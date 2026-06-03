@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+ //Todo check try to find the oldest Mingw-w64 version that works, ideally the version used for DC++
 #if defined(__GNUC__)
 #if __GNUC__ < 8 || (__GNUC__ == 8 && __GNUC_MINOR__ < 1)
 #error GCC 8.1 is required
@@ -25,9 +26,10 @@
 // see <https://bugs.launchpad.net/dcplusplus/+bug/2032940> for details
 #endif
 
+//This will all probably compile with VS 2022 but, I don't have time to bother checking
 #elif defined(_MSC_VER)
-#if _MSC_VER < 1910 || _MSC_FULL_VER < 191025017
-#error Visual Studio 2017 required
+#if _MSC_VER < 1951 || _MSC_FULL_VER < 195136122
+#error Visual Studio 2026 is required
 #endif
 
 #else
