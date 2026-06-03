@@ -1,0 +1,24 @@
+Import("dev source_path")
+
+env, target, sources = dev.prepare_build(
+    source_path, "dwarf", source_glob="*.c", in_bin=False
+)
+
+# Modern libdwarf no longer ships compatible producer interfaces used by this file.
+sources = [source for source in sources if "pro_encode_nm.c" not in str(source)]
+
+if "gcc" in env["TOOLS"]:
+    env.Append(CCFLAGS=["-Wno-unused-but-set-variable"])
+
+if dev.is_win32():
+    cpp_defines = ["WIN32", "SHT_RELA=4", "LIBDWARF_STATIC"]
+    if env["CC"] == "cl":
+        if env["arch"] == "x64":
+            cpp_defines.append("_AMD64_")
+        elif env["arch"] == "x86":
+            cpp_defines.extend(["X86", "_X86_"])
+    env.Append(CPPDEFINES=cpp_defines)
+env.Append(CPPPATH=["#/dwarf"])
+
+ret = dev.build_lib(env, target, sources)
+Return("ret")

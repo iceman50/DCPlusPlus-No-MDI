@@ -1,0 +1,242 @@
+= Compiling DC++
+
+
+1.	Application and Dependency versions needed
+
+		Some tools can be found on <https://sourceforge.net/projects/dcplusplus/files/Dev/>,
+		although I recommend getting them directly from their hosts.
+
+		* A modern C++ compiler. We are currently using these 2 packages by the MinGW-w64 project for official releases :
+
+		- 64-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/x86_64-11.2.0-release-win32-seh-rt_v9-rev1.7z>
+		- 32-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/i686-11.2.0-release-win32-dwarf-rt_v9-rev1.7z>
+
+		Make sure that the compiler's "bin" directory is in your PATH environment variable.
+
+		Have a look at section 2 for additional steps to configure the compiler.
+		Have a look at section 4 for alternative compilers.
+
+		* Python - 3.5+
+		<https://www.python.org>
+		Make sure that Python is in your PATH environment variable.
+
+		* SCons - 4.x.x
+		<https://scons.org/pages/download.html>
+
+		Note: SCons relies on Python so you need to have Python installed first.
+
+		On Windows you can install scons from the Python Package Index (PyPi) only.
+		The "python -m pip install scons" command installs scons into the Python\Scripts folder.
+
+		Make sure that SCons is in your PATH environment variable. 
+
+		* Perl - 5.12.0.1 or later (from MSYS, Cygwin or ActivePerl; only needed to build help files)
+		<https://www.perl.org/get.html>
+
+		Make sure that Perl is in your PATH environment variable.
+
+		* gettext runtime & tools - 0.17 or later
+		<https://ftp.gnome.org/pub/gnome/binaries/win32/dependencies/>
+
+		Make sure that the gettext tools are in your PATH environment variable.
+
+		* Html Help Workshop (only needed to build help files)
+		<https://msdn.microsoft.com/en-us/library/ms669985%28VS.85%29.aspx>
+		Downloads for HTMLHelp binaries are broken at the official MSDN page at the moment. Until that's
+		fixed you can get an archived version of the tool from
+		<http://web.archive.org/web/20160201063255/http://download.microsoft.com/download/0/A/9/0A939EF6-E31C-430F-A3DF-DFAE7960D564/htmlhelp.exe>
+
+		Make sure that hhc.exe is in your PATH environment variable.
+
+		* asciidoc3 (only needed to build help files)
+		<https://pypi.org/project/asciidoc3/#files>
+
+		Make sure that asciidoc3 is in your PATH environment variable.
+
+		* NSIS - 3.0 or later (only needed to build the installer)
+		<https://nsis.sourceforge.io> 
+
+		After installing NSIS, download the CPUFeatures plug-in from <https://nsis.sourceforge.io/CPUFeatures_plug-in>. 
+		From the .zip archive you have to unpack the following files:
+		 - Plugins\Release_Unicode\CPUFeatures.dll to <NSIS installation folder>\Plugins\x86-unicode\
+		 - Include\CPUFeatures.nsh to <NSIS installation folder>\Include\
+		 
+		Make sure that makensis.exe is in your PATH environment variable.
+
+		* zip from MSYS / Cygwin or 7-Zip (only needed to build the official distro)
+
+		Make sure that zip is in your PATH environment variable.
+
+
+2. Specific configuration of the compiler
+
+	a. HTML Help support (only for MinGW)
+
+		To build a version with HTML Help support, copy the following files from a Windows SDK
+		(Windows SDK path -> DC++ source code path):
+		Include/shared/winapifamily.h -> mingw/include/winapifamily.h
+		Include/um/HtmlHelp.h -> mingw/include/htmlhelp.h
+		Lib/win8/um/x86/Htmlhelp.Lib -> mingw/lib/htmlhelp.lib
+		Lib/win8/um/x64/Htmlhelp.Lib -> mingw/lib/x64/htmlhelp.lib
+
+		The latest Windows SDK is currently at
+		<https://msdn.microsoft.com/en-US/windows/desktop/hh852363>; it installs into
+		"C:\Program Files (x86)\Windows Kits\8.0".
+
+	b. OpenSSL
+
+		Download OpenSSL from www.openssl.org, copy the 'openssl-*.tar.gz' archive to the openssl/build folder.
+		
+		Compiling with MinGW
+
+			Use the build_mingw.bat script provided in the openssl/build folder. It will copy the compiled libraries to openssl/lib.
+			The build process needs Cygwin installed. Above the basic (default) packages the following additional packages needs
+			to be installed under Cygwin:
+
+			* perl (Perl builds for Windows are unsuitable for this process)
+			* make
+
+			<https://bennierobinson.com/programming/2016/01/24/perl-windows-2016.html> explains how to set up these
+			packages in detail.
+
+			You'll also need a GNU Patch executable for the operation in your PATH. It can be either the GNU Win32 binary
+			or a package installed under Cygwin or even any patch executable that may come with your versioning system.
+
+			Make sure that Cygwin's 'bin' folder is in your PATH environment variable.
+
+		Compiling with MSVC
+
+			Compilation requires the following additional packages to be installed above MSVS 2022:
+
+			* Perl v5.32.1 or later (from Strawberry [tested] or ActiveState)
+			  <https://www.perl.org/get.html>
+
+			* NASM version 2.15 or later 
+			  <https://www.nasm.us>
+
+			Make sure both tools' executables are added in your PATH environment variable.
+
+			For generating the 64-bit library open [x64 Native Tools Command Prompt for VS 2022] prompt and run:
+				perl Configure no-shared no-capieng -DOPENSSL_SYS_WIN32 -DOPENSSL_NO_CAPIENG VC-WIN64A --prefix=%CD%
+
+			For generating the 32-bit library open [x86 Native Tools Command Prompt for VS 2022] prompt and run:
+				perl Configure no-shared no-capieng -DOPENSSL_SYS_WIN32 -DOPENSSL_NO_CAPIENG VC-WIN32 --prefix=%CD%
+
+			Then run:
+				nmake 
+			which will compile the makefile and generate your libs and
+				nmake install_sw 
+			This will move all of your libs to the path specified in --openssldir switch
+
+		You may also ask around for help and pre-compiled libs in the DCDev hub; someone might have already built a package.
+
+
+3. Starting the build process
+
+	Open a command prompt and type "scons" followed by some options:
+
+		"tools=mingw" - Use mingw for building (default)
+		"tools=default" - Use msvc for building (yes, the option value is strange)
+		"mode=debug" - Compile a debug build (default)
+		"mode=release" - Compile an optimized release build
+		"arch=x64" - Compile a 64-bit build
+
+		To see more options, type "scons -h".
+
+		Tip: You can create a file custom.py and put your options in there.
+
+		You can choose which targets to build; eg:
+		  scons build/debug-mingw/dwt
+		will only build DWT with MinGW in debug mode. By default, when no target is specified, SCons builds all targets.
+		For more possible arguments, consult the SCons manual.
+
+		If you have problems, use google. It works for me.
+
+
+4. Alternative compilers
+
+	a. Various builds / versions of MinGW from the MinGW-w64 project or its forks (based on GCC 8.1 or later):
+		- <https://github.com/niXman/mingw-builds-binaries/releases>
+		- <https://sourceforge.net/projects/mingw-w64/files/>
+		- <https://winlibs.com>
+		- <https://gcc-mcf.lhmouse.com>
+		- MinGW-w64 compilers installed as part of MSYS2 <https://www.msys2.org>
+		etc...
+
+		All you have to do to use one is to download and extract it to a folder.
+		Prefer DWARF / SEH versions (usually marked with a "-dw") of the 32/64-bit compilers respectively; SJLJ ones should
+		be avoided for performance reasons.
+
+		We are currently using these 2 packages by the MinGW-w64 project:
+		- 64-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/x86_64-11.2.0-release-win32-seh-rt_v9-rev1.7z>
+		- 32-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/i686-11.2.0-release-win32-dwarf-rt_v9-rev1.7z>
+
+		Using compilers from regular MinGW (not MinGW-w64) is not supported as older versions had stability issues
+		and recent releases are not tested. If you still want to use regular MinGW (at your own risk) the easiest way 
+		is to install it by using mingw-get. 
+		Extract it to C:\MinGW and run:
+			mingw-get install gcc g++
+		A graphical installer around mingw-get is also available to facilitate the above.
+
+		Make sure that MinGW\bin is in your PATH environment variable.
+
+		Alternatively, if you have Cygwin, a MinGW compiler can be installed as part of Cygwin:
+		select it in the "Devel" category when running the Cygwin installer.
+		To make DC++ use it, add "prefix=i686-pc-mingw32-" to the scons arguments or create a
+		custom.py file containing:
+			prefix='i686-pc-mingw32-'
+		Make sure that Cygwin\bin is in your PATH environment variable.
+		Note that building with MinGW compilers provided by Cygwin is not tested.
+
+	b. Microsoft Visual Studio 2022:
+	<https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=Community&channel=Release&version=VS2022>
+
+		To generate project files for MSVC, run "scons" with "msvcproj=1" and "tools=default".
+		The resulting solution file (DCPlusPlus.sln) will be in msvc/[mode-arch]/.
+
+
+5.  Other information and submitting patches
+
+		a. With doxygen, graphviz and some luck, you can use the supplied doxygen configuration
+		file to generate some nice docs. Just check that the paths in the doxyfile are correct.
+
+		b. In the event you experience crashing you can check the howto guide for debugging
+		at <https://answers.launchpad.net/dcplusplus/+faq/337>
+
+		Note that DCPlusPlus.exe is stripped by default when it has been built with MinGW;
+		debugging symbols instead reside in DCPlusPlus.pdb. To get GDB to swallow it, start it with
+		the following command:
+			gdb -e DCPlusPlus.exe -s DCPlusPlus.pdb
+
+		c. Linux / Unix:
+
+			Look at <https://launchpad.net/linuxdcpp> for the *nix port of DC++ - they'll gladly accept any help. 	
+
+		d. Submitting patches
+
+			If you think you've done something that more people could use, you can always submit a
+			patch for inclusion in the original distribution. I will then consider whether I like
+			the patch or not based on things that might seem to be completely random, which just
+			might be the case. Popular reasons for rejecting a patch include, but are not limited
+			to, ugly code, abusable features, features that I don't like that bloat the application
+			and incompatibility with other modifications I've already done.
+
+			The Mercurial code repository is at <https://sourceforge.net/p/dcplusplus/code/>.
+
+			We accept both plain patches and pull requests.
+
+		e. Licensing issues with submitted patches	
+
+			In order to avoid future licensing issues, I ask you to give me copyright over any submitted code. 
+			If you don't like this policy, you are free to start your own distribution (as
+			many have done), and if you're lucky it might become more popular than the original =). Please
+			state explicitly when submitting the patch that you give me copyright over the code if the submission is larger 
+			than trivial.
+
+		f. Developing plugins
+
+			The DC plugin SDK is at <https://launchpad.net/dc-plugin-sdk>.
+
+			See dcpp/Plugin* files for implementation details.
+
+			The "Plugin format (dcext).txt" document describes the way plugins are packaged.

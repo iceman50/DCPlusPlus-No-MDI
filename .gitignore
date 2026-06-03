@@ -1,0 +1,105 @@
+# Build directories and generated output
+build/
+**/build/
+out/
+**/out/
+bin/
+**/bin/
+obj/
+**/obj/
+Debug/
+**/Debug/
+Release/
+**/Release/
+x64/
+**/x64/
+x86/
+**/x86/
+
+# C/C++ compiled objects and libraries
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.lib
+*.dll
+*.so
+*.so.*
+*.dylib
+*.exp
+*.pdb
+*.idb
+*.ilk
+*.pch
+*.gch
+
+# Executables and map files
+*.exe
+*.out
+*.app
+*.map
+
+# Build system metadata / caches
+*.ninja
+.ninja_deps
+.ninja_log
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+compile_commands.json
+.sconsign*
+
+# Temporary, backup, and editor swap files
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.rej
+*~
+*.swp
+*.swo
+
+# Python cache and temporary artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+
+# Common Python virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Logs and runtime dumps
+*.log
+*.dmp
+*.stackdump
+
+# Test and coverage artifacts
+coverage/
+*.gcda
+*.gcno
+*.gcov
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Mercurial metadata files
+.hgignore
+**/.hgignore
+.hgtags
+**/.hgtags
