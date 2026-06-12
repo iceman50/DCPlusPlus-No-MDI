@@ -29,6 +29,7 @@
 #include "PluginEntity.h"
 #include "Speaker.h"
 #include "TimerManager.h"
+#include "typedefs.h"
 
 #include <atomic>
 
@@ -175,6 +176,10 @@ protected:
 	virtual bool v4only() const = 0;
 
 private:
+	bool setHubUrl(const string& hubURL);
+	void setFailoverUrls(const StringList& urls);
+	bool advanceFailoverUrl();
+
 	virtual OnlineUserList getUsers() const = 0;
 	virtual void infoImpl() = 0;
 
@@ -185,6 +190,8 @@ private:
 	string port;
 	char separator;
 	bool secure;
+	StringList failoverUrls;
+	size_t failoverIndex;
 	CountType countType;
 };
 

@@ -24,6 +24,7 @@
 #include "ConnectionManager.h"
 #include "ConnectivityManager.h"
 #include "CryptoManager.h"
+#include "FavoriteManager.h"
 #include "format.h"
 #include "LogManager.h"
 #include "ShareManager.h"
@@ -192,6 +193,23 @@ void AdcHub::handle(AdcCommand::INF, AdcCommand& c) noexcept {
 
 	if(u->getIdentity().isHub()) {
 		setHubIdentity(u->getIdentity());
+		auto fav = FavoriteManager::getInstance()->getFavoriteHubEntry(getHubUrl());
+		if(fav) {
+			string fo = u->getIdentity().get("FO");
+			if(!fo.empty()) {
+				StringList urls;
+				StringTokenizer<string> st(fo, ',');
+				for(auto& url: st.getTokens()) {
+					Util::trim(url);
+					if(!url.empty())
+						urls.push_back(url);
+				}
+				if(!urls.empty() && urls != fav->getFailoverServers()) {
+					fav->setFailoverServers(urls);
+					FavoriteManager::getInstance()->save();
+				}
+			}
+		}
 		fire(ClientListener::HubUpdated(), this);
 	} else {
 		updated(*u);

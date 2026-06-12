@@ -407,6 +407,17 @@ void FavoriteManager::save() {
 			xml.addChildAttrib("Server", i->getServer());
 			xml.addChildAttrib("Encoding", i->getEncoding());
 			xml.addChildAttrib("Group", i->getGroup());
+			if(!i->getFailoverServers().empty()) {
+				xml.addTag("Failovers");
+				xml.stepIn();
+				for(auto& url: i->getFailoverServers()) {
+					if(url.empty())
+						continue;
+					xml.addTag("Server");
+					xml.addChildAttrib("URL", url);
+				}
+				xml.stepOut();
+			}
 			i->save(xml);
 			if(i->hasShareProfile()) {
 				xml.addChildAttrib("ShareProfile", true);
@@ -525,6 +536,16 @@ void FavoriteManager::load(SimpleXML& aXml) {
 			e->setServer(aXml.getChildAttrib("Server"));
 			e->setEncoding(aXml.getChildAttrib("Encoding"));
 			e->setGroup(aXml.getChildAttrib("Group"));
+			if(aXml.findChild("Failovers")) {
+				StringList failovers;
+				aXml.stepIn();
+				while(aXml.findChild("Server")) {
+					failovers.push_back(aXml.getChildAttrib("URL"));
+				}
+				aXml.stepOut();
+				aXml.resetCurrentChild();
+				e->setFailoverServers(failovers);
+			}
 			e->load(aXml);
 			if(aXml.getBoolChildAttrib("ShareProfile")) {
 				std::set<string> directories;
@@ -611,7 +632,7 @@ void FavoriteManager::userUpdated(const OnlineUser& info) {
 
 FavoriteHubEntryPtr FavoriteManager::getFavoriteHubEntry(const string& aServer) const {
 	for(auto hub: favoriteHubs) {
-		if(Util::stricmp(hub->getServer(), aServer) == 0) {
+		if(hub->hasServer(aServer)) {
 			return hub;
 		}
 	}

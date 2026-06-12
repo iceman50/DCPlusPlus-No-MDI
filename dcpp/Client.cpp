@@ -38,8 +38,8 @@ Client::Client(const string& hubURL, char separator_, bool secure_) :
 	myIdentity(ClientManager::getInstance()->getMe(), 0), uniqueId(++idCounter),
 	reconnDelay(120), lastActivity(GET_TICK()), registered(false), autoReconnect(false),
 	encoding(Text::systemCharset), state(STATE_DISCONNECTED), sock(0),
-	hubUrl(hubURL),separator(separator_),
-	secure(secure_), countType(COUNT_UNCOUNTED)
+	hubUrl(hubURL), separator(separator_),
+	secure(secure_), failoverIndex(0), countType(COUNT_UNCOUNTED)
 {
 	string file, proto, query, fragment;
 	Util::decodeUrl(hubURL, proto, address, port, file, query, fragment);
@@ -87,6 +87,8 @@ void Client::reloadSettings(bool updateNick) {
 
 		if(!fav->getEncoding().empty())
 			setEncoding(fav->getEncoding());
+
+		setFailoverUrls(fav->getFailoverServers());
 	}
 
 	if(updateNick)
@@ -147,6 +149,63 @@ void Client::connect() {
 	updateActivity();
 }
 
+void Client::setFailoverUrls(const StringList& urls) {
+	failoverUrls.clear();
+	failoverIndex = 0;
+
+	for(auto& url: urls) {
+		if(url.empty())
+			continue;
+		if(Util::stricmp(url, hubUrl) == 0)
+			continue;
+		bool duplicate = false;
+		for(auto& existing: failoverUrls) {
+			if(Util::stricmp(existing, url) == 0) {
+				duplicate = true;
+				break;
+			}
+		}
+		if(!duplicate)
+			failoverUrls.push_back(url);
+	}
+}
+
+bool Client::setHubUrl(const string& hubURL) {
+	string proto, file, query, fragment;
+	string address_, port_;
+	Util::decodeUrl(hubURL, proto, address_, port_, file, query, fragment);
+
+	if(address_.empty() || port_.empty())
+		return false;
+
+	hubUrl = hubURL;
+	address = address_;
+	port = port_;
+	if(!query.empty()) {
+		auto params = Util::decodeQuery(query);
+		keyprint = params["kp"];
+	} else {
+		keyprint.clear();
+	}
+
+	if(!proto.empty()) {
+		if(Util::stricmp(proto, "adcs") == 0 || Util::stricmp(proto, "ADCS") == 0)
+			secure = true;
+		else if(Util::stricmp(proto, "adc") == 0)
+			secure = false;
+	}
+	return true;
+}
+
+bool Client::advanceFailoverUrl() {
+	while(failoverIndex < failoverUrls.size()) {
+		const string url = failoverUrls[failoverIndex++];
+		if(setHubUrl(url))
+			return true;
+	}
+	return false;
+}
+
 void Client::info(Holder h) {
 	if(isConnected()) {
 		sock->callAsync([this, h = std::move(h)] { infoImpl(); });
@@ -191,6 +250,10 @@ void Client::on(Connected) noexcept {
 void Client::on(Failed, const string& aLine) noexcept {
 	state = STATE_DISCONNECTED;
 	FavoriteManager::getInstance()->removeUserCommand(getHubUrl());
+	if(getAutoReconnect() && advanceFailoverUrl()) {
+		connect();
+		return;
+	}
 	fire(ClientListener::Failed(), this, aLine);
 }
 
