@@ -1,0 +1,5 @@
+== 06-13-2026 - xx-xx-xxxx ==
+* Current DC++ HG Rev [d2cf61] (as of 06-13-2026)
+* Remove boost 
+* Boost::tribool is replaced with a generic implementation
+* Use DWTLib's copy of IntrusivePtr to replace Boost::intrusive_ptr
