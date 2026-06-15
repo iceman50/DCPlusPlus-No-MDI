@@ -33,8 +33,16 @@
 
 namespace dwt {
 
-bool SaveDialog::openImpl(OPENFILENAME& ofn) {
-	return ::GetSaveFileName(&ofn);
+bool SaveDialog::openImpl(tstring& file, unsigned flags) {
+	auto options = getOptions(true);
+	options.legacyFlags = flags;
+	options.initialFileName = file;
+	std::vector<tstring> files;
+	if(!util::win32::showFileDialog(options, files)) {
+		return false;
+	}
+	file = files.front();
+	return true;
 }
 
 }

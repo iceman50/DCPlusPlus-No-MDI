@@ -82,6 +82,15 @@ Point Icon::getSize() const {
 	return color.getSize();
 }
 
+IconPtr Icon::resized(const Point& size) const {
+	auto copy = reinterpret_cast<HICON>(::CopyImage(handle(), IMAGE_ICON,
+		size.x, size.y, 0));
+	if(!copy) {
+		throw Win32Exception("Failed to resize an icon");
+	}
+	return new Icon(copy);
+}
+
 bool Icon::operator==(const Icon& rhs) const {
 	if(resId && rhs.resId)
 		return resId == rhs.resId;

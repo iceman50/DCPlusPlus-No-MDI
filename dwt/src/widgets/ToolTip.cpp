@@ -89,6 +89,48 @@ void ToolTip::refresh() {
 	setActive(true);
 }
 
+void ToolTip::pop() {
+	sendMessage(TTM_POP);
+}
+
+void ToolTip::update() {
+	sendMessage(TTM_UPDATE);
+}
+
+void ToolTip::setTitle(const tstring& title, int icon) {
+	sendMessage(TTM_SETTITLE, icon, reinterpret_cast<LPARAM>(title.c_str()));
+}
+
+void ToolTip::setMargin(const Rectangle& margin) {
+	auto rect = margin.toRECT();
+	sendMessage(TTM_SETMARGIN, 0, reinterpret_cast<LPARAM>(&rect));
+}
+
+Rectangle ToolTip::getMargin() const {
+	RECT rect = { 0 };
+	sendMessage(TTM_GETMARGIN, 0, reinterpret_cast<LPARAM>(&rect));
+	return Rectangle(rect);
+}
+
+void ToolTip::setTipBackgroundColor(COLORREF color) {
+	sendMessage(TTM_SETTIPBKCOLOR, color);
+}
+
+void ToolTip::setTipTextColor(COLORREF color) {
+	sendMessage(TTM_SETTIPTEXTCOLOR, color);
+}
+
+void ToolTip::setWindowTheme(const tstring& theme) {
+	sendMessage(TTM_SETWINDOWTHEME, 0, reinterpret_cast<LPARAM>(theme.c_str()));
+}
+
+void ToolTip::onLinkClicked(std::function<void ()> f) {
+	addCallback(Message(WM_NOTIFY, TTN_LINKCLICK), [f](const MSG&, LRESULT&) -> bool {
+		f();
+		return true;
+	});
+}
+
 void ToolTip::onGetTip(F f) {
 	setCallback(Message(WM_NOTIFY, TTN_GETDISPINFO), [f](const MSG& msg, LRESULT&) -> bool {
 		auto& ttdi = *reinterpret_cast<LPNMTTDISPINFO>(msg.lParam);

@@ -146,9 +146,14 @@ size_t SplitterContainer::ensureSplitters() {
 	auto nc = 0, ns = 0;
 	std::for_each(children.first, children.second, [&](Widget *w) { isSplitter(w) ? ns++ : nc++; });
 
+	bool changed = false;
 	while(ns < nc - 1) {
 		addChild(Splitter::Seed(startPos, horizontal));
 		ns++;
+		changed = true;
+	}
+	if(changed) {
+		raiseAccessibleStructureChanged();
 	}
 
 	return ns;

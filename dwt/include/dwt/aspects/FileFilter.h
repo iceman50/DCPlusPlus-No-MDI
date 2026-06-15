@@ -39,6 +39,9 @@
 #include "../WindowsHeaders.h"
 #include "../tstring.h"
 #include "../util/check.h"
+#include "../util/win32/FileDialog.h"
+
+#include <optional>
 
 namespace dwt { namespace aspects {
 
@@ -62,10 +65,7 @@ public:
 	  */
 	WidgetType& addFilter( const tstring & filterName, const tstring & filter )
 	{
-		itsFilter.insert( itsFilter.end(), filterName.begin(), filterName.end() );
-		itsFilter.push_back( '\0' );
-		itsFilter.insert( itsFilter.end(), filter.begin(), filter.end() );
-		itsFilter.push_back( '\0' );
+		itsFilters.emplace_back(filterName, filter);
 		return W();
 	}
 
@@ -75,7 +75,7 @@ public:
 	  * filter used when first showing the dialog.
 	  */
 	WidgetType& setActiveFilter( unsigned filterNo ) {
-		if ( filterNo >= itsFilter.size() ) {
+		if ( filterNo >= itsFilters.size() ) {
 			dwtDebugFail( "Tried to set active filter to more than number of filters in filter..." );
 			return W();
 		}
@@ -105,23 +105,28 @@ public:
 		return W();
 	}
 
+	WidgetType& setTitle(const tstring& title) {
+		itsTitle = title;
+		return W();
+	}
+
+	WidgetType& setClientGuid(const GUID& guid) {
+		itsClientGuid = guid;
+		return W();
+	}
+
+	WidgetType& addPlace(const tstring& path, bool top = false) {
+		itsPlaces.emplace_back(path, top ? FDAP_TOP : FDAP_BOTTOM);
+		return W();
+	}
+
+	WidgetType& addOptions(FILEOPENDIALOGOPTIONS options) {
+		itsOptions |= options;
+		return W();
+	}
+
 	bool open(tstring& file, unsigned flags = 0) {
-		// get the current directory and restore it later to avoid directory locks
-		TCHAR buf[MAX_PATH];
-		::GetCurrentDirectory(MAX_PATH, buf);
-
-		OPENFILENAME ofn = { 0 };
-		getOFN(ofn);
-		file.resize(PATH_BUFFER_SIZE);
-		ofn.lpstrFile = const_cast<LPTSTR>(file.c_str());
-		ofn.Flags = flags;
-
-		bool ret = W().openImpl(ofn);
-		if(ret)
-			file = ofn.lpstrFile;
-
-		::SetCurrentDirectory(buf);
-		return ret;
+		return W().openImpl(file, flags);
 	}
 
 protected:
@@ -129,29 +134,33 @@ protected:
 		: itsParent(parent), itsActiveFilter( 0 )
 	{}
 
-	void getOFN(OPENFILENAME& ofn) {
-		ofn.lStructSize = sizeof(OPENFILENAME);
-		ofn.hwndOwner = itsParent ? itsParent->handle() : NULL;
-		ofn.lpstrFilter = ifNotEmpty(itsFilter);
-		ofn.nFilterIndex = this->getActiveFilter();
-		ofn.nMaxFile = PATH_BUFFER_SIZE;
-		ofn.lpstrInitialDir = ifNotEmpty(itsInitialDir);
-		ofn.lpstrDefExt = ifNotEmpty(itsDefExt);
+	util::win32::FileDialogOptions getOptions(bool save, bool multiple = false) const {
+		util::win32::FileDialogOptions options;
+		options.owner = itsParent ? itsParent->handle() : nullptr;
+		options.save = save;
+		options.allowMultiple = multiple;
+		options.activeFilter = itsActiveFilter;
+		options.title = itsTitle;
+		options.initialDirectory = itsInitialDir;
+		options.defaultExtension = itsDefExt;
+		options.filters = itsFilters;
+		options.places = itsPlaces;
+		options.options = itsOptions;
+		options.clientGuid = itsClientGuid ? &*itsClientGuid : nullptr;
+		return options;
 	}
 
 private:
-	static const int PATH_BUFFER_SIZE = 32768;
-
 	Widget* itsParent;
 
 	unsigned int itsActiveFilter;
 	tstring itsInitialDir;
-	tstring itsFilter;
 	tstring itsDefExt;
-
-	static const TCHAR* ifNotEmpty(const tstring& str) {
-		return str.empty() ? NULL : str.c_str();
-	}
+	tstring itsTitle;
+	std::vector<std::pair<tstring, tstring>> itsFilters;
+	std::vector<std::pair<tstring, FDAP>> itsPlaces;
+	FILEOPENDIALOGOPTIONS itsOptions = 0;
+	std::optional<GUID> itsClientGuid;
 };
 
 } }

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, Jacek Sieka
 
   All rights reserved.
 
@@ -20,27 +20,34 @@
   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
   ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
   WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
-  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef DWT_UTIL_GDI_H
-#define DWT_UTIL_GDI_H
+#ifndef DWT_UTIL_WIN32_ACCESSIBILITYPROVIDER_H
+#define DWT_UTIL_WIN32_ACCESSIBILITYPROVIDER_H
 
-#include <dwt/forward.h>
+#include "../../WindowsHeaders.h"
 
-namespace dwt { namespace util {
+#include <cstdint>
 
-IconPtr merge(const ImageList& icons);
+namespace dwt {
 
-/// Conversion factor for the system DPI. Prefer Widget::getDpi/scale for window-aware layout.
-float dpiFactor();
+class Widget;
+class AccessibilityProvider;
+
+namespace util { namespace win32 {
+
+AccessibilityProvider* createAccessibilityProvider(Widget* widget);
+void detachAccessibilityProvider(AccessibilityProvider* provider);
+void releaseAccessibilityProvider(AccessibilityProvider* provider);
+LRESULT returnAccessibilityProvider(AccessibilityProvider* provider,
+	HWND window, WPARAM wParam, LPARAM lParam);
+void raiseAccessibilityEvent(AccessibilityProvider* provider, long eventId);
+void raiseAccessibilityItemEvent(AccessibilityProvider* provider,
+	std::uintptr_t item, long eventId);
+void raiseAccessibilityStructureChanged(AccessibilityProvider* provider);
 
 } }
+
+}
 
 #endif

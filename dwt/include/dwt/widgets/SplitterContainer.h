@@ -70,7 +70,10 @@ public:
 	virtual void layout();
 
 private:
-	explicit SplitterContainer( Widget * parent ) : BaseType(parent), maximized(0), horizontal(false), startPos(0.5) { }
+	explicit SplitterContainer( Widget * parent ) : BaseType(parent), maximized(0), horizontal(false), startPos(0.5) {
+		enableAccessibility(accessibility::Pane);
+		setAccessibleName(_T("Splitter container"));
+	}
 
 	size_t ensureSplitters();
 

@@ -124,6 +124,9 @@ public:
 
 	IconPtr getIcon(unsigned i) const;
 
+	/// Create a new image list by rendering every icon at the requested size.
+	ImageListPtr resized(const Point& size) const;
+
 	void setBkColor(COLORREF color);
 
 	COLORREF getBkColor() const;

@@ -86,6 +86,15 @@ public:
 
 	void setActive(bool b);
 	void refresh();
+	void pop();
+	void update();
+	void setTitle(const tstring& title, int icon = TTI_NONE);
+	void setMargin(const Rectangle& margin);
+	Rectangle getMargin() const;
+	void setTipBackgroundColor(COLORREF color);
+	void setTipTextColor(COLORREF color);
+	void setWindowTheme(const tstring& theme);
+	void onLinkClicked(std::function<void ()> f);
 
 	void onGetTip(F f);
 

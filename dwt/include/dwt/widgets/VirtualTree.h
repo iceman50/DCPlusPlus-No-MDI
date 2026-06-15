@@ -121,6 +121,7 @@ private:
 	bool handleSelect(WPARAM code, Item* item);
 	void handleSelected(Item* item);
 	bool handleSetItem(TVITEMEX& tv);
+	bool handleSortChildren(Item* item, bool recursive);
 
 	void addRoot();
 	bool validate(Item* item) const;
@@ -129,6 +130,7 @@ private:
 	void hide(Item& item);
 	void remove(Item* item);
 	void updateChildDisplay(Item* item);
+	void configureAccessibility();
 	LRESULT sendTreeMsg(UINT msg, WPARAM wParam, LPARAM lParam);
 };
 

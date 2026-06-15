@@ -181,9 +181,12 @@ void TabView::create(const Seed & cs) {
 
 		if(widthConfig < 100)
 			widthConfig = 100;
-		TabCtrl_SetMinTabWidth(handle(), widthConfig);
+		TabCtrl_SetMinTabWidth(handle(), scale(static_cast<int>(widthConfig)));
 
 		closeIcon = cs.closeIcon;
+		if(closeIcon) {
+			closeIcon = closeIcon->resized(scale(closeIcon->getSize()));
+		}
 
 		if(cs.tabStyle == Seed::WinBrowser) {
 			theme.load(std::wstring(L"BrowserTab::") + std::wstring(VSCLASS_TAB), this);
@@ -205,7 +208,7 @@ void TabView::create(const Seed & cs) {
 			widthConfig = 0;
 	}
 
-	icons = new ImageList(Point(16, 16));
+	icons = new ImageList(scale(Point(16, 16)));
 	TabCtrl_SetImageList(handle(), icons->handle());
 
 	onSelectionChanged([this] { handleTabSelected(); });
@@ -228,6 +231,11 @@ void TabView::create(const Seed & cs) {
 	} else {
 		delete dropper;
 	}
+
+	configureAccessibility();
+	onDpiResourcesChanged([this](const DpiResourceEvent& event) {
+		recreateDpiResources(event);
+	});
 }
 
 void TabView::add(ContainerPtr w, const IconPtr& icon) {
@@ -272,6 +280,7 @@ void TabView::add(ContainerPtr w, const IconPtr& icon) {
 	}
 
 	layout();
+	raiseAccessibleStructureChanged();
 
 	w->onTextChanging([this, w](const tstring& t) { handleTextChanging(w, t); });
 }
@@ -320,6 +329,7 @@ void TabView::remove(ContainerPtr w) {
 	if(taskbar) {
 		removeFromTaskbar(w);
 	}
+	raiseAccessibleStructureChanged();
 }
 
 IconPtr TabView::getIcon(ContainerPtr w) const {
@@ -431,6 +441,8 @@ void TabView::handleTabSelected() {
 	if(taskbar) {
 		setActiveOnTaskbar(ti->w);
 	}
+	raiseAccessibleItemEvent(
+		reinterpret_cast<accessibility::ItemId>(ti->w), 20012);
 }
 
 void TabView::mark(ContainerPtr w) {
@@ -689,6 +701,7 @@ bool TabView::handleLeftMouseUp(const MouseEvent& mouseEvent) {
 		if(taskbar) {
 			moveOnTaskbar(getTabInfo(dropPos)->w, (dropPos < static_cast<int>(size()) - 1) ? getTabInfo(dropPos + 1)->w : 0);
 		}
+		raiseAccessibleStructureChanged();
 	}
 
 	return true;
@@ -875,7 +888,7 @@ void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSele
 		rect.size.y -= 1;
 	}
 
-	const Point margin { 4, 1 };
+	const Point margin = scale(Point(4, 1));
 	rect.pos += margin;
 	rect.size -= margin + margin;
 
@@ -892,7 +905,7 @@ void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSele
 	}
 
 	if(isSelected)
-		rect.size.x -= margin.x + 16; // keep some space for the 'X' button
+		rect.size.x -= margin.x + scale(16); // keep some space for the 'X' button
 
 	const tstring text = ti->w->getText();
 	const unsigned dtFormat = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_WORD_ELLIPSIS;
@@ -906,10 +919,10 @@ void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSele
 
 	if(isSelected) {
 		rect.pos.x = rect.right() + margin.x;
-		rect.size.x = 16;
-		if(16 < rect.size.y)
-			rect.pos.y += (rect.size.y - 16) / 2; // center the icon vertically
-		rect.size.y = 16;
+		rect.size.x = scale(16);
+		if(scale(16) < rect.size.y)
+			rect.pos.y += (rect.size.y - scale(16)) / 2; // center the icon vertically
+		rect.size.y = scale(16);
 
 		if(closeIcon) {
 			Rectangle drawRect = rect;
@@ -964,6 +977,94 @@ void TabView::helpImpl(unsigned& id) {
 void TabView::handleCtrlTab(bool shift) {
 	inTab = true;
 	next(shift);
+}
+
+void TabView::configureAccessibility() {
+	setAccessibleControlType(accessibility::Tab);
+	if(getAccessibleName().empty()) {
+		setAccessibleName(_T("Tabs"));
+	}
+
+	auto toId = [](ContainerPtr page) {
+		return reinterpret_cast<accessibility::ItemId>(page);
+	};
+	auto fromId = [](accessibility::ItemId id) {
+		return reinterpret_cast<ContainerPtr>(id);
+	};
+
+	accessibility::ItemProvider provider;
+	provider.exists = [this, fromId](accessibility::ItemId id) {
+		return findTab(fromId(id)) >= 0;
+	};
+	provider.children = [this, toId](accessibility::ItemId parent) {
+		std::vector<accessibility::ItemId> result;
+		if(parent) {
+			return result;
+		}
+		for(size_t i = 0; i < size(); ++i) {
+			result.push_back(toId(getTabInfo(static_cast<int>(i))->w));
+		}
+		return result;
+	};
+	provider.parent = [](accessibility::ItemId) {
+		return accessibility::ItemId();
+	};
+	provider.name = [this, fromId](accessibility::ItemId id) {
+		auto info = getTabInfo(fromId(id));
+		return info ? info->w->getText() : tstring();
+	};
+	provider.bounds = [this, fromId](accessibility::ItemId id) {
+		RECT rect = { 0 };
+		auto index = findTab(fromId(id));
+		return index >= 0 && TabCtrl_GetItemRect(handle(), index, &rect) ?
+			Rectangle(rect) : Rectangle();
+	};
+	provider.controlType = [](accessibility::ItemId) {
+		return static_cast<long>(accessibility::TabItem);
+	};
+	provider.selection = [this, toId] {
+		std::vector<accessibility::ItemId> result;
+		auto page = getActive();
+		if(page) {
+			result.push_back(toId(page));
+		}
+		return result;
+	};
+	provider.selected = [this, fromId](accessibility::ItemId id) {
+		return getActive() == fromId(id);
+	};
+	provider.select = [this, fromId](accessibility::ItemId id) {
+		setActive(fromId(id));
+	};
+	provider.selectionRequired = true;
+	provider.invoke = [this, fromId](accessibility::ItemId id) {
+		setActive(fromId(id));
+	};
+	provider.focused = [this, toId] {
+		auto page = getActive();
+		return page ? toId(page) : accessibility::ItemId();
+	};
+	provider.setFocus = [this, fromId](accessibility::ItemId id) {
+		auto page = fromId(id);
+		setActive(page);
+		::SetFocus(handle());
+	};
+	setAccessibleItems(provider);
+}
+
+void TabView::recreateDpiResources(const DpiResourceEvent& event) {
+	if(icons) {
+		icons = icons->resized(event.scale(icons->getImageSize()));
+		TabCtrl_SetImageList(handle(), icons->handle());
+	}
+	if(closeIcon) {
+		closeIcon = closeIcon->resized(event.scale(closeIcon->getSize()));
+	}
+	if(hasStyle(TCS_OWNERDRAWFIXED)) {
+		TabCtrl_SetMinTabWidth(handle(), scale(static_cast<int>(widthConfig)));
+	}
+	layout();
+	BaseType::redraw();
 }
 
 bool TabView::filter(const MSG& msg) {

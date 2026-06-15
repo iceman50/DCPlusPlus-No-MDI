@@ -38,6 +38,7 @@
 
 #include "../aspects/Caption.h"
 #include "../aspects/Clickable.h"
+#include "../resources/ImageList.h"
 #include "Control.h"
 
 namespace dwt {
@@ -80,6 +81,14 @@ public:
 
 	void setImage(BitmapPtr bitmap);
 	void setImage(IconPtr icon);
+	void setNote(const tstring& note);
+	tstring getNote() const;
+	void setElevationRequired(bool required = true);
+	void setImageList(const ImageListPtr& images,
+		UINT alignment = BUTTON_IMAGELIST_ALIGN_LEFT,
+		const Rectangle& margin = Rectangle());
+	void setSplitInfo(const BUTTON_SPLITINFO& info);
+	void onDropDown(std::function<void (const RECT&)> f);
 
 	virtual Point getPreferredSize();
 
@@ -94,6 +103,7 @@ protected:
 private:
 	friend class ChainingDispatcher;
 	static const TCHAR windowClass[];
+	ImageListPtr imageList;
 
 	// aspects::Clickable
 	static Message getClickMessage();

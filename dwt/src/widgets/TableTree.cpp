@@ -65,6 +65,7 @@ void TableTree::create(const Seed& seed) {
 	onCustomDraw([this](NMLVCUSTOMDRAW& data) { return handleCustomDraw(data); });
 	onKeyDown([this](int c) { return handleKeyDown(c); });
 	onLeftMouseDown([this](const MouseEvent& me) { return handleLeftMouseDown(me); });
+	configureAccessibility();
 }
 
 bool TableTree::handleMessage(const MSG& msg, LRESULT& retVal) {
@@ -72,17 +73,20 @@ bool TableTree::handleMessage(const MSG& msg, LRESULT& retVal) {
 	case LVM_DELETEITEM:
 		{
 			handleDelete(static_cast<int>(msg.wParam));
+			raiseAccessibleStructureChanged();
 			break;
 		}
 	case LVM_DELETEALLITEMS:
 		{
 			items.clear();
 			children.clear();
+			raiseAccessibleStructureChanged();
 			break;
 		}
 	case LVM_INSERTITEM:
 		{
 			handleInsert(*reinterpret_cast<LVITEM*>(msg.lParam));
+			raiseAccessibleStructureChanged();
 			break;
 		}
 	case LVM_SETIMAGELIST:
@@ -113,12 +117,14 @@ void TableTree::insertChild(LPARAM parentParam, LPARAM child) {
 		item.iIndent = 2;
 		sendMsg(LVM_INSERTITEM, 0, reinterpret_cast<LPARAM>(&item));
 	}
+	raiseAccessibleStructureChanged();
 }
 
 void TableTree::eraseChild(LPARAM child) {
 	auto i = children.find(child);
 	if(i != children.end()) {
 		eraseChild(i, false);
+		raiseAccessibleStructureChanged();
 	}
 }
 
@@ -135,6 +141,7 @@ void TableTree::collapse(LPARAM parentParam) {
 
 	items[parentParam].expanded = false;
 	items[parentParam].redrawGlyph(*this);
+	raiseAccessibleStructureChanged();
 
 	// special case, see TableTreeTest
 	if(n == 1 && pos == static_cast<int>(size()) - 1) {
@@ -159,6 +166,7 @@ void TableTree::expand(LPARAM parentParam) {
 
 	items[parentParam].expanded = true;
 	items[parentParam].redrawGlyph(*this);
+	raiseAccessibleStructureChanged();
 }
 
 TableTree::Item::Item() : expanded(false)
@@ -379,6 +387,128 @@ void TableTree::eraseChild(decltype(children)::iterator& child, bool deleting) {
 		item.redrawGlyph(*this);
 	}
 	children.erase(child);
+}
+
+void TableTree::configureAccessibility() {
+	setAccessibleControlType(accessibility::Tree);
+	if(getAccessibleName().empty()) {
+		setAccessibleName(_T("Table tree"));
+	}
+
+	accessibility::ItemProvider provider;
+	provider.exists = [this](accessibility::ItemId id) {
+		auto value = static_cast<LPARAM>(id);
+		return findData(value) >= 0 || children.find(value) != children.end() ||
+			items.find(value) != items.end();
+	};
+	provider.children = [this](accessibility::ItemId parent) {
+		std::vector<accessibility::ItemId> result;
+		if(parent) {
+			auto found = items.find(static_cast<LPARAM>(parent));
+			if(found != items.end() && found->second.expanded) {
+				for(auto child: found->second.children) {
+					result.push_back(static_cast<accessibility::ItemId>(child));
+				}
+			}
+			return result;
+		}
+		for(size_t row = 0; row < size(); ++row) {
+			auto value = getData(static_cast<int>(row));
+			if(children.find(value) == children.end()) {
+				result.push_back(static_cast<accessibility::ItemId>(value));
+			}
+		}
+		return result;
+	};
+	provider.parent = [this](accessibility::ItemId id) {
+		auto found = children.find(static_cast<LPARAM>(id));
+		return found == children.end() ? accessibility::ItemId() :
+			static_cast<accessibility::ItemId>(found->second);
+	};
+	provider.name = [this](accessibility::ItemId id) {
+		auto row = findData(static_cast<LPARAM>(id));
+		return row >= 0 ? getText(static_cast<unsigned>(row), 0) : tstring();
+	};
+	provider.bounds = [this](accessibility::ItemId id) {
+		auto row = findData(static_cast<LPARAM>(id));
+		return row >= 0 ? getRect(row, LVIR_BOUNDS) : Rectangle();
+	};
+	provider.controlType = [](accessibility::ItemId) {
+		return static_cast<long>(accessibility::TreeItem);
+	};
+	provider.selection = [this] {
+		std::vector<accessibility::ItemId> result;
+		for(auto row: getSelection()) {
+			result.push_back(static_cast<accessibility::ItemId>(getData(row)));
+		}
+		return result;
+	};
+	provider.selected = [this](accessibility::ItemId id) {
+		auto row = findData(static_cast<LPARAM>(id));
+		return row >= 0 &&
+			(ListView_GetItemState(handle(), row, LVIS_SELECTED) & LVIS_SELECTED);
+	};
+	provider.select = [this](accessibility::ItemId id) {
+		auto row = findData(static_cast<LPARAM>(id));
+		if(row >= 0) {
+			clearSelection();
+			setSelected(row);
+		}
+	};
+	provider.addToSelection = [this](accessibility::ItemId id) {
+		auto row = findData(static_cast<LPARAM>(id));
+		if(row >= 0) {
+			setSelected(row);
+		}
+	};
+	provider.removeFromSelection = [this](accessibility::ItemId id) {
+		auto row = findData(static_cast<LPARAM>(id));
+		if(row >= 0) {
+			ListView_SetItemState(handle(), row, 0, LVIS_SELECTED | LVIS_FOCUSED);
+		}
+	};
+	provider.canSelectMultiple = !hasStyle(LVS_SINGLESEL);
+	provider.expandState = [this](accessibility::ItemId id) {
+		auto found = items.find(static_cast<LPARAM>(id));
+		if(found == items.end() || found->second.children.empty()) {
+			return accessibility::LeafNode;
+		}
+		return found->second.expanded ?
+			accessibility::Expanded : accessibility::Collapsed;
+	};
+	provider.expand = [this](accessibility::ItemId id) {
+		expand(static_cast<LPARAM>(id));
+	};
+	provider.collapse = [this](accessibility::ItemId id) {
+		collapse(static_cast<LPARAM>(id));
+	};
+	provider.invoke = [this](accessibility::ItemId id) {
+		auto found = items.find(static_cast<LPARAM>(id));
+		if(found != items.end() && !found->second.children.empty()) {
+			found->second.expanded ? collapse(found->first) : expand(found->first);
+		}
+	};
+	provider.focused = [this] {
+		auto row = ListView_GetNextItem(handle(), -1, LVNI_FOCUSED);
+		return row >= 0 ?
+			static_cast<accessibility::ItemId>(getData(row)) :
+			accessibility::ItemId();
+	};
+	provider.setFocus = [this](accessibility::ItemId id) {
+		auto row = findData(static_cast<LPARAM>(id));
+		if(row >= 0) {
+			::SetFocus(handle());
+			setSelected(row);
+		}
+	};
+	setAccessibleItems(provider);
+	onSelectionChanged([this] {
+		auto row = ListView_GetNextItem(handle(), -1, LVNI_FOCUSED);
+		if(row >= 0) {
+			raiseAccessibleItemEvent(
+				static_cast<accessibility::ItemId>(getData(row)), 20012);
+		}
+	});
 }
 
 LRESULT TableTree::sendMsg(UINT msg, WPARAM wParam, LPARAM lParam) {

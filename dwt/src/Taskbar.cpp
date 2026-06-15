@@ -189,6 +189,18 @@ void Taskbar::setOverlayIcon(ContainerPtr tab, const IconPtr& icon, const tstrin
 	}
 }
 
+void Taskbar::setProgressState(TBPFLAG state) {
+	if(taskbar && window) {
+		taskbar->SetProgressState(window->handle(), state);
+	}
+}
+
+void Taskbar::setProgressValue(ULONGLONG completed, ULONGLONG total) {
+	if(taskbar && window) {
+		taskbar->SetProgressValue(window->handle(), completed, total);
+	}
+}
+
 BitmapPtr Taskbar::getBitmap(ContainerPtr tab, LPARAM thumbnailSize) {
 	UpdateCanvas canvas { tab };
 

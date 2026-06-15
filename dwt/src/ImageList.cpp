@@ -117,6 +117,17 @@ IconPtr ImageList::getIcon(unsigned i) const {
 	return IconPtr(new Icon(ImageList_GetIcon(handle(), i, ILD_TRANSPARENT)));
 }
 
+ImageListPtr ImageList::resized(const Point& newSize) const {
+	ImageListPtr result(new ImageList(newSize));
+	result->setBkColor(getBkColor());
+	for(unsigned i = 0; i < size(); ++i) {
+		auto icon = getIcon(i);
+		auto resizedIcon = icon->resized(newSize);
+		result->add(*resizedIcon);
+	}
+	return result;
+}
+
 void ImageList::setBkColor(COLORREF color) {
 	ImageList_SetBkColor(handle(), color);
 }

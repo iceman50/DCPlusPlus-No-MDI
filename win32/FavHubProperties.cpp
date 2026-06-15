@@ -210,7 +210,8 @@ bool FavHubProperties::handleInitDialog() {
 		defaultShare->setChecked(!entry->hasShareProfile());
 
 		dwt::Tree::Seed seed;
-		seed.style |= TVS_CHECKBOXES | TVS_HASBUTTONS | TVS_LINESATROOT;
+		seed.checkBoxes = true;
+		seed.style |= TVS_HASBUTTONS | TVS_LINESATROOT;
 		shareFolders = cur->addChild(seed);
 		shareFolders->addColumn(T_("Virtual folder"), 120);
 		shareFolders->addColumn(T_("Shared directories"), 240);
@@ -228,17 +229,23 @@ bool FavHubProperties::handleInitDialog() {
 				updatingShareFolders = false;
 			}
 		});
-		shareFolders->onCheckStateChanged([this](HTREEITEM item, bool checked) {
+		shareFolders->onItemChanged([this](const NMTVITEMCHANGE& change) {
+			if((change.uChanged & TVIF_STATE) == 0 ||
+				((change.uStateOld ^ change.uStateNew) & TVIS_STATEIMAGEMASK) == 0) {
+				return;
+			}
+
 			if(updatingShareFolders) {
 				return;
 			}
 
+			const auto item = change.hItem;
 			auto paths = shareFolderPaths.find(item);
 			if(paths == shareFolderPaths.end()) {
 				return;
 			}
 
-			if(checked) {
+			if(shareFolders->getChecked(item)) {
 				selectedShareDirectories.insert(paths->second.begin(), paths->second.end());
 			} else {
 				for(const auto& path: paths->second) {

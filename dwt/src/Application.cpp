@@ -38,6 +38,7 @@
 #include <dwt/tstring.h>
 #include <dwt/DWTException.h>
 #include <dwt/util/check.h>
+#include <dwt/util/win32/Dpi.h>
 #include <dwt/widgets/Control.h>
 #include <assert.h>
 
@@ -52,6 +53,7 @@ HANDLE Application::itsMutex = 0;
  Typically only called by WinMain or DllMain.
  */
 void Application::init() {
+	util::win32::enablePerMonitorDpiAwareness();
 	itsInstance = new Application();
 
 	BOOL enable;

@@ -101,12 +101,15 @@ private:
 	bool handleLButtonDown(const MouseEvent& mouseEvent);
 	bool handleLButtonUp();
 	bool handleMouseMove(const MouseEvent& mouseEvent);
+	void moveTo(double value);
 
-	int thickness() { return ::GetSystemMetrics(horizontal ? SM_CYEDGE : SM_CXEDGE) + 2; }
+	int thickness() {
+		return getSystemMetric(horizontal ? SM_CYEDGE : SM_CXEDGE) + scale(2);
+	}
 };
 
 inline Splitter::Seed::Seed(double pos_, bool horizontal) :
-BaseType::Seed(WS_CHILD, 0),
+BaseType::Seed(WS_CHILD | WS_TABSTOP, 0),
 pos(pos_), horizontal(horizontal)
 {
 }
@@ -117,6 +120,7 @@ pos(0.5),
 horizontal(false),
 hovering(false)
 {
+	enableAccessibility(accessibility::Thumb);
 }
 
 }

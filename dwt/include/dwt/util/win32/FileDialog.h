@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, Jacek Sieka
 
   All rights reserved.
 
@@ -20,27 +20,39 @@
   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
   ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
   WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
-  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef DWT_UTIL_GDI_H
-#define DWT_UTIL_GDI_H
+#ifndef DWT_UTIL_WIN32_FILEDIALOG_H
+#define DWT_UTIL_WIN32_FILEDIALOG_H
 
-#include <dwt/forward.h>
+#include "../../WindowsHeaders.h"
+#include "../../tstring.h"
 
-namespace dwt { namespace util {
+#include <utility>
+#include <vector>
 
-IconPtr merge(const ImageList& icons);
+namespace dwt { namespace util { namespace win32 {
 
-/// Conversion factor for the system DPI. Prefer Widget::getDpi/scale for window-aware layout.
-float dpiFactor();
+struct FileDialogOptions {
+	HWND owner = nullptr;
+	bool save = false;
+	bool pickFolders = false;
+	bool allowMultiple = false;
+	DWORD legacyFlags = 0;
+	FILEOPENDIALOGOPTIONS options = 0;
+	unsigned activeFilter = 0;
+	tstring title;
+	tstring initialDirectory;
+	tstring defaultExtension;
+	tstring initialFileName;
+	std::vector<std::pair<tstring, tstring>> filters;
+	std::vector<std::pair<tstring, FDAP>> places;
+	PCIDLIST_ABSOLUTE initialItem = nullptr;
+	const GUID* clientGuid = nullptr;
+};
 
-} }
+bool showFileDialog(const FileDialogOptions& options, std::vector<tstring>& paths);
+
+} } }
 
 #endif

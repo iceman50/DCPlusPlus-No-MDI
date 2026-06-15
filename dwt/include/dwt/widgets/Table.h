@@ -121,6 +121,17 @@ public:
 		SORT_FLOAT
 	};
 
+	struct FooterInfo {
+		tstring text;
+		unsigned itemCount;
+	};
+
+	struct FooterItem {
+		int index;
+		tstring text;
+		UINT state;
+	};
+
 	/// \ingroup EventHandlersTable
 	/// Event handler for the SortItems event
 	/** When you sort a Table you need to supply a callback function for
@@ -225,8 +236,21 @@ public:
 
 	bool isGrouped() const { return grouped; }
 
-	/** Get the rectangle of the specified group's header. Only available on >= Vista. */
+	/** Get the rectangle of the specified group's header. */
 	bool getGroupRect(unsigned groupId, Rectangle& rect) const;
+	int setGroupInfo(int groupId, const LVGROUP& group);
+	int getGroupInfo(int groupId, LVGROUP& group) const;
+	bool removeGroup(int groupId);
+	int getGroupCount() const;
+	bool moveGroup(int groupId, int index);
+	LVGROUPMETRICS getGroupMetrics() const;
+	void setGroupMetrics(const LVGROUPMETRICS& metrics);
+	UINT getGroupState(int groupId, UINT mask) const;
+	bool setGroupState(int groupId, UINT state, UINT mask);
+	int getFocusedGroup() const;
+	bool setFocusedGroup(int groupId);
+	bool setSelectedGroup(int groupId);
+	bool hasGroup(int groupId) const;
 
 	/// Returns the checked state of the given row
 	/** A list view can have checkboxes in each row, if the checkbox for the given
@@ -332,21 +356,25 @@ public:
 	  * for the data grid icons in Icon View (big icons).
 	  */
 	void setNormalImageList(ImageListPtr imageList);
+	ImageListPtr getNormalImageList() const { return itsNormalImageList; }
 
 	/// Set the small image list for the Data Grid.
 	/** smallImageList is the image list that contains the images
 	  * for the data grid icons in Report, List & Small Icon Views.
 	  */
 	void setSmallImageList(ImageListPtr imageList);
+	ImageListPtr getSmallImageList() const { return itsSmallImageList; }
 
 	/// Set the state image list for the Data Grid.
 	/** stateImageList is the image list that contains the images
 	  * for the data grid icons states.
 	  */
 	void setStateImageList(ImageListPtr imageList);
+	ImageListPtr getStateImageList() const { return itsStateImageList; }
 
-	/** Set the image list to find icons from when adding groups. Only available on >= Vista. */
+	/** Set the image list to find icons from when adding groups. */
 	void setGroupImageList(ImageListPtr imageList);
+	ImageListPtr getGroupImageList() const { return groupImageList; }
 
 	/// Change the view for the Data Grid.
 	/** The view parameter can be one of LVS_ICON, LVS_SMALLICON, LVS_LIST or
@@ -354,6 +382,53 @@ public:
 	  * The Data Grid uses the report view for default.
 	  */
 	void setView( int view );
+	int getView() const;
+	void setTileViewInfo(const LVTILEVIEWINFO& info);
+	LVTILEVIEWINFO getTileViewInfo() const;
+	void setTileInfo(const LVTILEINFO& info);
+	bool getTileInfo(LVTILEINFO& info) const;
+	void onGetEmptyText(std::function<tstring ()> f, bool centered = true);
+	bool getFooterRect(Rectangle& rect) const;
+	FooterInfo getFooterInfo() const;
+	FooterItem getFooterItem(int item) const;
+	bool getFooterItemRect(int item, Rectangle& rect) const;
+	bool getNextItemIndex(LVITEMINDEX& index, int flags) const;
+	bool setItemIndexState(const LVITEMINDEX& index, UINT state, UINT mask);
+	void setInsertMark(const LVINSERTMARK& mark);
+	LVINSERTMARK getInsertMark() const;
+	COLORREF getInsertMarkColor() const;
+	COLORREF setInsertMarkColor(COLORREF color);
+	std::vector<Rectangle> getWorkAreas() const;
+	void setWorkAreas(const std::vector<Rectangle>& areas);
+	int getHotItem() const;
+	int setHotItem(int item);
+	HCURSOR getHotCursor() const;
+	HCURSOR setHotCursor(HCURSOR cursor);
+	DWORD getHoverTime() const;
+	DWORD setHoverTime(DWORD milliseconds);
+	COLORREF getOutlineColor() const;
+	COLORREF setOutlineColor(COLORREF color);
+	int getSelectedColumn() const;
+	void setSelectedColumn(int column);
+	bool getViewRect(Rectangle& rect) const;
+	bool getOrigin(Point& point) const;
+	bool getItemIndexRect(const LVITEMINDEX& index, int subItem, int code,
+		Rectangle& rect) const;
+	bool isItemVisible(int item) const;
+	bool getBackgroundImage(LVBKIMAGE& image) const;
+	bool setBackgroundImage(const LVBKIMAGE& image);
+	int getTopIndex() const;
+	int getCountPerPage() const;
+	HWND getEditControl() const;
+
+	void onBeginDrag(std::function<void (const NMLISTVIEW&)> f);
+	void onItemActivate(std::function<void (const NMITEMACTIVATE&)> f);
+	void onListKeyDown(std::function<void (const NMLVKEYDOWN&)> f);
+	void onItemChanging(std::function<bool (const NMLISTVIEW&)> f);
+	void onItemChanged(std::function<void (const NMLISTVIEW&)> f);
+	void onBeginLabelEdit(std::function<bool (const NMLVDISPINFO&)> f);
+	void onEndLabelEdit(std::function<bool (const NMLVDISPINFO&)> f);
+	void onFooterLinkClick(std::function<void (const NMLVLINK&)> f);
 
 	/// Force redraw of a range of items.
 	/** You may want to call invalidateWidget after the this call to force repaint.

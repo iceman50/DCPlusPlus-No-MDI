@@ -56,6 +56,7 @@ class Mouse
 	HWND H() const { return W().handle(); }
 
 	typedef std::function<bool (const MouseEvent&)> F;
+	typedef std::function<bool (const PointerEvent&)> PointerF;
 
 public:
 	/// \ingroup EventHandlersaspects::Mouse
@@ -208,6 +209,13 @@ public:
 		}
 	}
 
+	void onPointerDown(PointerF f) { onPointer(WM_POINTERDOWN, f); }
+	void onPointerUpdate(PointerF f) { onPointer(WM_POINTERUPDATE, f); }
+	void onPointerUp(PointerF f) { onPointer(WM_POINTERUP, f); }
+	void onPointerEnter(PointerF f) { onPointer(WM_POINTERENTER, f); }
+	void onPointerLeave(PointerF f) { onPointer(WM_POINTERLEAVE, f); }
+	void onPointerCaptureChanged(PointerF f) { onPointer(WM_POINTERCAPTURECHANGED, f); }
+
 private:
 	void onMouse(UINT msg, F f) {
 		W().addCallback(Message(msg), [f](const MSG& msg, LRESULT&) -> bool {
@@ -219,6 +227,12 @@ private:
 		W().addCallback(Message(msg), [f](const MSG& msg, LRESULT& ret) -> bool {
 			ret = TRUE;
 			return f(MouseEvent(msg));
+		});
+	}
+
+	void onPointer(UINT message, PointerF f) {
+		W().addCallback(Message(message), [f](const MSG& msg, LRESULT&) -> bool {
+			return f(PointerEvent(msg));
 		});
 	}
 };

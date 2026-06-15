@@ -102,6 +102,7 @@ private:
 	int handleSort(LPARAM& lhs, LPARAM& rhs);
 
 	void eraseChild(decltype(children)::iterator& child, bool deleting);
+	void configureAccessibility();
 
 	LRESULT sendMsg(UINT msg, WPARAM wParam, LPARAM lParam);
 };

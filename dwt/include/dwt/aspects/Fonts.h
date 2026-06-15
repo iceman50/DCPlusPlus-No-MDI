@@ -68,6 +68,14 @@ public:
 	/// Sets the font used by the Widget
 	void setFont(FontPtr newFont) {
 		this->font = newFont ? newFont : new Font(Font::DefaultGui);
+		dpiFont = this->font->getLogFont();
+		dpiFontSource = W().getDpi();
+		if(!dpiCallbackRegistered) {
+			W().onDpiResourcesChanged([this](const DpiResourceEvent& event) {
+				recreateFont(event.newDpi);
+			});
+			dpiCallbackRegistered = true;
+		}
 		W().setFontImpl();
 	}
 
@@ -85,8 +93,25 @@ protected:
 	}
 
 private:
+	void recreateFont(unsigned dpi) {
+		if(!font || !dpiFontSource || dpi == dpiFontSource) {
+			return;
+		}
+
+		auto value = dpiFont;
+		value.lfHeight = ::MulDiv(value.lfHeight, static_cast<int>(dpi),
+			static_cast<int>(dpiFontSource));
+		value.lfWidth = ::MulDiv(value.lfWidth, static_cast<int>(dpi),
+			static_cast<int>(dpiFontSource));
+		font = new Font(value);
+		W().setFontImpl();
+	}
+
 	// Keep a reference around so it doesn't get deleted
 	FontPtr font;
+	LOGFONT dpiFont = {};
+	unsigned dpiFontSource = 0;
+	bool dpiCallbackRegistered = false;
 };
 
 } }

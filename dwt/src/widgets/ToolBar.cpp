@@ -74,6 +74,22 @@ void ToolBar::create(const Seed& cs) {
 		onRaw([this](WPARAM, LPARAM) { return handleQuery(); }, Message(WM_NOTIFY, TBN_QUERYDELETE));
 		onRaw([this](WPARAM, LPARAM) { return handleReset(); }, Message(WM_NOTIFY, TBN_RESET));
 	}
+
+	onDpiResourcesChanged([this](const DpiResourceEvent& event) {
+		if(itsNormalImageList) {
+			setNormalImageList(itsNormalImageList->resized(
+				event.scale(itsNormalImageList->getImageSize())));
+		}
+		if(itsHotImageList) {
+			setHotImageList(itsHotImageList->resized(
+				event.scale(itsHotImageList->getImageSize())));
+		}
+		if(itsDisabledImageList) {
+			setDisabledImageList(itsDisabledImageList->resized(
+				event.scale(itsDisabledImageList->getImageSize())));
+		}
+		refresh();
+	});
 }
 
 Point ToolBar::getPreferredSize() {

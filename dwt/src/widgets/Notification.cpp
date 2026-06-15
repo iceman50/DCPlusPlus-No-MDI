@@ -99,6 +99,8 @@ void Notification::setVisible(bool visible_) {
 		}
 
 		::Shell_NotifyIcon(NIM_ADD, &nid);
+		nid.uVersion = NOTIFYICON_VERSION_4;
+		::Shell_NotifyIcon(NIM_SETVERSION, &nid);
 
 	} else {
 		::Shell_NotifyIcon(NIM_DELETE, &nid);
@@ -154,6 +156,8 @@ bool Notification::trayHandler(const MSG& msg) {
 	switch(LOWORD(msg.lParam)) {
 
 	case WM_LBUTTONUP:
+	case NIN_SELECT:
+	case NIN_KEYSELECT:
 		{
 			if(ignoreNextClick) {
 				ignoreNextClick = false;
@@ -197,7 +201,9 @@ bool Notification::trayHandler(const MSG& msg) {
 
 	case NIN_BALLOONUSERCLICK:
 		{
-			balloons.front().first();
+			if(!balloons.empty() && balloons.front().first) {
+				balloons.front().first();
+			}
 		} // fall through
 	case NIN_BALLOONHIDE: // fall through
 	case NIN_BALLOONTIMEOUT:
@@ -210,9 +216,33 @@ bool Notification::trayHandler(const MSG& msg) {
 			}
 			break;
 		}
+
+	case NIN_POPUPOPEN:
+		if(popupOpened) {
+			popupOpened();
+		}
+		break;
+
+	case NIN_POPUPCLOSE:
+		if(popupClosed) {
+			popupClosed();
+		}
+		break;
 	}
 
 	return true;
+}
+
+void Notification::setFocus() {
+	auto nid = makeNID();
+	::Shell_NotifyIcon(NIM_SETFOCUS, &nid);
+}
+
+Rectangle Notification::getRect() const {
+	NOTIFYICONIDENTIFIER identifier = { sizeof(NOTIFYICONIDENTIFIER), parent->handle(), 0 };
+	RECT rect = { 0 };
+	return SUCCEEDED(::Shell_NotifyIconGetRect(&identifier, &rect)) ?
+		Rectangle(rect) : Rectangle();
 }
 
 }

@@ -173,6 +173,8 @@ typedef Table* TablePtr;
 class TableTree;
 typedef TableTree* TableTreePtr;
 
+class TaskDialog;
+
 class TabView;
 typedef TabView* TabViewPtr;
 

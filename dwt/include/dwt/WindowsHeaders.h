@@ -40,29 +40,24 @@
 #ifndef DWT_WindowsHeaders_h
 #define DWT_WindowsHeaders_h
 
-//TEMP TEMP TEMP
-// My stupid IDE likes to make a mess even though these are defined...
-// so we will default to Win 7 because realistically, nobody with an older WinVer is likely to use this...
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x601
+#define _WIN32_WINNT 0x0601
 #endif
 
 #ifndef WINVER
-#define WINVER 0x601
+#define WINVER 0x0601
 #endif
 
-// Expose the current common-control declarations while retaining Windows 7 as the OS baseline.
 #ifndef _WIN32_IE
 #define _WIN32_IE 0x0A00
 #endif
-// TEMP TEMP TEMP
 
-#if _WIN32_WINNT < 0x601 || WINVER < 0x601
-#error _WIN32_WINNT / WINVER must require Windows 7 (0x601)
+#if _WIN32_WINNT < 0x0601 || WINVER < 0x0601
+#error _WIN32_WINNT / WINVER must require Windows 7 (0x0601)
 #endif
 
-#if _WIN32_IE < 0x600
-#error _WIN32_IE must require Common Controls 6 (0x600)
+#if _WIN32_IE < 0x0A00
+#error _WIN32_IE must be at least 0x0A00
 #endif
 
 #include <cstdint>
@@ -97,9 +92,26 @@
 
 // Other quirks
 
-// LM_GETIDEALSIZE is a >=Vista message; we check the OS version before using it.
+// Some MinGW headers omit this Windows SDK alias.
 #ifndef LM_GETIDEALSIZE
 #define LM_GETIDEALSIZE LM_GETIDEALHEIGHT
+#endif
+
+#ifndef WM_POINTERUPDATE
+#define WM_POINTERUPDATE 0x0245
+#define WM_POINTERDOWN 0x0246
+#define WM_POINTERUP 0x0247
+#define WM_POINTERENTER 0x0249
+#define WM_POINTERLEAVE 0x024A
+#define WM_POINTERCAPTURECHANGED 0x024C
+#endif
+
+#ifndef WM_DPICHANGED_BEFOREPARENT
+#define WM_DPICHANGED_BEFOREPARENT 0x02E2
+#endif
+
+#ifndef WM_DPICHANGED_AFTERPARENT
+#define WM_DPICHANGED_AFTERPARENT 0x02E3
 #endif
 
 #endif // !WindowsHeaders_h

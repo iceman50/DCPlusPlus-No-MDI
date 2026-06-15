@@ -78,6 +78,10 @@ public:
 	FolderDialog& setInitialSelection(const tstring& sel);
 	FolderDialog& setInitialSelection(const int csidl);
 
+	FolderDialog& setClientGuid(const GUID& guid);
+	FolderDialog& addPlace(const tstring& path, bool top = false);
+	FolderDialog& addOptions(FILEOPENDIALOGOPTIONS options);
+
 	/** Display the dialog.
 	@param dir On input, may define an initially selected dir (shortcut for setInitialSelection).
 	On output, contains the selected directory on success.
@@ -92,10 +96,14 @@ private:
 	tstring title;
 	tstring initialSel;
 	LPITEMIDLIST pidlInitialSel;
+	std::vector<std::pair<tstring, FDAP>> places;
+	FILEOPENDIALOGOPTIONS options;
+	GUID clientGuid;
+	bool hasClientGuid;
 
 	HWND getParentHandle() const { return parent ? parent->handle() : nullptr; }
-
-	static int CALLBACK browseCallbackProc(HWND hwnd, UINT uMsg, LPARAM, LPARAM lpData);
+	bool openRooted(tstring& dir);
+	static int CALLBACK browseCallbackProc(HWND hwnd, UINT message, LPARAM, LPARAM data);
 };
 
 }

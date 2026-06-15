@@ -70,7 +70,7 @@ RichTextBox::Seed::Seed() :
 }
 
 Dispatcher& RichTextBox::makeDispatcher() {
-	// msftedit is the DLL containing Rich Edit 4.1, available from XP SP1 onwards.
+	// msftedit is the DLL containing Rich Edit 4.1.
 	static LibraryLoader richEditLibrary(_T("msftedit.dll"));
 	return ChainingDispatcher::superClass<RichTextBox>();
 }

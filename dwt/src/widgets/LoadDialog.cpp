@@ -33,53 +33,24 @@
 
 namespace dwt {
 
-bool LoadDialog::openImpl(OPENFILENAME& ofn) {
-	ofn.Flags |= OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
-	return ::GetOpenFileName(&ofn);
+bool LoadDialog::openImpl(tstring& file, unsigned flags) {
+	auto options = getOptions(false);
+	options.legacyFlags = flags | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+	options.initialFileName = file;
+	std::vector<tstring> files;
+	if(!util::win32::showFileDialog(options, files)) {
+		return false;
+	}
+	file = files.front();
+	return true;
 }
 
 bool LoadDialog::openMultiple(std::vector<tstring>& files, unsigned flags)
 {
-	// get the current directory and restore it later to avoid directory locks
-	TCHAR buf[MAX_PATH];
-	::GetCurrentDirectory(MAX_PATH, buf);
-
-	OPENFILENAME ofn;
-	getOFN(ofn);
-	ofn.lpstrFile = files.empty() ? 0 : const_cast<LPTSTR>(files[0].c_str());
-	ofn.Flags = flags | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_ALLOWMULTISELECT;
-
-	bool ret = false;
-	if( ::GetOpenFileName(&ofn) )
-	{
-		// If a single file is selected, the lpstrFile string is just the path terminated by TWO null bytes
-		// If multiple files are selected, the format of the string returned is:
-		// DIRECTORY_PATH + '\0' + FILE_NAME_1 + '\0' + FILE_NAME_2 + '\0' + ... + FILE_NAME_N + '\0' + '\0'
-		// (Note the last file name is terminated by two null bytes)
-
-		tstring fileName;
-		tstring filePath;
-		tstring directory;
-		directory = ofn.lpstrFile; // tstring ends at first null
-		TCHAR *array_p = ofn.lpstrFile + directory.length() + 1; // set pointer to one position past null
-		fileName = array_p; // fileName is substring from array_p to next null
-		if (fileName.length() == 0) // only one file was selected
-			files.push_back(directory); // string 'directory' contains full path
-		else
-		{
-			while (fileName.length() > 0)
-			{
-				filePath = directory + _T("\\") + fileName;
-				files.push_back(filePath);
-				array_p = array_p + fileName.length() + 1; // set pointer one position past null
-				fileName = array_p; // fileName is substring from array_p to next null
-			}
-		}
-		ret = true;
-	}
-
-	::SetCurrentDirectory(buf);
-	return ret;
+	auto options = getOptions(false, true);
+	options.legacyFlags = flags | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+		OFN_HIDEREADONLY | OFN_ALLOWMULTISELECT;
+	return util::win32::showFileDialog(options, files);
 }
 
 }

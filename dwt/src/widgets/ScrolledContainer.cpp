@@ -31,7 +31,24 @@
 
 #include <dwt/widgets/ScrolledContainer.h>
 
+#include <algorithm>
+#include <utility>
+
 namespace dwt {
+
+namespace {
+
+int scrollDelta(accessibility::ScrollAmount amount, int page, int line) {
+	switch(amount) {
+	case accessibility::LargeDecrement: return -page;
+	case accessibility::SmallDecrement: return -line;
+	case accessibility::LargeIncrement: return page;
+	case accessibility::SmallIncrement: return line;
+	default: return 0;
+	}
+}
+
+}
 
 Point ScrolledContainer::getPreferredSize() {
 	auto child = getChild();
@@ -53,13 +70,8 @@ void ScrolledContainer::layout() {
 
 	clientSize = getClientSize();
 
-	if(childSize.x > clientSize.x) {
-		setScrollInfo(SB_HORZ, clientSize.x, childSize.x);
-	}
-
-	if(childSize.y > clientSize.y) {
-		setScrollInfo(SB_VERT, clientSize.y, childSize.y);
-	}
+	setScrollInfo(SB_HORZ, clientSize.x, std::max(childSize.x, clientSize.x));
+	setScrollInfo(SB_VERT, clientSize.y, std::max(childSize.y, clientSize.y));
 
 	child->resize(Rectangle(0, 0, std::max(childSize.x, clientSize.x), std::max(childSize.y, clientSize.y)));
 }
@@ -95,10 +107,10 @@ bool ScrolledContainer::handleMessage(const MSG &msg, LRESULT &retVal) {
     	si.nPos = si.nMax;
     	break;
     case SB_LINELEFT:
-        si.nPos -= 10;
+        si.nPos -= scale(10);
         break;
     case SB_LINERIGHT:
-        si.nPos += 10;
+        si.nPos += scale(10);
         break;
     case SB_PAGELEFT:
         si.nPos -= si.nPage;
@@ -125,6 +137,147 @@ bool ScrolledContainer::handleMessage(const MSG &msg, LRESULT &retVal) {
 void ScrolledContainer::create(const Seed& cs) {
 	BaseType::create(cs);
 	onWindowPosChanged([this] (const Rectangle &) { this->layout(); });
+	if(getAccessibleName().empty()) {
+		setAccessibleName(_T("Scrollable container"));
+	}
+	setAccessibleKeyboardFocusable(true);
+	onKeyDown([this](int key) { return handleKeyDown(key); });
+
+	accessibility::ScrollProvider provider;
+	provider.scroll = [this](accessibility::ScrollAmount horizontal,
+		accessibility::ScrollAmount vertical) {
+		scrollAccessible(horizontal, vertical);
+	};
+	provider.setPercent = [this](double horizontal, double vertical) {
+		setAccessibleScrollPercent(horizontal, vertical);
+	};
+	provider.horizontalPercent = [this] {
+		return getAccessibleScrollPercent(SB_HORZ);
+	};
+	provider.verticalPercent = [this] {
+		return getAccessibleScrollPercent(SB_VERT);
+	};
+	provider.horizontalViewSize = [this] {
+		return getAccessibleViewSize(SB_HORZ);
+	};
+	provider.verticalViewSize = [this] {
+		return getAccessibleViewSize(SB_VERT);
+	};
+	provider.horizontallyScrollable = [this] {
+		return isAccessibleScrollable(SB_HORZ);
+	};
+	provider.verticallyScrollable = [this] {
+		return isAccessibleScrollable(SB_VERT);
+	};
+	setAccessibleScroll(provider);
+}
+
+bool ScrolledContainer::handleKeyDown(int key) {
+	switch(key) {
+	case VK_LEFT:
+		scrollAccessible(accessibility::SmallDecrement,
+			accessibility::NoAmount);
+		return true;
+	case VK_RIGHT:
+		scrollAccessible(accessibility::SmallIncrement,
+			accessibility::NoAmount);
+		return true;
+	case VK_UP:
+		scrollAccessible(accessibility::NoAmount,
+			accessibility::SmallDecrement);
+		return true;
+	case VK_DOWN:
+		scrollAccessible(accessibility::NoAmount,
+			accessibility::SmallIncrement);
+		return true;
+	case VK_PRIOR:
+		scrollAccessible(accessibility::NoAmount,
+			accessibility::LargeDecrement);
+		return true;
+	case VK_NEXT:
+		scrollAccessible(accessibility::NoAmount,
+			accessibility::LargeIncrement);
+		return true;
+	case VK_HOME:
+		setAccessibleScrollPercent(-1., 0.);
+		return true;
+	case VK_END:
+		setAccessibleScrollPercent(-1., 100.);
+		return true;
+	default:
+		return false;
+	}
+}
+
+void ScrolledContainer::scrollAccessible(accessibility::ScrollAmount horizontal,
+	accessibility::ScrollAmount vertical)
+{
+	for(auto item: { std::make_pair(SB_HORZ, horizontal),
+		std::make_pair(SB_VERT, vertical) }) {
+		if(item.second == accessibility::NoAmount) {
+			continue;
+		}
+		SCROLLINFO info = { sizeof(SCROLLINFO), SIF_ALL };
+		::GetScrollInfo(handle(), item.first, &info);
+		setAccessibleScrollPosition(item.first,
+			info.nPos + scrollDelta(item.second, static_cast<int>(info.nPage),
+				scale(10)));
+	}
+}
+
+void ScrolledContainer::setAccessibleScrollPercent(double horizontal,
+	double vertical)
+{
+	for(auto item: { std::make_pair(SB_HORZ, horizontal),
+		std::make_pair(SB_VERT, vertical) }) {
+		if(item.second < 0) {
+			continue;
+		}
+		SCROLLINFO info = { sizeof(SCROLLINFO), SIF_ALL };
+		::GetScrollInfo(handle(), item.first, &info);
+		auto maximum = std::max(info.nMin,
+			info.nMax - static_cast<int>(info.nPage) + 1);
+		auto position = info.nMin + static_cast<int>(
+			(maximum - info.nMin) * item.second / 100.);
+		setAccessibleScrollPosition(item.first, position);
+	}
+}
+
+double ScrolledContainer::getAccessibleScrollPercent(int type) const {
+	SCROLLINFO info = { sizeof(SCROLLINFO), SIF_ALL };
+	::GetScrollInfo(handle(), type, &info);
+	auto maximum = std::max(info.nMin,
+		info.nMax - static_cast<int>(info.nPage) + 1);
+	return maximum > info.nMin ?
+		100. * (info.nPos - info.nMin) / (maximum - info.nMin) : -1.;
+}
+
+double ScrolledContainer::getAccessibleViewSize(int type) const {
+	SCROLLINFO info = { sizeof(SCROLLINFO), SIF_ALL };
+	::GetScrollInfo(handle(), type, &info);
+	auto range = info.nMax - info.nMin + 1;
+	return range > 0 ? std::min(100., 100. * info.nPage / range) : 100.;
+}
+
+bool ScrolledContainer::isAccessibleScrollable(int type) const {
+	SCROLLINFO info = { sizeof(SCROLLINFO), SIF_ALL };
+	::GetScrollInfo(handle(), type, &info);
+	return info.nPage && info.nMax - info.nMin + 1 > static_cast<int>(info.nPage);
+}
+
+void ScrolledContainer::setAccessibleScrollPosition(int type, int position) {
+	SCROLLINFO info = { sizeof(SCROLLINFO), SIF_ALL };
+	::GetScrollInfo(handle(), type, &info);
+	auto original = info.nPos;
+	info.fMask = SIF_POS;
+	info.nPos = position;
+	::SetScrollInfo(handle(), type, &info, TRUE);
+	info.fMask = SIF_POS;
+	::GetScrollInfo(handle(), type, &info);
+	auto horizontal = type == SB_HORZ ? original - info.nPos : 0;
+	auto vertical = type == SB_VERT ? original - info.nPos : 0;
+	::ScrollWindowEx(handle(), horizontal, vertical, nullptr, nullptr, nullptr,
+		nullptr, SW_INVALIDATE | SW_SCROLLCHILDREN);
 }
 
 }

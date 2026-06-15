@@ -76,7 +76,7 @@ public:
 		enum {
 			WinDefault, /// use the default Windows style.
 
-			WinBrowser /// use the "Browser" Windows style, only available on Win >= Vista.
+			WinBrowser /// use the "Browser" Windows style.
 		} tabStyle;
 
 		FontPtr font;
@@ -234,6 +234,8 @@ private:
 	int getImage(unsigned index);
 	void removeIcon(unsigned index);
 	void swapWidgets(ContainerPtr oldW, ContainerPtr newW);
+	void configureAccessibility();
+	void recreateDpiResources(const DpiResourceEvent& event);
 
 	void setText(unsigned idx, const tstring& text);
 	void redraw(unsigned index);

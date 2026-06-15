@@ -47,7 +47,7 @@ namespace dwt {
 const TCHAR Table::windowClass[] = WC_LISTVIEW;
 
 namespace { LVGROUP makeLVGROUP() {
-	LVGROUP lvg = { sizeof(LVGROUP) };
+	LVGROUP lvg = { static_cast<UINT>(sizeof(LVGROUP)) };
 	return lvg;
 } }
 
@@ -75,6 +75,24 @@ void Table::create( const Seed & cs )
 	setFont(cs.font);
 	if(cs.lvStyle != 0)
 		setTableStyle(cs.lvStyle);
+	onDpiResourcesChanged([this](const DpiResourceEvent& event) {
+		if(itsNormalImageList) {
+			setNormalImageList(itsNormalImageList->resized(
+				event.scale(itsNormalImageList->getImageSize())));
+		}
+		if(itsSmallImageList) {
+			setSmallImageList(itsSmallImageList->resized(
+				event.scale(itsSmallImageList->getImageSize())));
+		}
+		if(itsStateImageList) {
+			setStateImageList(itsStateImageList->resized(
+				event.scale(itsStateImageList->getImageSize())));
+		}
+		if(groupImageList) {
+			setGroupImageList(groupImageList->resized(
+				event.scale(groupImageList->getImageSize())));
+		}
+	});
 }
 
 Table::Table(dwt::Widget* parent) :
@@ -355,6 +373,68 @@ bool Table::getGroupRect(unsigned groupId, Rectangle& rect) const {
 	return false;
 }
 
+int Table::setGroupInfo(int groupId, const LVGROUP& group) {
+	return static_cast<int>(sendMessage(LVM_SETGROUPINFO, groupId,
+		reinterpret_cast<LPARAM>(&group)));
+}
+
+int Table::getGroupInfo(int groupId, LVGROUP& group) const {
+	return static_cast<int>(sendMessage(LVM_GETGROUPINFO, groupId,
+		reinterpret_cast<LPARAM>(&group)));
+}
+
+bool Table::removeGroup(int groupId) {
+	return sendMessage(LVM_REMOVEGROUP, groupId) != -1;
+}
+
+int Table::getGroupCount() const {
+	return static_cast<int>(sendMessage(LVM_GETGROUPCOUNT));
+}
+
+bool Table::moveGroup(int groupId, int index) {
+	return sendMessage(LVM_MOVEGROUP, groupId, index) != -1;
+}
+
+LVGROUPMETRICS Table::getGroupMetrics() const {
+	LVGROUPMETRICS metrics = { sizeof(LVGROUPMETRICS) };
+	sendMessage(LVM_GETGROUPMETRICS, 0, reinterpret_cast<LPARAM>(&metrics));
+	return metrics;
+}
+
+void Table::setGroupMetrics(const LVGROUPMETRICS& metrics) {
+	auto value = metrics;
+	value.cbSize = sizeof(LVGROUPMETRICS);
+	sendMessage(LVM_SETGROUPMETRICS, 0, reinterpret_cast<LPARAM>(&value));
+}
+
+UINT Table::getGroupState(int groupId, UINT mask) const {
+	return static_cast<UINT>(sendMessage(LVM_GETGROUPSTATE, groupId, mask));
+}
+
+bool Table::setGroupState(int groupId, UINT state, UINT mask) {
+	LVGROUP group = makeLVGROUP();
+	group.mask = LVGF_STATE;
+	group.state = state;
+	group.stateMask = mask;
+	return setGroupInfo(groupId, group) != -1;
+}
+
+int Table::getFocusedGroup() const {
+	return static_cast<int>(sendMessage(LVM_GETFOCUSEDGROUP));
+}
+
+bool Table::setFocusedGroup(int groupId) {
+	return setGroupState(groupId, LVGS_FOCUSED, LVGS_FOCUSED);
+}
+
+bool Table::setSelectedGroup(int groupId) {
+	return setGroupState(groupId, LVGS_SELECTED, LVGS_SELECTED);
+}
+
+bool Table::hasGroup(int groupId) const {
+	return sendMessage(LVM_HASGROUP, groupId) != FALSE;
+}
+
 void Table::initGroupSupport() {
 	// add some spacing between groups.
 	LVGROUPMETRICS metrics = { sizeof(LVGROUPMETRICS), LVGMF_BORDERSIZE };
@@ -501,17 +581,309 @@ void Table::setGroupImageList(ImageListPtr imageList) {
 }
 
 void Table::setView( int view ) {
-	if ( ( view & LVS_TYPEMASK ) != view )
-	{
+	if(view < LV_VIEW_ICON || view > LV_VIEW_TILE) {
 		dwtWin32DebugFail("Invalid View type");
+		return;
 	}
-	//little hack because there is no way to do this with Widget::addRemoveStyle
-	DWORD newStyle = static_cast<DWORD>(::GetWindowLongPtr(handle(), GWL_STYLE));
-	const DWORD viewStyle = static_cast<DWORD>(view);
-	if ( ( newStyle & LVS_TYPEMASK ) != viewStyle )
-	{
-		::SetWindowLongPtr(handle(), GWL_STYLE, static_cast<LONG_PTR>(( newStyle & ~LVS_TYPEMASK ) | viewStyle));
+	sendMessage(LVM_SETVIEW, view);
+}
+
+int Table::getView() const {
+	return static_cast<int>(sendMessage(LVM_GETVIEW));
+}
+
+void Table::setTileViewInfo(const LVTILEVIEWINFO& info) {
+	sendMessage(LVM_SETTILEVIEWINFO, 0, reinterpret_cast<LPARAM>(&info));
+}
+
+LVTILEVIEWINFO Table::getTileViewInfo() const {
+	LVTILEVIEWINFO info = { sizeof(LVTILEVIEWINFO) };
+	sendMessage(LVM_GETTILEVIEWINFO, 0, reinterpret_cast<LPARAM>(&info));
+	return info;
+}
+
+void Table::setTileInfo(const LVTILEINFO& info) {
+	sendMessage(LVM_SETTILEINFO, 0, reinterpret_cast<LPARAM>(&info));
+}
+
+bool Table::getTileInfo(LVTILEINFO& info) const {
+	info.cbSize = sizeof(LVTILEINFO);
+	return sendMessage(LVM_GETTILEINFO, 0,
+		reinterpret_cast<LPARAM>(&info)) != FALSE;
+}
+
+void Table::onGetEmptyText(std::function<tstring ()> f, bool centered) {
+	addCallback(Message(WM_NOTIFY, LVN_GETEMPTYMARKUP),
+		[f, centered](const MSG& msg, LRESULT&) -> bool {
+			auto& markup = *reinterpret_cast<NMLVEMPTYMARKUP*>(msg.lParam);
+			auto text = f();
+			auto length = std::min(text.size(),
+				static_cast<size_t>(L_MAX_URL_LENGTH - 1));
+			std::copy_n(text.c_str(), length, markup.szMarkup);
+			markup.szMarkup[length] = L'\0';
+			markup.dwFlags = centered ? EMF_CENTERED : 0;
+			return true;
+		});
+}
+
+bool Table::getFooterRect(Rectangle& rect) const {
+	RECT value = { 0 };
+	if(!sendMessage(LVM_GETFOOTERRECT, 0, reinterpret_cast<LPARAM>(&value))) {
+		return false;
 	}
+	rect = Rectangle(value);
+	return true;
+}
+
+Table::FooterInfo Table::getFooterInfo() const {
+	WCHAR text[1024] = { 0 };
+	LVFOOTERINFO info = { LVFF_ITEMCOUNT, text,
+		static_cast<int>(sizeof(text) / sizeof(text[0])), 0 };
+	sendMessage(LVM_GETFOOTERINFO, 0, reinterpret_cast<LPARAM>(&info));
+	return FooterInfo { tstring(text), info.cItems };
+}
+
+Table::FooterItem Table::getFooterItem(int item) const {
+	WCHAR text[1024] = { 0 };
+	LVFOOTERITEM value = { LVFIF_TEXT | LVFIF_STATE, item, text,
+		static_cast<int>(sizeof(text) / sizeof(text[0])), 0, ~0u };
+	sendMessage(LVM_GETFOOTERITEM, item, reinterpret_cast<LPARAM>(&value));
+	return FooterItem { value.iItem, tstring(text), value.state };
+}
+
+bool Table::getFooterItemRect(int item, Rectangle& rect) const {
+	RECT value = { 0 };
+	if(!sendMessage(LVM_GETFOOTERITEMRECT, item,
+		reinterpret_cast<LPARAM>(&value))) {
+		return false;
+	}
+	rect = Rectangle(value);
+	return true;
+}
+
+bool Table::getNextItemIndex(LVITEMINDEX& index, int flags) const {
+	return sendMessage(LVM_GETNEXTITEMINDEX,
+		reinterpret_cast<WPARAM>(&index), MAKELPARAM(flags, 0)) != FALSE;
+}
+
+bool Table::setItemIndexState(const LVITEMINDEX& index, UINT state, UINT mask) {
+	LVITEM item = { LVIF_STATE };
+	item.state = state;
+	item.stateMask = mask;
+	return sendMessage(LVM_SETITEMINDEXSTATE,
+		reinterpret_cast<WPARAM>(&index), reinterpret_cast<LPARAM>(&item)) != FALSE;
+}
+
+void Table::setInsertMark(const LVINSERTMARK& mark) {
+	sendMessage(LVM_SETINSERTMARK, 0, reinterpret_cast<LPARAM>(&mark));
+}
+
+LVINSERTMARK Table::getInsertMark() const {
+	LVINSERTMARK mark = { sizeof(LVINSERTMARK) };
+	sendMessage(LVM_GETINSERTMARK, 0, reinterpret_cast<LPARAM>(&mark));
+	return mark;
+}
+
+COLORREF Table::getInsertMarkColor() const {
+	return static_cast<COLORREF>(sendMessage(LVM_GETINSERTMARKCOLOR));
+}
+
+COLORREF Table::setInsertMarkColor(COLORREF color) {
+	return static_cast<COLORREF>(
+		sendMessage(LVM_SETINSERTMARKCOLOR, 0, color));
+}
+
+std::vector<Rectangle> Table::getWorkAreas() const {
+	UINT count = 0;
+	if(!sendMessage(LVM_GETNUMBEROFWORKAREAS, 0,
+		reinterpret_cast<LPARAM>(&count)) || count == 0) {
+		return std::vector<Rectangle>();
+	}
+	std::vector<RECT> native(count);
+	if(!sendMessage(LVM_GETWORKAREAS, count,
+		reinterpret_cast<LPARAM>(native.data()))) {
+		return std::vector<Rectangle>();
+	}
+	std::vector<Rectangle> areas;
+	areas.reserve(count);
+	for(const auto& rect: native) {
+		areas.push_back(Rectangle(rect));
+	}
+	return areas;
+}
+
+void Table::setWorkAreas(const std::vector<Rectangle>& areas) {
+	std::vector<RECT> native;
+	native.reserve(areas.size());
+	for(const auto& rect: areas) {
+		native.push_back(rect);
+	}
+	sendMessage(LVM_SETWORKAREAS, native.size(),
+		native.empty() ? 0 : reinterpret_cast<LPARAM>(native.data()));
+}
+
+int Table::getHotItem() const {
+	return static_cast<int>(sendMessage(LVM_GETHOTITEM));
+}
+
+int Table::setHotItem(int item) {
+	return static_cast<int>(sendMessage(LVM_SETHOTITEM, item));
+}
+
+HCURSOR Table::getHotCursor() const {
+	return reinterpret_cast<HCURSOR>(sendMessage(LVM_GETHOTCURSOR));
+}
+
+HCURSOR Table::setHotCursor(HCURSOR cursor) {
+	return reinterpret_cast<HCURSOR>(
+		sendMessage(LVM_SETHOTCURSOR, 0, reinterpret_cast<LPARAM>(cursor)));
+}
+
+DWORD Table::getHoverTime() const {
+	return static_cast<DWORD>(sendMessage(LVM_GETHOVERTIME));
+}
+
+DWORD Table::setHoverTime(DWORD milliseconds) {
+	return static_cast<DWORD>(sendMessage(LVM_SETHOVERTIME, 0, milliseconds));
+}
+
+COLORREF Table::getOutlineColor() const {
+	return static_cast<COLORREF>(sendMessage(LVM_GETOUTLINECOLOR));
+}
+
+COLORREF Table::setOutlineColor(COLORREF color) {
+	return static_cast<COLORREF>(sendMessage(LVM_SETOUTLINECOLOR, 0, color));
+}
+
+int Table::getSelectedColumn() const {
+	return static_cast<int>(sendMessage(LVM_GETSELECTEDCOLUMN));
+}
+
+void Table::setSelectedColumn(int column) {
+	sendMessage(LVM_SETSELECTEDCOLUMN, column);
+}
+
+bool Table::getViewRect(Rectangle& rect) const {
+	RECT value = { 0 };
+	if(!sendMessage(LVM_GETVIEWRECT, 0, reinterpret_cast<LPARAM>(&value))) {
+		return false;
+	}
+	rect = Rectangle(value);
+	return true;
+}
+
+bool Table::getOrigin(Point& point) const {
+	POINT value = { 0 };
+	if(!sendMessage(LVM_GETORIGIN, 0, reinterpret_cast<LPARAM>(&value))) {
+		return false;
+	}
+	point = Point(value);
+	return true;
+}
+
+bool Table::getItemIndexRect(const LVITEMINDEX& index, int subItem, int code,
+	Rectangle& rect) const {
+	RECT value = { 0 };
+	value.top = subItem;
+	value.left = code;
+	auto item = index;
+	if(!sendMessage(LVM_GETITEMINDEXRECT,
+		reinterpret_cast<WPARAM>(&item),
+		reinterpret_cast<LPARAM>(&value))) {
+		return false;
+	}
+	rect = Rectangle(value);
+	return true;
+}
+
+bool Table::isItemVisible(int item) const {
+	return sendMessage(LVM_ISITEMVISIBLE, item) != FALSE;
+}
+
+bool Table::getBackgroundImage(LVBKIMAGE& image) const {
+	return sendMessage(LVM_GETBKIMAGE, 0,
+		reinterpret_cast<LPARAM>(&image)) != FALSE;
+}
+
+bool Table::setBackgroundImage(const LVBKIMAGE& image) {
+	auto value = image;
+	return sendMessage(LVM_SETBKIMAGE, 0,
+		reinterpret_cast<LPARAM>(&value)) != FALSE;
+}
+
+int Table::getTopIndex() const {
+	return static_cast<int>(sendMessage(LVM_GETTOPINDEX));
+}
+
+int Table::getCountPerPage() const {
+	return static_cast<int>(sendMessage(LVM_GETCOUNTPERPAGE));
+}
+
+HWND Table::getEditControl() const {
+	return reinterpret_cast<HWND>(sendMessage(LVM_GETEDITCONTROL));
+}
+
+void Table::onBeginDrag(std::function<void (const NMLISTVIEW&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_BEGINDRAG), [f](const MSG& msg, LRESULT&) -> bool {
+		f(*reinterpret_cast<const NMLISTVIEW*>(msg.lParam));
+		return true;
+	});
+}
+
+void Table::onItemActivate(std::function<void (const NMITEMACTIVATE&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_ITEMACTIVATE), [f](const MSG& msg, LRESULT&) -> bool {
+		f(*reinterpret_cast<const NMITEMACTIVATE*>(msg.lParam));
+		return true;
+	});
+}
+
+void Table::onListKeyDown(std::function<void (const NMLVKEYDOWN&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_KEYDOWN), [f](const MSG& msg, LRESULT&) -> bool {
+		f(*reinterpret_cast<const NMLVKEYDOWN*>(msg.lParam));
+		return true;
+	});
+}
+
+void Table::onItemChanging(std::function<bool (const NMLISTVIEW&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_ITEMCHANGING),
+		[f](const MSG& msg, LRESULT& result) -> bool {
+			result = f(*reinterpret_cast<const NMLISTVIEW*>(msg.lParam)) ? TRUE : FALSE;
+			return true;
+		});
+}
+
+void Table::onItemChanged(std::function<void (const NMLISTVIEW&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_ITEMCHANGED),
+		[f](const MSG& msg, LRESULT&) -> bool {
+			f(*reinterpret_cast<const NMLISTVIEW*>(msg.lParam));
+			return true;
+		});
+}
+
+void Table::onBeginLabelEdit(std::function<bool (const NMLVDISPINFO&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_BEGINLABELEDIT),
+		[f](const MSG& msg, LRESULT& result) -> bool {
+			result = f(*reinterpret_cast<const NMLVDISPINFO*>(msg.lParam)) ?
+				FALSE : TRUE;
+			return true;
+		});
+}
+
+void Table::onEndLabelEdit(std::function<bool (const NMLVDISPINFO&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_ENDLABELEDIT),
+		[f](const MSG& msg, LRESULT& result) -> bool {
+			result = f(*reinterpret_cast<const NMLVDISPINFO*>(msg.lParam)) ?
+				TRUE : FALSE;
+			return true;
+		});
+}
+
+void Table::onFooterLinkClick(std::function<void (const NMLVLINK&)> f) {
+	addCallback(Message(WM_NOTIFY, LVN_LINKCLICK),
+		[f](const MSG& msg, LRESULT&) -> bool {
+			f(*reinterpret_cast<const NMLVLINK*>(msg.lParam));
+			return true;
+		});
 }
 
 void Table::eraseColumnImpl( unsigned columnNo ) {

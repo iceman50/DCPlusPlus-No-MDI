@@ -31,7 +31,33 @@
 
 #include <dwt/Events.h>
 
+#include <cstring>
+
 namespace dwt {
+
+DpiChangedEvent::DpiChangedEvent(unsigned oldDpi_, const MSG& msg) :
+	oldDpi(oldDpi_),
+	newDpi(LOWORD(msg.wParam)),
+	suggestedBounds(*reinterpret_cast<const RECT*>(msg.lParam))
+{
+}
+
+SystemSettingsEvent::SystemSettingsEvent(const MSG& msg) :
+	action(static_cast<UINT>(msg.wParam)),
+	section(msg.lParam ? reinterpret_cast<const TCHAR*>(msg.lParam) : _T("")),
+	highContrast(false),
+	clientAreaAnimation(true)
+{
+	HIGHCONTRAST value = { sizeof(HIGHCONTRAST) };
+	if(::SystemParametersInfo(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0)) {
+		highContrast = (value.dwFlags & HCF_HIGHCONTRASTON) != 0;
+	}
+
+	BOOL animation = TRUE;
+	if(::SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, &animation, 0)) {
+		clientAreaAnimation = animation != FALSE;
+	}
+}
 
 SizedEvent::SizedEvent( const MSG& msg ) :
 	size(Point::fromLParam(msg.lParam)),
@@ -78,5 +104,24 @@ MouseEvent::MouseEvent(const MSG& msg) {
 	isShiftPressed = keys & MK_SHIFT;
 }
 
+PointerEvent::PointerEvent(const MSG& msg) :
+	id(LOWORD(msg.wParam)),
+	type(Unknown),
+	pos(Point(GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam))),
+	flags(HIWORD(msg.wParam))
+{
+	typedef BOOL (WINAPI *GetPointerTypeFunction)(UINT32, int*);
+	static GetPointerTypeFunction getPointerType = [] {
+		GetPointerTypeFunction function = nullptr;
+		auto address = ::GetProcAddress(::GetModuleHandle(_T("user32.dll")), "GetPointerType");
+		static_assert(sizeof(function) == sizeof(address), "Function pointer size mismatch");
+		std::memcpy(&function, &address, sizeof(function));
+		return function;
+	}();
+	int nativeType = 0;
+	if(getPointerType && getPointerType(id, &nativeType)) {
+		type = static_cast<Type>(nativeType);
+	}
 }
 
+}

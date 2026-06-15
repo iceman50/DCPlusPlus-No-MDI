@@ -33,28 +33,11 @@
 
 #include <algorithm>
 
-#include <dwt/util/win32/Version.h>
+#include <dwt/DWTException.h>
 #include <dwt/widgets/Header.h>
 #include <dwt/WidgetCreator.h>
 
 namespace dwt {
-
-namespace {
-
-// These are hidden by the Windows SDK when _WIN32_IE is 0x0600 even though
-// version 6 common controls support them on Vista and later.
-const int TVN_ITEMCHANGED_ = TVN_FIRST - 19;
-
-struct NMTVITEMCHANGE_ {
-	NMHDR hdr;
-	UINT uChanged;
-	HTREEITEM hItem;
-	UINT uStateNew;
-	UINT uStateOld;
-	LPARAM lParam;
-};
-
-}
 
 const TCHAR Tree::TreeView::windowClass[] = WC_TREEVIEW;
 
@@ -67,16 +50,28 @@ bool Tree::TreeView::handleMessage(const MSG& msg, LRESULT &retVal) {
 
 Tree::Seed::Seed() :
 	BaseType::Seed(WS_CHILD | WS_TABSTOP | TVS_DISABLEDRAGDROP | TVS_HASLINES | TVS_NONEVENHEIGHT | TVS_SHOWSELALWAYS),
-	font(0)
+	font(0),
+	checkBoxes(false),
+	tvExStyle(0)
 {
 }
 
 void Tree::create( const Seed & cs )
 {
 	Control::Seed mySeed(WS_CHILD, WS_EX_CONTROLPARENT);
+	Seed treeSeed = cs;
+	const bool checkBoxes = treeSeed.checkBoxes || (treeSeed.style & TVS_CHECKBOXES) != 0;
+	treeSeed.style &= ~TVS_CHECKBOXES;
 
 	BaseType::create(mySeed);
-	tree = WidgetCreator<TreeView>::create(this, cs);
+	tree = WidgetCreator<TreeView>::create(this, treeSeed);
+
+	if(treeSeed.tvExStyle) {
+		setExtendedStyle(treeSeed.tvExStyle, treeSeed.tvExStyle);
+	}
+	if(checkBoxes) {
+		setCheckBoxes();
+	}
 
 	onSized([this](const SizedEvent& e) { layout(); });
 
@@ -96,6 +91,16 @@ void Tree::create( const Seed & cs )
 	tree->onCustomDraw([this](NMTVCUSTOMDRAW& x) { return draw(x); });
 
 	setFont(cs.font);
+	onDpiResourcesChanged([this](const DpiResourceEvent& event) {
+		if(itsNormalImageList) {
+			setNormalImageList(itsNormalImageList->resized(
+				event.scale(itsNormalImageList->getImageSize())));
+		}
+		if(itsStateImageList) {
+			setStateImageList(itsStateImageList->resized(
+				event.scale(itsStateImageList->getImageSize())));
+		}
+	});
 	layout();
 }
 
@@ -193,55 +198,236 @@ void Tree::setStateImageList( ImageListPtr imageList ) {
 	  TreeView_SetImageList(treeHandle(), imageList->getImageList(), TVSIL_STATE);
 }
 
-bool Tree::getChecked(HTREEITEM item) const {
-	return TreeView_GetCheckState(treeHandle(), item) != FALSE;
-}
-
-void Tree::setChecked(HTREEITEM item, bool checked) {
-	TreeView_SetCheckState(treeHandle(), item, checked ? TRUE : FALSE);
-}
-
-void Tree::onCheckStateChanged(const std::function<void(HTREEITEM, bool)>& f) {
-	if(util::win32::ensureVersion(util::win32::VISTA)) {
-		addCallback(Message(WM_NOTIFY, TVN_ITEMCHANGED_), [this, f](const MSG& msg, LRESULT& ret) {
-			const auto change = reinterpret_cast<const NMTVITEMCHANGE_*>(msg.lParam);
-			if((change->uChanged & TVIF_STATE) != 0 &&
-				((change->uStateOld ^ change->uStateNew) & TVIS_STATEIMAGEMASK) != 0) {
-				f(change->hItem, getChecked(change->hItem));
-			}
-			ret = 0;
-			return false;
-		});
+void Tree::setCheckBoxes(bool value) {
+	const bool enabled = tree->hasStyle(TVS_CHECKBOXES);
+	if(!value) {
+		if(enabled) {
+			throw DWTException("Tree checkbox style cannot be removed after it has been enabled");
+		}
 		return;
 	}
 
-	auto notifyAfterChange = [this, f](HTREEITEM item) {
-		if(item) {
-			callAsync([this, f, item] {
-				f(item, getChecked(item));
-			});
-		}
-	};
+	if(enabled) {
+		return;
+	}
+	if(size() != 0) {
+		throw DWTException("Tree checkboxes must be enabled before inserting items");
+	}
 
-	addCallback(Message(WM_NOTIFY, NM_CLICK), [this, notifyAfterChange](const MSG&, LRESULT& ret) {
-		TVHITTESTINFO hit = { { GET_X_LPARAM(::GetMessagePos()), GET_Y_LPARAM(::GetMessagePos()) } };
-		::ScreenToClient(treeHandle(), &hit.pt);
-		TreeView_HitTest(treeHandle(), &hit);
-		if((hit.flags & TVHT_ONITEMSTATEICON) != 0) {
-			notifyAfterChange(hit.hItem);
-		}
-		ret = 0;
-		return false;
-	});
+	tree->addRemoveStyle(TVS_CHECKBOXES, true);
 
-	addCallback(Message(WM_NOTIFY, TVN_KEYDOWN), [this, notifyAfterChange](const MSG& msg, LRESULT& ret) {
-		const auto key = reinterpret_cast<const NMTVKEYDOWN*>(msg.lParam);
-		if(key->wVKey == VK_SPACE) {
-			notifyAfterChange(getSelected());
-		}
-		ret = 0;
-		return false;
+	HIMAGELIST checkBoxes = TreeView_GetImageList(treeHandle(), TVSIL_STATE);
+	if(checkBoxes) {
+		itsStateImageList = ImageListPtr(new ImageList(checkBoxes));
+	}
+}
+
+bool Tree::getChecked(HTREEITEM item) const {
+	return getCheckState(item) == Checked;
+}
+
+void Tree::setChecked(HTREEITEM item, bool checked) {
+	setCheckState(item, checked ? Checked : Unchecked);
+}
+
+Tree::CheckState Tree::getCheckState(HTREEITEM item) const {
+	auto state = TreeView_GetItemState(treeHandle(), item, TVIS_STATEIMAGEMASK);
+	return static_cast<CheckState>(state >> 12);
+}
+
+void Tree::setCheckState(HTREEITEM item, CheckState state) {
+	TVITEM value = { TVIF_HANDLE | TVIF_STATE, item };
+	value.stateMask = TVIS_STATEIMAGEMASK;
+	value.state = INDEXTOSTATEIMAGEMASK(static_cast<UINT>(state));
+	TreeView_SetItem(treeHandle(), &value);
+}
+
+void Tree::setExtendedCheckBoxes(bool partial, bool exclusion, bool dimmed) {
+	DWORD styles = 0;
+	if(partial) {
+		styles |= TVS_EX_PARTIALCHECKBOXES;
+	}
+	if(exclusion) {
+		styles |= TVS_EX_EXCLUSIONCHECKBOXES;
+	}
+	if(dimmed) {
+		styles |= TVS_EX_DIMMEDCHECKBOXES;
+	}
+	setExtendedStyle(styles, TVS_EX_PARTIALCHECKBOXES |
+		TVS_EX_EXCLUSIONCHECKBOXES | TVS_EX_DIMMEDCHECKBOXES);
+	if(styles) {
+		setCheckBoxes();
+	}
+}
+
+void Tree::setExtendedStyle(DWORD styles, DWORD mask) {
+	TreeView_SetExtendedStyle(treeHandle(), styles, mask);
+}
+
+DWORD Tree::getExtendedStyle() const {
+	return static_cast<DWORD>(TreeView_GetExtendedStyle(treeHandle()));
+}
+
+void Tree::setMultiSelect(bool value) {
+	setExtendedStyle(value ? TVS_EX_MULTISELECT : 0, TVS_EX_MULTISELECT);
+}
+
+void Tree::setDoubleBuffered(bool value) {
+	setExtendedStyle(value ? TVS_EX_DOUBLEBUFFER : 0, TVS_EX_DOUBLEBUFFER);
+}
+
+std::vector<HTREEITEM> Tree::getSelectedItems() const {
+	std::vector<HTREEITEM> items;
+	auto item = TreeView_GetSelection(treeHandle());
+	while(item) {
+		items.push_back(item);
+		item = TreeView_GetNextItem(treeHandle(), item, TVGN_NEXTSELECTED);
+	}
+	return items;
+}
+
+void Tree::onItemChanged(std::function<void (const NMTVITEMCHANGE&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_ITEMCHANGED), [f](const MSG& msg, LRESULT&) -> bool {
+		f(*reinterpret_cast<const NMTVITEMCHANGE*>(msg.lParam));
+		return true;
 	});
+}
+
+void Tree::onItemChanging(std::function<bool (const NMTVITEMCHANGE&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_ITEMCHANGING), [f](const MSG& msg, LRESULT& result) -> bool {
+		result = f(*reinterpret_cast<const NMTVITEMCHANGE*>(msg.lParam)) ? TRUE : FALSE;
+		return true;
+	});
+}
+
+void Tree::onGetInfoTip(std::function<tstring (HTREEITEM, LPARAM)> f) {
+	tree->addRemoveStyle(TVS_INFOTIP, true);
+	addCallback(Message(WM_NOTIFY, TVN_GETINFOTIP),
+		[f](const MSG& msg, LRESULT&) -> bool {
+			auto& tip = *reinterpret_cast<NMTVGETINFOTIP*>(msg.lParam);
+			auto text = f(tip.hItem, tip.lParam);
+			if(tip.cchTextMax > 0) {
+				_tcsncpy_s(tip.pszText, tip.cchTextMax, text.c_str(),
+					_TRUNCATE);
+			}
+			return true;
+		});
+}
+
+void Tree::onBeginLabelEdit(std::function<bool (const NMTVDISPINFO&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_BEGINLABELEDIT),
+		[f](const MSG& msg, LRESULT& result) -> bool {
+			result = f(*reinterpret_cast<const NMTVDISPINFO*>(msg.lParam)) ?
+				FALSE : TRUE;
+			return true;
+		});
+}
+
+void Tree::onEndLabelEdit(std::function<bool (const NMTVDISPINFO&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_ENDLABELEDIT),
+		[f](const MSG& msg, LRESULT& result) -> bool {
+			result = f(*reinterpret_cast<const NMTVDISPINFO*>(msg.lParam)) ?
+				TRUE : FALSE;
+			return true;
+		});
+}
+
+void Tree::onBeginDrag(std::function<void (const NMTREEVIEW&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_BEGINDRAG),
+		[f](const MSG& msg, LRESULT&) -> bool {
+			f(*reinterpret_cast<const NMTREEVIEW*>(msg.lParam));
+			return true;
+		});
+}
+
+void Tree::onBeginRightDrag(std::function<void (const NMTREEVIEW&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_BEGINRDRAG),
+		[f](const MSG& msg, LRESULT&) -> bool {
+			f(*reinterpret_cast<const NMTREEVIEW*>(msg.lParam));
+			return true;
+		});
+}
+
+void Tree::onAsyncDraw(std::function<void (NMTVASYNCDRAW&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_ASYNCDRAW),
+		[f](const MSG& msg, LRESULT&) -> bool {
+			f(*reinterpret_cast<NMTVASYNCDRAW*>(msg.lParam));
+			return true;
+		});
+}
+
+void Tree::onTreeKeyDown(std::function<void (const NMTVKEYDOWN&)> f) {
+	addCallback(Message(WM_NOTIFY, TVN_KEYDOWN),
+		[f](const MSG& msg, LRESULT&) -> bool {
+			f(*reinterpret_cast<const NMTVKEYDOWN*>(msg.lParam));
+			return true;
+		});
+}
+
+ImageListPtr Tree::createDragImage(HTREEITEM item) const {
+	auto imageList = TreeView_CreateDragImage(treeHandle(), item);
+	return imageList ? ImageListPtr(new ImageList(imageList)) : ImageListPtr();
+}
+
+void Tree::setInsertMark(HTREEITEM item, bool after) {
+	TreeView_SetInsertMark(treeHandle(), item, after ? TRUE : FALSE);
+}
+
+unsigned Tree::getIndent() const {
+	return static_cast<unsigned>(TreeView_GetIndent(treeHandle()));
+}
+
+void Tree::setIndent(unsigned indent) {
+	TreeView_SetIndent(treeHandle(), indent);
+}
+
+UINT Tree::getScrollTime() const {
+	return TreeView_GetScrollTime(treeHandle());
+}
+
+void Tree::setScrollTime(UINT milliseconds) {
+	TreeView_SetScrollTime(treeHandle(), milliseconds);
+}
+
+void Tree::setAutoScrollInfo(UINT pixelsPerSecond, UINT updateTime) {
+	::SendMessage(treeHandle(), TVM_SETAUTOSCROLLINFO, pixelsPerSecond,
+		updateTime);
+}
+
+COLORREF Tree::getLineColor() const {
+	return TreeView_GetLineColor(treeHandle());
+}
+
+COLORREF Tree::setLineColor(COLORREF color) {
+	return TreeView_SetLineColor(treeHandle(), color);
+}
+
+COLORREF Tree::getInsertMarkColor() const {
+	return TreeView_GetInsertMarkColor(treeHandle());
+}
+
+COLORREF Tree::setInsertMarkColor(COLORREF color) {
+	return TreeView_SetInsertMarkColor(treeHandle(), color);
+}
+
+HWND Tree::getToolTips() const {
+	return TreeView_GetToolTips(treeHandle());
+}
+
+void Tree::setToolTips(HWND toolTips) {
+	TreeView_SetToolTips(treeHandle(), toolTips);
+}
+
+bool Tree::sortChildren(HTREEITEM item, bool recursive) {
+	return TreeView_SortChildren(treeHandle(), item, recursive ? TRUE : FALSE) != FALSE;
+}
+
+UINT Tree::mapItemToAccessibilityId(HTREEITEM item) const {
+	return TreeView_MapHTREEITEMToAccID(treeHandle(), item);
+}
+
+HTREEITEM Tree::mapAccessibilityIdToItem(UINT id) const {
+	return TreeView_MapAccIDToHTREEITEM(treeHandle(), id);
 }
 
 LPARAM Tree::getDataImpl(HTREEITEM item) {
@@ -284,10 +470,22 @@ void Tree::select(const ScreenCoordinate& pt) {
 	}
 }
 
-Rectangle Tree::getItemRect(HTREEITEM item) {
-	RECT rc;
-	TreeView_GetItemRect(treeHandle(), item, &rc, TRUE);
+Rectangle Tree::getItemRect(HTREEITEM item, bool textOnly) {
+	RECT rc = { 0 };
+	TreeView_GetItemRect(treeHandle(), item, &rc, textOnly ? TRUE : FALSE);
 	return Rectangle(rc);
+}
+
+bool Tree::getItemPartRect(HTREEITEM item, TVITEMPART part,
+	Rectangle& rect) const {
+	RECT value = { 0 };
+	TVGETITEMPARTRECTINFO info = { item, &value, part };
+	if(!::SendMessage(treeHandle(), TVM_GETITEMPARTRECT, 0,
+		reinterpret_cast<LPARAM>(&info))) {
+		return false;
+	}
+	rect = Rectangle(value);
+	return true;
 }
 
 HeaderPtr Tree::getHeader() {

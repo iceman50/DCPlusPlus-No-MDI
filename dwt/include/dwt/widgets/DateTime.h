@@ -39,6 +39,8 @@
 #include "../aspects/Clickable.h"
 #include "Control.h"
 
+#include <optional>
+
 namespace dwt {
 
 /// DateTimePicker Control class
@@ -112,6 +114,15 @@ public:
 	/** Sets the date end time of the control to the given SYSTEMTIME.
 	  */
 	void setDateTime( const SYSTEMTIME & st );
+	std::optional<SYSTEMTIME> getValue();
+	void setNone();
+	void setRange(const SYSTEMTIME* minimum, const SYSTEMTIME* maximum);
+	void getRange(std::optional<SYSTEMTIME>& minimum, std::optional<SYSTEMTIME>& maximum);
+	Point getIdealSize() const;
+	void closeMonthCalendar();
+	DWORD setMonthCalendarStyle(DWORD style);
+	DWORD getMonthCalendarStyle() const;
+	DATETIMEPICKERINFO getPickerInfo() const;
 
 	/// Sets the format to use when displaying the date and time in the control
 	/** The format can be any combinations in any order of the given ones
@@ -216,6 +227,63 @@ inline SYSTEMTIME DateTime::getDateTime()
 inline void DateTime::setDateTime( const SYSTEMTIME & st )
 {
 	DateTime_SetSystemtime( this->handle(), GDT_VALID, & st );
+}
+
+inline std::optional<SYSTEMTIME> DateTime::getValue() {
+	SYSTEMTIME value = { 0 };
+	return DateTime_GetSystemtime(handle(), &value) == GDT_VALID ?
+		std::optional<SYSTEMTIME>(value) : std::nullopt;
+}
+
+inline void DateTime::setNone() {
+	DateTime_SetSystemtime(handle(), GDT_NONE, nullptr);
+}
+
+inline void DateTime::setRange(const SYSTEMTIME* minimum, const SYSTEMTIME* maximum) {
+	SYSTEMTIME range[2] = { };
+	DWORD flags = 0;
+	if(minimum) {
+		range[0] = *minimum;
+		flags |= GDTR_MIN;
+	}
+	if(maximum) {
+		range[1] = *maximum;
+		flags |= GDTR_MAX;
+	}
+	DateTime_SetRange(handle(), flags, range);
+}
+
+inline void DateTime::getRange(std::optional<SYSTEMTIME>& minimum,
+	std::optional<SYSTEMTIME>& maximum)
+{
+	SYSTEMTIME range[2] = { };
+	auto flags = DateTime_GetRange(handle(), range);
+	minimum = (flags & GDTR_MIN) ? std::optional<SYSTEMTIME>(range[0]) : std::nullopt;
+	maximum = (flags & GDTR_MAX) ? std::optional<SYSTEMTIME>(range[1]) : std::nullopt;
+}
+
+inline Point DateTime::getIdealSize() const {
+	SIZE size = { 0 };
+	sendMessage(DTM_GETIDEALSIZE, 0, reinterpret_cast<LPARAM>(&size));
+	return Point(size.cx, size.cy);
+}
+
+inline void DateTime::closeMonthCalendar() {
+	sendMessage(DTM_CLOSEMONTHCAL);
+}
+
+inline DWORD DateTime::setMonthCalendarStyle(DWORD style) {
+	return static_cast<DWORD>(sendMessage(DTM_SETMCSTYLE, 0, style));
+}
+
+inline DWORD DateTime::getMonthCalendarStyle() const {
+	return static_cast<DWORD>(sendMessage(DTM_GETMCSTYLE));
+}
+
+inline DATETIMEPICKERINFO DateTime::getPickerInfo() const {
+	DATETIMEPICKERINFO info = { sizeof(DATETIMEPICKERINFO) };
+	sendMessage(DTM_GETDATETIMEPICKERINFO, 0, reinterpret_cast<LPARAM>(&info));
+	return info;
 }
 
 inline void DateTime::setFormat( const tstring & format )

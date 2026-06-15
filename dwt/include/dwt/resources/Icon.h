@@ -77,6 +77,9 @@ public:
 	*/
 	Point getSize() const;
 
+	/// Create an owned copy rendered at the requested pixel size.
+	IconPtr resized(const Point& size) const;
+
 	bool operator==(const Icon& rhs) const;
 
 private:

@@ -32,7 +32,6 @@
 #include <dwt/widgets/Grid.h>
 
 #include <dwt/util/check.h>
-#include <dwt/util/GDI.h>
 #include <dwt/util/HoldResize.h>
 
 #include <algorithm>
@@ -129,7 +128,7 @@ std::vector<size_t> Grid::calcSizes(const GridInfoList& x, const GridInfoList& y
 
 		switch(x[i].mode) {
 		case GridInfo::STATIC:
-			ret[i] = static_cast<size_t>(ret[i] * util::dpiFactor());
+			ret[i] = static_cast<size_t>(scale(static_cast<int>(ret[i])));
 			break;
 		case GridInfo::FILL:
 			fills++;
@@ -268,11 +267,13 @@ Grid::WidgetInfo* Grid::getWidgetInfo(Control* w) {
 
 size_t Grid::addRow(const GridInfo& gp) {
 	rows.push_back(gp);
+	raiseAccessibleStructureChanged();
 	return rows.size() - 1;
 }
 
 size_t Grid::addColumn(const GridInfo& gp) {
 	columns.push_back(gp);
+	raiseAccessibleStructureChanged();
 	return columns.size() - 1;
 }
 
@@ -312,6 +313,7 @@ void Grid::removeRow(size_t row) {
 			++i;
 		}
 	}
+	raiseAccessibleStructureChanged();
 }
 
 void Grid::removeColumn(size_t column) {
@@ -332,14 +334,17 @@ void Grid::removeColumn(size_t column) {
 			++i;
 		}
 	}
+	raiseAccessibleStructureChanged();
 }
 
 void Grid::clearRows() {
 	rows.clear();
+	raiseAccessibleStructureChanged();
 }
 
 void Grid::clearColumns() {
 	columns.clear();
+	raiseAccessibleStructureChanged();
 }
 
 void Grid::setWidget(Control* w, size_t row, size_t column, size_t rowSpan, size_t colSpan) {
@@ -351,11 +356,13 @@ void Grid::setWidget(Control* w, size_t row, size_t column, size_t rowSpan, size
 			i.column = column;
 			i.rowSpan = rowSpan;
 			i.colSpan = colSpan;
+			raiseAccessibleStructureChanged();
 			return;
 		}
 	}
 
 	widgetInfo.push_back(WidgetInfo(w, row, column, rowSpan, colSpan));
+	raiseAccessibleStructureChanged();
 }
 
 void Grid::setWidget(Control* w) {

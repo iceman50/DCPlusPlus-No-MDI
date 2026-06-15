@@ -70,15 +70,26 @@ public:
 protected:
 	friend class WidgetCreator<ScrolledContainer>;
 
-	ScrolledContainer(Widget* parent, Dispatcher& dispatcher = NormalDispatcher::getDefault()) : BaseType(parent, dispatcher) { };
+	ScrolledContainer(Widget* parent, Dispatcher& dispatcher = NormalDispatcher::getDefault()) : BaseType(parent, dispatcher) {
+		enableAccessibility(accessibility::Pane);
+	};
 
 private:
 
 	void setScrollInfo(int type, int page, int max, int pos = 0);
+	void scrollAccessible(accessibility::ScrollAmount horizontal,
+		accessibility::ScrollAmount vertical);
+	void setAccessibleScrollPercent(double horizontal, double vertical);
+	double getAccessibleScrollPercent(int type) const;
+	double getAccessibleViewSize(int type) const;
+	bool isAccessibleScrollable(int type) const;
+	void setAccessibleScrollPosition(int type, int position);
+	bool handleKeyDown(int key);
 };
 
 inline ScrolledContainer::Seed::Seed(DWORD style, DWORD exStyle) :
-BaseType::Seed(style | WS_CHILD | WS_HSCROLL | WS_VSCROLL, exStyle | WS_EX_CONTROLPARENT)
+BaseType::Seed(style | WS_CHILD | WS_TABSTOP | WS_HSCROLL | WS_VSCROLL,
+	exStyle | WS_EX_CONTROLPARENT)
 {
 }
 

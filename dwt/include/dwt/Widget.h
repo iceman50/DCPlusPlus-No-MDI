@@ -37,17 +37,21 @@
 #define DWT_Widget_h
 
 #include "Application.h"
+#include "Accessibility.h"
 #include "Atom.h"
 #include "forward.h"
 #include "Rectangle.h"
 #include "Point.h"
 #include "Message.h"
 #include "Dispatcher.h"
+#include "Events.h"
 #include <unordered_map>
 
 namespace dwt {
 
 using namespace std::placeholders;
+
+class AccessibilityProvider;
 
 template<typename T>
 T hwnd_cast(HWND hwnd);
@@ -142,6 +146,91 @@ public:
 	Rectangle getWindowRect() const;
 	Point getWindowSize() const;
 	Point getClientSize() const;
+
+	/// Return the effective DPI for this widget.
+	unsigned getDpi() const;
+
+	/// Scale values from 96 DPI to this widget's current DPI.
+	int scale(int value) const;
+	Point scale(const Point& value) const;
+	Rectangle scale(const Rectangle& value) const;
+
+	/// Return a system metric scaled for this widget's current DPI.
+	int getSystemMetric(int index) const;
+
+	/// Query a system parameter for this widget's current DPI.
+	bool getSystemParameters(UINT action, UINT param, void* value,
+		UINT flags = 0) const;
+
+	/// Adjust a client rectangle for this widget's current DPI and window styles.
+	bool adjustWindowRect(RECT& rect, bool hasMenu = false) const;
+
+	/** Enable a minimal UI Automation provider for custom HWND controls.
+	 * Do not use this for standard controls, which already have native providers.
+	 */
+	void enableAccessibility(long controlType = accessibility::Custom);
+	bool accessibilityEnabled() const;
+	void setAccessibleName(const tstring& value);
+	void setAccessibleHelpText(const tstring& value);
+	void setAccessibleControlType(long value);
+	void setAccessibleKeyboardFocusable(bool value);
+	void setAccessibleRangeValue(const accessibility::RangeValueProvider& value);
+	void setAccessibleScroll(const accessibility::ScrollProvider& value);
+	void setAccessibleItems(const accessibility::ItemProvider& value);
+	tstring getAccessibleName() const;
+	const tstring& getAccessibleHelpText() const;
+	long getAccessibleControlType() const;
+	bool getAccessibleKeyboardFocusable() const;
+	const accessibility::RangeValueProvider* getAccessibleRangeValue() const;
+	const accessibility::ScrollProvider* getAccessibleScroll() const;
+	const accessibility::ItemProvider* getAccessibleItems() const;
+	void raiseAccessibleEvent(long eventId);
+	void raiseAccessibleItemEvent(accessibility::ItemId item, long eventId);
+	void raiseAccessibleStructureChanged();
+
+	/** Register resource recreation work that must happen before layout after a
+	 * DPI transition. Use this for icons, image lists, and custom drawing caches.
+	 * Widgets using aspects::Fonts recreate their assigned fonts automatically.
+	 */
+	void onDpiResourcesChanged(std::function<void (const DpiResourceEvent&)> f);
+
+	/** Called after Windows reports a monitor DPI transition. Top-level windows
+	 * are moved to the suggested bounds before callbacks run.
+	 */
+	void onDpiChanged(std::function<void (const DpiChangedEvent&)> f) {
+		addCallback(Message(WM_DPICHANGED), [this, f](const MSG& msg, LRESULT&) -> bool {
+			f(DpiChangedEvent(previousDpi, msg));
+			return false;
+		});
+	}
+
+	void onThemeChanged(std::function<void ()> f) {
+		addCallback(Message(WM_THEMECHANGED),
+			[f](const MSG&, LRESULT&) -> bool {
+				f();
+				return false;
+			});
+	}
+
+	void onSystemColorsChanged(std::function<void ()> f) {
+		addCallback(Message(WM_SYSCOLORCHANGE),
+			[f](const MSG&, LRESULT&) -> bool {
+				f();
+				return false;
+			});
+	}
+
+	void onSystemSettingsChanged(
+		std::function<void (const SystemSettingsEvent&)> f)
+	{
+		addCallback(Message(WM_SETTINGCHANGE),
+			[f](const MSG& msg, LRESULT&) -> bool {
+				f(SystemSettingsEvent(msg));
+				return false;
+			});
+	}
+
+	static bool isHighContrast();
 
 	/** Return the desktop size of the primary monitor (at coords 0, 0). */
 	static Point getPrimaryDesktopSize();
@@ -251,6 +340,7 @@ protected:
 
 private:
 	friend class Application;
+	friend class AccessibilityProvider;
 	template<typename T> friend T hwnd_cast(HWND hwnd);
 
 	static Rectangle getDesktopSize(HMONITOR mon);
@@ -266,6 +356,19 @@ private:
 	Widget *parent;
 
 	Dispatcher& dispatcher;
+
+	unsigned dpi;
+	unsigned previousDpi;
+
+	AccessibilityProvider* accessibilityProvider;
+	tstring accessibleName;
+	tstring accessibleHelpText;
+	long accessibleControlType;
+	bool accessibleKeyboardFocusable;
+	std::unique_ptr<accessibility::RangeValueProvider> accessibleRangeValue;
+	std::unique_ptr<accessibility::ScrollProvider> accessibleScroll;
+	std::unique_ptr<accessibility::ItemProvider> accessibleItems;
+	std::vector<std::function<void (const DpiResourceEvent&)>> dpiResourceCallbacks;
 };
 
 inline LRESULT Widget::sendMessage( UINT msg, WPARAM wParam, LPARAM lParam) const {

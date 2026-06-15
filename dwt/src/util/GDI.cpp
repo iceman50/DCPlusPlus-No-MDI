@@ -35,6 +35,7 @@
 #include <dwt/resources/Icon.h>
 #include <dwt/resources/ImageList.h>
 #include <dwt/util/check.h>
+#include <dwt/util/win32/Dpi.h>
 
 namespace dwt { namespace util {
 
@@ -57,9 +58,8 @@ IconPtr merge(const ImageList& icons) {
 	return temp->getIcon(0);
 }
 
-const float& dpiFactor() {
-  static const float factor = static_cast<float>(UpdateCanvas(reinterpret_cast<HWND>(0)).getDeviceCaps(LOGPIXELSX)) / 96.0f;
-	return factor;
+float dpiFactor() {
+	return static_cast<float>(win32::getDpi(nullptr)) / static_cast<float>(win32::defaultDpi);
 }
 
 } }

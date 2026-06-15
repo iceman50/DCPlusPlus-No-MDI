@@ -39,6 +39,8 @@
 #include <dwt/widgets/SplitterContainer.h>
 #include <dwt/widgets/ToolTip.h>
 
+#include <algorithm>
+
 namespace dwt {
 
 void Splitter::create(const Seed& cs) {
@@ -52,6 +54,38 @@ void Splitter::create(const Seed& cs) {
 	onLeftMouseDown([this](const MouseEvent& mouseEvent) { return handleLButtonDown(mouseEvent); });
 	onMouseMove([this](const MouseEvent& mouseEvent) { return handleMouseMove(mouseEvent); });
 	onLeftMouseUp([this](const MouseEvent&) { return handleLButtonUp(); });
+
+	accessibility::RangeValueProvider range;
+	range.getValue = [this] { return getRelativePos() * 100.; };
+	range.setValue = [this](double value) {
+		moveTo(value / 100.);
+	};
+	range.minimum = 0;
+	range.maximum = 100;
+	range.smallChange = 1;
+	range.largeChange = 10;
+	setAccessibleRangeValue(range);
+	setAccessibleKeyboardFocusable(true);
+	setAccessibleName(horizontal ? _T("Horizontal splitter") : _T("Vertical splitter"));
+	onKeyDown([this](int key) {
+		switch(key) {
+		case VK_LEFT:
+		case VK_UP:
+			moveTo(pos - 0.01);
+			return true;
+		case VK_RIGHT:
+		case VK_DOWN:
+			moveTo(pos + 0.01);
+			return true;
+		case VK_HOME:
+			moveTo(0.);
+			return true;
+		case VK_END:
+			moveTo(1.);
+			return true;
+		}
+		return false;
+	});
 
 	auto tip = WidgetCreator<ToolTip>::create(this, ToolTip::Seed());
 	tip->setText(Texts::get(Texts::resize));
@@ -129,6 +163,12 @@ bool Splitter::handleMouseMove(const MouseEvent& mouseEvent) {
 	}
 
 	return true;
+}
+
+void Splitter::moveTo(double value) {
+	pos = std::max(0., std::min(1., value));
+	getParent()->checkSplitterPos(this);
+	getParent()->onMove();
 }
 
 };

@@ -46,6 +46,8 @@ public:
 	void initTaskbar(WindowPtr window_);
 
 	void setOverlayIcon(ContainerPtr tab, const IconPtr& icon, const tstring& description);
+	void setProgressState(TBPFLAG state);
+	void setProgressValue(ULONGLONG completed, ULONGLONG total);
 
 protected:
 	Taskbar();

@@ -34,8 +34,50 @@
 
 #include "WindowsHeaders.h"
 #include "Point.h"
+#include "Rectangle.h"
+#include "tstring.h"
 
 namespace dwt {
+
+struct DpiChangedEvent {
+	DpiChangedEvent(unsigned oldDpi_, const MSG& msg);
+
+	unsigned oldDpi;
+	unsigned newDpi;
+	Rectangle suggestedBounds;
+};
+
+struct DpiResourceEvent {
+	DpiResourceEvent(unsigned oldDpi_, unsigned newDpi_) :
+		oldDpi(oldDpi_), newDpi(newDpi_) { }
+
+	unsigned oldDpi;
+	unsigned newDpi;
+
+	int scale(int value) const {
+		return oldDpi ? ::MulDiv(value, static_cast<int>(newDpi),
+			static_cast<int>(oldDpi)) : value;
+	}
+
+	Point scale(const Point& value) const {
+		return Point(scale(static_cast<int>(value.x)),
+			scale(static_cast<int>(value.y)));
+	}
+};
+
+struct SystemSettingsEvent {
+	explicit SystemSettingsEvent(const MSG& msg);
+
+	UINT action;
+	tstring section;
+	bool highContrast;
+	bool clientAreaAnimation;
+
+	bool accessibilityChanged() const {
+		return section == _T("Accessibility") ||
+			action == SPI_SETHIGHCONTRAST;
+	}
+};
 
 struct SizedEvent {
 	SizedEvent(const MSG& msg);
@@ -94,6 +136,23 @@ struct MouseEvent {
 	Button ButtonPressed;
 };
 
+struct PointerEvent {
+	enum Type {
+		Unknown = 0,
+		Generic = 1,
+		Touch = 2,
+		Pen = 3,
+		Mouse = 4,
+		Touchpad = 5
+	};
+
+	PointerEvent(const MSG& msg);
+
+	unsigned id;
+	Type type;
+	ScreenCoordinate pos;
+	unsigned flags;
+};
 
 }
 
