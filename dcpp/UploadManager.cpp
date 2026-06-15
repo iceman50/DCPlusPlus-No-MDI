@@ -69,21 +69,40 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 
 	string sourceFile;
 	Transfer::Type type;
+	std::unique_ptr<MemoryInputStream> preparedList;
 
 	try {
 		if(aType == Transfer::names[Transfer::TYPE_FILE]) {
-			auto info = ShareManager::getInstance()->toRealWithSize(aFile);
-			sourceFile = move(info.first);
-			type = (aFile == Transfer::USER_LIST_NAME_BZ || aFile == Transfer::USER_LIST_NAME) ?
-				Transfer::TYPE_FULL_LIST : Transfer::TYPE_FILE;
-			miniSlot = type == Transfer::TYPE_FULL_LIST || info.second <= static_cast<int64_t>(SETTING(SET_MINISLOT_SIZE) * 1024);
+			if(aSource.getHubUrl().empty()) {
+				throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+			}
+
+			if(aFile == Transfer::USER_LIST_NAME_BZ || aFile == Transfer::USER_LIST_NAME) {
+				if(ShareManager::getInstance()->hasCustomShare(aSource.getHubUrl())) {
+					preparedList.reset(ShareManager::getInstance()->generateFileList(
+						aSource.getHubUrl(), aFile == Transfer::USER_LIST_NAME_BZ));
+					sourceFile = _("File list");
+				} else {
+					sourceFile = ShareManager::getInstance()->toRealWithSize(aFile).first;
+				}
+				type = Transfer::TYPE_FULL_LIST;
+				miniSlot = true;
+			} else {
+				auto info = ShareManager::getInstance()->toRealWithSize(aFile, aSource.getHubUrl());
+				sourceFile = move(info.first);
+				type = Transfer::TYPE_FILE;
+				miniSlot = info.second <= static_cast<int64_t>(SETTING(SET_MINISLOT_SIZE) * 1024);
+			}
 
 		} else if(aType == Transfer::names[Transfer::TYPE_TREE]) {
-			sourceFile = ShareManager::getInstance()->toReal(aFile);
+			sourceFile = ShareManager::getInstance()->toReal(aFile, aSource.getHubUrl());
 			type = Transfer::TYPE_TREE;
 			miniSlot = true;
 
 		} else if(aType == Transfer::names[Transfer::TYPE_PARTIAL_LIST]) {
+			if(aSource.getHubUrl().empty()) {
+				throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+			}
 			sourceFile = _("Partial file list");
 			type = Transfer::TYPE_PARTIAL_LIST;
 			miniSlot = true;
@@ -116,8 +135,12 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 
 				// Check for tth root identifier
 				string tFile = aFile;
-				if (tFile.compare(0, 4, "TTH/") == 0)
-					tFile = ShareManager::getInstance()->toVirtual(TTHValue(aFile.substr(4)));
+				if(tFile.compare(0, 4, "TTH/") == 0) {
+					try {
+						tFile = ShareManager::getInstance()->toVirtual(TTHValue(aFile.substr(4)), aSource.getHubUrl());
+					} catch(const ShareException&) {
+					}
+				}
 
 				aSource.maxedOut(addFailedUpload(aSource, tFile +
 					" (" +  Util::formatBytes(aStartPos) + " - " + Util::formatBytes(aStartPos + aBytes) + ")"));
@@ -138,33 +161,70 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	try {
 		switch(type) {
 		case Transfer::TYPE_FILE:
+			{
+				File* f = new File(sourceFile, File::READ, File::OPEN);
+
+				start = aStartPos;
+				int64_t sz = f->getSize();
+				size = (aBytes == -1) ? sz - start : aBytes;
+
+				if(start > sz || size < 0 || size > sz - start) {
+					aSource.fileNotAvail();
+					delete f;
+					return false;
+				}
+
+				f->setPos(start);
+				is = f;
+				if((start + size) < sz) {
+					is = new LimitedInputStream<true>(is, size);
+				}
+				break;
+			}
+
 		case Transfer::TYPE_FULL_LIST:
 			{
-				if(aFile == Transfer::USER_LIST_NAME) {
-					// Unpack before sending...
-					string bz2 = File(sourceFile, File::READ, File::OPEN).read();
-					string xml;
-					CryptoManager::getInstance()->decodeBZ2(reinterpret_cast<const uint8_t*>(bz2.data()), bz2.size(), xml);
-					is = new MemoryInputStream(xml);
-					start = 0;
-					size = xml.size();
-
-				} else {
-					File* f = new File(sourceFile, File::READ, File::OPEN);
-
+				if(preparedList) {
 					start = aStartPos;
-					int64_t sz = f->getSize();
-					size = (aBytes == -1) ? sz - start : aBytes;
-
-					if((start + size) > sz) {
+					auto fullSize = static_cast<int64_t>(preparedList->getSize());
+					size = (aBytes == -1) ? fullSize - start : aBytes;
+					if(start > fullSize || size < 0 || size > fullSize - start || !preparedList->setPos(static_cast<size_t>(start))) {
 						aSource.fileNotAvail();
-						delete f;
 						return false;
 					}
-
-					f->setPos(start);
-					is = f;
-					if((start + size) < sz) {
+					is = preparedList.release();
+					if(start + size < fullSize) {
+						is = new LimitedInputStream<true>(is, size);
+					}
+				} else if(aFile == Transfer::USER_LIST_NAME) {
+					string compressed = File(sourceFile, File::READ, File::OPEN).read();
+					string xml;
+					CryptoManager::getInstance()->decodeBZ2(reinterpret_cast<const uint8_t*>(compressed.data()), compressed.size(), xml);
+					auto list = std::make_unique<MemoryInputStream>(xml);
+					start = aStartPos;
+					auto fullSize = static_cast<int64_t>(list->getSize());
+					size = (aBytes == -1) ? fullSize - start : aBytes;
+					if(start > fullSize || size < 0 || size > fullSize - start || !list->setPos(static_cast<size_t>(start))) {
+						aSource.fileNotAvail();
+						return false;
+					}
+					is = list.release();
+					if(start + size < fullSize) {
+						is = new LimitedInputStream<true>(is, size);
+					}
+				} else {
+					auto file = new File(sourceFile, File::READ, File::OPEN);
+					start = aStartPos;
+					auto fullSize = file->getSize();
+					size = (aBytes == -1) ? fullSize - start : aBytes;
+					if(start > fullSize || size < 0 || size > fullSize - start) {
+						delete file;
+						aSource.fileNotAvail();
+						return false;
+					}
+					file->setPos(start);
+					is = file;
+					if(start + size < fullSize) {
 						is = new LimitedInputStream<true>(is, size);
 					}
 				}
@@ -173,7 +233,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 
 		case Transfer::TYPE_TREE:
 			{
-				MemoryInputStream* mis = ShareManager::getInstance()->getTree(aFile);
+				MemoryInputStream* mis = ShareManager::getInstance()->getTree(aFile, aSource.getHubUrl());
 				if(!mis) {
 					aSource.fileNotAvail();
 					return false;
@@ -188,7 +248,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 		case Transfer::TYPE_PARTIAL_LIST:
 			{
 				// Partial file list
-				MemoryInputStream* mis = ShareManager::getInstance()->generatePartialList(aFile, listRecursive);
+				MemoryInputStream* mis = ShareManager::getInstance()->generatePartialList(aFile, listRecursive, aSource.getHubUrl());
 				if(!mis) {
 					aSource.fileNotAvail();
 					return false;
@@ -572,9 +632,11 @@ void UploadManager::on(AdcCommand::GFI, UserConnection* aSource, const AdcComman
 	const string& type = c.getParam(0);
 	const string& ident = c.getParam(1);
 
-	if(type == Transfer::names[Transfer::TYPE_FILE]) {
+	if(aSource->getHubUrl().empty()) {
+		aSource->fileNotAvail();
+	} else if(type == Transfer::names[Transfer::TYPE_FILE]) {
 		try {
-			aSource->send(ShareManager::getInstance()->getFileInfo(ident));
+			aSource->send(ShareManager::getInstance()->getFileInfo(ident, aSource->getHubUrl()));
 		} catch(const ShareException&) {
 			aSource->fileNotAvail();
 		}

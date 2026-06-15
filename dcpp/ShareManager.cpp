@@ -25,6 +25,7 @@
 #include "Download.h"
 #include "File.h"
 #include "FilteredFile.h"
+#include "FavoriteManager.h"
 #include "LogManager.h"
 #include "HashBloom.h"
 #include "HashManager.h"
@@ -150,8 +151,69 @@ string ShareManager::toVirtual(const TTHValue& tth) const {
 	}
 }
 
+ShareManager::ShareAccess ShareManager::getShareAccess(const string& hubUrl) const {
+	ShareAccess access;
+	if(hubUrl.empty()) {
+		return access;
+	}
+
+	if(!FavoriteManager::getInstance()->getHubShareDirectories(hubUrl, access.directories)) {
+		access.unrestricted = true;
+	}
+	return access;
+}
+
+bool ShareManager::hasCustomShare(const string& hubUrl) const {
+	std::set<string> directories;
+	return !hubUrl.empty() && FavoriteManager::getInstance()->getHubShareDirectories(hubUrl, directories);
+}
+
+bool ShareManager::isVirtualAllowed(const string& virtualName, const ShareAccess& access) const {
+	if(access.unrestricted) {
+		return true;
+	}
+
+	bool found = false;
+	for(const auto& share: shares) {
+		if(Util::stricmp(share.second, virtualName) != 0) {
+			continue;
+		}
+
+		found = true;
+		auto allowed = find_if(access.directories.begin(), access.directories.end(), [&share](const string& path) {
+			return Util::stricmp(path, share.first) == 0;
+		});
+		if(allowed == access.directories.end()) {
+			return false;
+		}
+	}
+	return found;
+}
+
+bool ShareManager::isFileAllowed(const Directory::File& file, const ShareAccess& access) const {
+	auto directory = file.getParent();
+	while(directory->getParent()) {
+		directory = directory->getParent();
+	}
+	return isVirtualAllowed(directory->getName(), access);
+}
+
+string ShareManager::toVirtual(const TTHValue& tth, const string& hubUrl) const {
+	auto access = getShareAccess(hubUrl);
+	Lock l(cs);
+	auto i = tthIndex.find(tth);
+	if(i != tthIndex.end() && isFileAllowed(*i->second, access)) {
+		return i->second->getADCPath();
+	}
+	throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+}
+
 string ShareManager::toReal(const string& virtualFile) {
 	return toRealWithSize(virtualFile).first;
+}
+
+string ShareManager::toReal(const string& virtualFile, const string& hubUrl) {
+	return toRealWithSize(virtualFile, hubUrl).first;
 }
 
 pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile) {
@@ -166,6 +228,21 @@ pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile) {
 	}
 
 	auto f = findFile(virtualFile);
+	return make_pair(f.getRealPath(), f.getSize());
+}
+
+pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile, const string& hubUrl) {
+	auto access = getShareAccess(hubUrl);
+	Lock l(cs);
+
+	if(virtualFile == "MyList.DcLst" || virtualFile == Transfer::USER_LIST_NAME_BZ || virtualFile == Transfer::USER_LIST_NAME) {
+		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+	}
+
+	auto& f = findFile(virtualFile);
+	if(!isFileAllowed(f, access)) {
+		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+	}
 	return make_pair(f.getRealPath(), f.getSize());
 }
 
@@ -223,6 +300,16 @@ optional<TTHValue> ShareManager::getTTH(const string& virtualFile) const {
 	return findFile(virtualFile).tth;
 }
 
+optional<TTHValue> ShareManager::getTTH(const string& virtualFile, const string& hubUrl) const {
+	auto access = getShareAccess(hubUrl);
+	Lock l(cs);
+	auto& file = findFile(virtualFile);
+	if(!isFileAllowed(file, access)) {
+		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+	}
+	return file.tth;
+}
+
 MemoryInputStream* ShareManager::getTree(const string& virtualFile) const {
 	TigerTree tree;
 	if(virtualFile.compare(0, 4, "TTH/") == 0) {
@@ -236,6 +323,21 @@ MemoryInputStream* ShareManager::getTree(const string& virtualFile) const {
 		} catch(const Exception&) {
 			return nullptr;
 		}
+	}
+
+	ByteVector buf = tree.getLeafData();
+	return new MemoryInputStream(&buf[0], buf.size());
+}
+
+MemoryInputStream* ShareManager::getTree(const string& virtualFile, const string& hubUrl) const {
+	TigerTree tree;
+	try {
+		auto tth = getTTH(virtualFile, hubUrl);
+		if(!tth || !HashManager::getInstance()->getTree(*tth, tree)) {
+			return nullptr;
+		}
+	} catch(...) {
+		return nullptr;
 	}
 
 	ByteVector buf = tree.getLeafData();
@@ -276,6 +378,44 @@ AdcCommand ShareManager::getFileInfo(const string& aFile) {
 	Lock l(cs);
 	auto i = tthIndex.find(val);
 	if(i == tthIndex.end()) {
+		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+	}
+
+	const Directory::File& f = *i->second;
+	AdcCommand cmd(AdcCommand::CMD_RES);
+	cmd.addParam("FN", f.getADCPath());
+	cmd.addParam("SI", Util::toString(f.getSize()));
+	cmd.addParam("TR", f.tth->toBase32());
+	return cmd;
+}
+
+AdcCommand ShareManager::getFileInfo(const string& aFile, const string& hubUrl) {
+	auto access = getShareAccess(hubUrl);
+	if(aFile == Transfer::USER_LIST_NAME || aFile == Transfer::USER_LIST_NAME_BZ) {
+		if(access.unrestricted) {
+			return getFileInfo(aFile);
+		}
+
+		auto data = generateFileListData(hubUrl, aFile == Transfer::USER_LIST_NAME_BZ);
+		TigerTree tree(1024 * 1024 * 1024);
+		tree.update(data.data(), data.size());
+		tree.finalize();
+
+		AdcCommand cmd(AdcCommand::CMD_RES);
+		cmd.addParam("FN", aFile);
+		cmd.addParam("SI", Util::toString(static_cast<int64_t>(data.size())));
+		cmd.addParam("TR", tree.getRoot().toBase32());
+		return cmd;
+	}
+
+	if(aFile.compare(0, 4, "TTH/") != 0) {
+		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+	}
+
+	TTHValue val(aFile.substr(4));
+	Lock l(cs);
+	auto i = tthIndex.find(val);
+	if(i == tthIndex.end() || !isFileAllowed(*i->second, access)) {
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
 
@@ -593,9 +733,29 @@ int64_t ShareManager::getShareSize() const noexcept {
 	return tmp;
 }
 
+int64_t ShareManager::getShareSizeForHub(const string& hubUrl) const {
+	auto access = getShareAccess(hubUrl);
+	Lock l(cs);
+	int64_t size = 0;
+	for(const auto& item: tthIndex) {
+		if(isFileAllowed(*item.second, access)) {
+			size += item.second->getSize();
+		}
+	}
+	return size;
+}
+
 size_t ShareManager::getSharedFiles() const noexcept {
 	Lock l(cs);
 	return tthIndex.size();
+}
+
+size_t ShareManager::getSharedFiles(const string& hubUrl) const {
+	auto access = getShareAccess(hubUrl);
+	Lock l(cs);
+	return count_if(tthIndex.begin(), tthIndex.end(), [this, &access](const auto& item) {
+		return isFileAllowed(*item.second, access);
+	});
 }
 
 ShareManager::Directory::Ptr ShareManager::buildTree(const string& realPath, optional<std::reference_wrapper<const string>> dirName, const Directory::Ptr& parent) {
@@ -949,6 +1109,21 @@ void ShareManager::getBloom(ByteVector& v, size_t k, size_t m, size_t h) const {
 	bloom.copy_to(v);
 }
 
+void ShareManager::getBloom(ByteVector& v, size_t k, size_t m, size_t h, const string& hubUrl) const {
+	dcdebug("Creating hub share bloom filter, k=%u, m=%u, h=%u\n", k, m, h);
+	auto access = getShareAccess(hubUrl);
+	Lock l(cs);
+
+	HashBloom bloom;
+	bloom.reset(k, m, h);
+	for(const auto& item: tthIndex) {
+		if(isFileAllowed(*item.second, access)) {
+			bloom.add(item.first);
+		}
+	}
+	bloom.copy_to(v);
+}
+
 void ShareManager::generateXmlList() {
 	Lock l(cs);
 	if(forceXmlRefresh || (xmlDirty && (lastXmlUpdate + 15 * 60 * 1000 < GET_TICK() || lastXmlUpdate < lastFullUpdate))) {
@@ -1009,6 +1184,40 @@ void ShareManager::generateXmlList() {
 	}
 }
 
+string ShareManager::generateFileListData(const string& hubUrl, bool compressed) const {
+	auto access = getShareAccess(hubUrl);
+	string xml = SimpleXML::utf8Header;
+	xml += "<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() +
+		"\" Base=\"/\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n";
+
+	{
+		StringRefOutputStream output(xml);
+		string indent;
+		string tmp;
+		Lock l(cs);
+		for(const auto& item: directories) {
+			if(isVirtualAllowed(item.first, access)) {
+				item.second->toXml(output, indent, tmp, -1);
+			}
+		}
+	}
+	xml += "</FileListing>";
+
+	if(!compressed) {
+		return xml;
+	}
+
+	StringOutputStream output;
+	FilteredOutputStream<BZFilter, false> compressor(&output);
+	compressor.write(xml);
+	compressor.flush();
+	return output.getString();
+}
+
+MemoryInputStream* ShareManager::generateFileList(const string& hubUrl, bool compressed) const {
+	return new MemoryInputStream(generateFileListData(hubUrl, compressed));
+}
+
 MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool recurse) const {
 	if(dir[0] != '/' || dir[dir.size()-1] != '/')
 		return 0;
@@ -1061,6 +1270,70 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 			it2.second->toXml(sos, indent, tmp, recurse ? -1 : 0);
 		}
 		root->filesToXml(sos, indent, tmp);
+	}
+
+	xml += "</FileListing>";
+	return new MemoryInputStream(xml);
+}
+
+MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool recurse, const string& hubUrl) const {
+	if(dir.empty() || dir[0] != '/' || dir[dir.size() - 1] != '/') {
+		return nullptr;
+	}
+
+	auto access = getShareAccess(hubUrl);
+	string xml = SimpleXML::utf8Header;
+	string tmp;
+	xml += "<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() +
+		"\" Base=\"" + SimpleXML::escape(dir, tmp, true) + "\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n";
+	StringRefOutputStream output(xml);
+	string indent = "\t";
+
+	Lock l(cs);
+	if(dir == "/") {
+		for(const auto& item: directories) {
+			if(isVirtualAllowed(item.first, access)) {
+				tmp.clear();
+				item.second->toXml(output, indent, tmp, recurse ? -1 : 0);
+			}
+		}
+	} else {
+		string::size_type i = 1;
+		string::size_type j = 1;
+		Directory::Ptr root;
+		bool first = true;
+
+		while((i = dir.find('/', j)) != string::npos) {
+			if(i == j) {
+				++j;
+				continue;
+			}
+
+			if(first) {
+				first = false;
+				auto item = directories.find(dir.substr(j, i - j));
+				if(item == directories.end() || !isVirtualAllowed(item->first, access)) {
+					return nullptr;
+				}
+				root = item->second;
+			} else {
+				auto item = root->directories.find(dir.substr(j, i - j));
+				if(item == root->directories.end()) {
+					return nullptr;
+				}
+				root = item->second;
+			}
+			j = i + 1;
+		}
+
+		if(!root) {
+			return nullptr;
+		}
+
+		for(const auto& item: root->directories) {
+			item.second->toXml(output, indent, tmp, recurse ? -1 : 0);
+		}
+		root->filesToXml(output, indent, tmp);
 	}
 
 	xml += "</FileListing>";
@@ -1322,6 +1595,32 @@ SearchResultList ShareManager::search(SearchQuery&& query, size_t maxResults) no
 	return results;
 }
 
+SearchResultList ShareManager::search(SearchQuery&& query, size_t maxResults, const ShareAccess& access) noexcept {
+	SearchResultList results;
+	Lock l(cs);
+
+	if(query.root) {
+		auto item = tthIndex.find(*query.root);
+		if(item != tthIndex.end() && isFileAllowed(*item->second, access)) {
+			results.push_back(new SearchResult(SearchResult::TYPE_FILE, item->second->getSize(),
+				item->second->getParent()->getFullName() + item->second->getName(), *item->second->tth));
+			addHits(1);
+		}
+		return results;
+	}
+
+	for(const auto& dir: directories) {
+		if(!isVirtualAllowed(dir.first, access)) {
+			continue;
+		}
+		dir.second->search(results, query, maxResults);
+		if(results.size() >= maxResults) {
+			return results;
+		}
+	}
+	return results;
+}
+
 SearchResultList ShareManager::search(const StringList& adcParams, size_t maxResults) noexcept {
 #if DCPP_TIME_SEARCHES
 	auto start = GET_TICK();
@@ -1333,6 +1632,14 @@ SearchResultList ShareManager::search(const StringList& adcParams, size_t maxRes
 	return search(SearchQuery(adcParams), maxResults);
 }
 
+SearchResultList ShareManager::search(const StringList& adcParams, size_t maxResults, const string& hubUrl) noexcept {
+	try {
+		return search(SearchQuery(adcParams), maxResults, getShareAccess(hubUrl));
+	} catch(...) {
+		return SearchResultList();
+	}
+}
+
 SearchResultList ShareManager::search(const string& nmdcString, int searchType, int64_t size, int fileType, size_t maxResults) noexcept {
 #if DCPP_TIME_SEARCHES
 	auto start = GET_TICK();
@@ -1342,6 +1649,16 @@ SearchResultList ShareManager::search(const string& nmdcString, int searchType, 
 #endif
 
 	return search(SearchQuery(nmdcString, searchType, size, fileType), maxResults);
+}
+
+SearchResultList ShareManager::search(const string& nmdcString, int searchType, int64_t size, int fileType,
+	size_t maxResults, const string& hubUrl) noexcept
+{
+	try {
+		return search(SearchQuery(nmdcString, searchType, size, fileType), maxResults, getShareAccess(hubUrl));
+	} catch(...) {
+		return SearchResultList();
+	}
 }
 
 ShareManager::Directory::Ptr ShareManager::getDirectory(const string& realPath) noexcept {

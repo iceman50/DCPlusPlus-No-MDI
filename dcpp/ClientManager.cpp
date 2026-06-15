@@ -495,7 +495,7 @@ void ClientManager::on(NmdcSearch, Client* aClient, const string& aSeeker, int a
 		return;
 	}
 
-	auto l = ShareManager::getInstance()->search(aString, aSearchType, aSize, aFileType, isPassive ? 5 : 10);
+	auto l = ShareManager::getInstance()->search(aString, aSearchType, aSize, aFileType, isPassive ? 5 : 10, aClient->getHubUrl());
 //		dcdebug("Found %d items (%s)\n", l.size(), aString.c_str());
 	if(!l.empty()) {
 		if(isPassive) {

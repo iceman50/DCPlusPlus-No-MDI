@@ -33,10 +33,28 @@
 
 #include <algorithm>
 
+#include <dwt/util/win32/Version.h>
 #include <dwt/widgets/Header.h>
 #include <dwt/WidgetCreator.h>
 
 namespace dwt {
+
+namespace {
+
+// These are hidden by the Windows SDK when _WIN32_IE is 0x0600 even though
+// version 6 common controls support them on Vista and later.
+const int TVN_ITEMCHANGED_ = TVN_FIRST - 19;
+
+struct NMTVITEMCHANGE_ {
+	NMHDR hdr;
+	UINT uChanged;
+	HTREEITEM hItem;
+	UINT uStateNew;
+	UINT uStateOld;
+	LPARAM lParam;
+};
+
+}
 
 const TCHAR Tree::TreeView::windowClass[] = WC_TREEVIEW;
 
@@ -173,6 +191,57 @@ void Tree::setNormalImageList( ImageListPtr imageList ) {
 void Tree::setStateImageList( ImageListPtr imageList ) {
 	  itsStateImageList = imageList;
 	  TreeView_SetImageList(treeHandle(), imageList->getImageList(), TVSIL_STATE);
+}
+
+bool Tree::getChecked(HTREEITEM item) const {
+	return TreeView_GetCheckState(treeHandle(), item) != FALSE;
+}
+
+void Tree::setChecked(HTREEITEM item, bool checked) {
+	TreeView_SetCheckState(treeHandle(), item, checked ? TRUE : FALSE);
+}
+
+void Tree::onCheckStateChanged(const std::function<void(HTREEITEM, bool)>& f) {
+	if(util::win32::ensureVersion(util::win32::VISTA)) {
+		addCallback(Message(WM_NOTIFY, TVN_ITEMCHANGED_), [this, f](const MSG& msg, LRESULT& ret) {
+			const auto change = reinterpret_cast<const NMTVITEMCHANGE_*>(msg.lParam);
+			if((change->uChanged & TVIF_STATE) != 0 &&
+				((change->uStateOld ^ change->uStateNew) & TVIS_STATEIMAGEMASK) != 0) {
+				f(change->hItem, getChecked(change->hItem));
+			}
+			ret = 0;
+			return false;
+		});
+		return;
+	}
+
+	auto notifyAfterChange = [this, f](HTREEITEM item) {
+		if(item) {
+			callAsync([this, f, item] {
+				f(item, getChecked(item));
+			});
+		}
+	};
+
+	addCallback(Message(WM_NOTIFY, NM_CLICK), [this, notifyAfterChange](const MSG&, LRESULT& ret) {
+		TVHITTESTINFO hit = { { GET_X_LPARAM(::GetMessagePos()), GET_Y_LPARAM(::GetMessagePos()) } };
+		::ScreenToClient(treeHandle(), &hit.pt);
+		TreeView_HitTest(treeHandle(), &hit);
+		if((hit.flags & TVHT_ONITEMSTATEICON) != 0) {
+			notifyAfterChange(hit.hItem);
+		}
+		ret = 0;
+		return false;
+	});
+
+	addCallback(Message(WM_NOTIFY, TVN_KEYDOWN), [this, notifyAfterChange](const MSG& msg, LRESULT& ret) {
+		const auto key = reinterpret_cast<const NMTVKEYDOWN*>(msg.lParam);
+		if(key->wVKey == VK_SPACE) {
+			notifyAfterChange(getSelected());
+		}
+		ret = 0;
+		return false;
+	});
 }
 
 LPARAM Tree::getDataImpl(HTREEITEM item) {

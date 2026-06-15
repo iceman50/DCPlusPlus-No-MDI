@@ -32,25 +32,23 @@
 namespace dwt { namespace util { namespace win32 {
 
 enum Version {
-	XP,
-	VISTA,
 	SEVEN,
-  EIGHT,
-  EIGHT_ONE,
-  TEN,
-  TEN_1909,
-  TEN_2004,
-  TEN_20H2,
-  TEN_21H1,
-  TEN_21H2,
-  TEN_22H2,
-  ELEVEN,
-  ELEVEN_21H2,
-  ELEVEN_22H2,
-  ELEVEN_23H2,
-  ELEVEN_24H2,
-  ELEVEN_25H2,
-  ELEVEN_26H2
+	EIGHT,
+	EIGHT_ONE,
+	TEN,
+	TEN_1909,
+	TEN_2004,
+	TEN_20H2,
+	TEN_21H1,
+	TEN_21H2,
+	TEN_22H2,
+	ELEVEN,
+	ELEVEN_21H2,
+	ELEVEN_22H2,
+	ELEVEN_23H2,
+	ELEVEN_24H2,
+	ELEVEN_25H2,
+	ELEVEN_26H2
 };
 
 bool ensureVersion(Version version);

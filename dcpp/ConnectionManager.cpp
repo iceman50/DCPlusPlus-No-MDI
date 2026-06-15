@@ -65,7 +65,7 @@ string ConnectionManager::makeToken() const {
 
 void ConnectionManager::addToken(const string& token, const OnlineUser& user, ConnectionType type) {
 	Lock l(cs);
-	tokens[token] = make_pair(user.getUser()->getCID(), type);
+	tokens[token] = TokenInfo { user.getUser()->getCID(), type, user.getClient().getHubUrl() };
 }
 
 void ConnectionManager::listen() {
@@ -243,7 +243,7 @@ void ConnectionManager::on(TimerManagerListener::Minute, uint64_t aTick) noexcep
 
 	// remove tokens associated with offline users.
 	for(auto i = tokens.begin(); i != tokens.end();) {
-		auto user = ClientManager::getInstance()->findUser(i->second.first);
+		auto user = ClientManager::getInstance()->findUser(i->second.cid);
 		if(user && user->isOnline()) {
 			++i;
 		} else {
@@ -401,8 +401,11 @@ void ConnectionManager::adcConnect(const OnlineUser& aUser, const string& aPort,
 	{
 		Lock l(cs);
 		auto t = tokens.find(aToken);
-		if(t != tokens.end() && t->second.second == CONNECTION_TYPE_PM) {
-			uc->setFlag(UserConnection::FLAG_PM);
+		if(t != tokens.end()) {
+			if(t->second.type == CONNECTION_TYPE_PM) {
+				uc->setFlag(UserConnection::FLAG_PM);
+			}
+			tokens.erase(t);
 		}
 	}
 
@@ -717,13 +720,6 @@ void ConnectionManager::on(AdcCommand::INF, UserConnection* aSource, const AdcCo
 		}
 	}
 
-	// without a valid KeyPrint this degrades into normal turst check
-	if(!checkKeyprint(aSource)) {
-		QueueManager::getInstance()->removeSource(aSource->getUser(), QueueItem::Source::FLAG_UNTRUSTED);
-		putConnection(aSource);
-		return;
-	}
-
 	auto type = CONNECTION_TYPE_LAST;
 
 	if(aSource->isSet(UserConnection::FLAG_INCOMING)) {
@@ -742,7 +738,16 @@ void ConnectionManager::on(AdcCommand::INF, UserConnection* aSource, const AdcCo
 			return;
 		}
 		type = tokCheck.second;
+	}
 
+	// without a valid KeyPrint this degrades into normal trust check
+	if(!checkKeyprint(aSource)) {
+		QueueManager::getInstance()->removeSource(aSource->getUser(), QueueItem::Source::FLAG_UNTRUSTED);
+		putConnection(aSource);
+		return;
+	}
+
+	if(aSource->isSet(UserConnection::FLAG_INCOMING)) {
 		// set the PM flag now in order to send a INF with PM1
 		if(type == CONNECTION_TYPE_PM || cmd.hasFlag("PM", 0)) {
 			if(!aSource->isSet(UserConnection::FLAG_PM)) {
@@ -792,12 +797,15 @@ bool ConnectionManager::checkKeyprint(UserConnection* aSource) {
 	return aSource->verifyKeyprint(kp, SETTING(ALLOW_UNTRUSTED_CLIENTS));
 }
 
-pair<bool, ConnectionType> ConnectionManager::checkToken(const UserConnection* uc) const {
+pair<bool, ConnectionType> ConnectionManager::checkToken(UserConnection* uc) {
 	Lock l(cs);
 
 	auto t = tokens.find(uc->getToken());
-	if(t != tokens.end() && t->second.first == uc->getUser()->getCID()) {
-		return make_pair(true, t->second.second);
+	if(t != tokens.end() && t->second.cid == uc->getUser()->getCID()) {
+		auto type = t->second.type;
+		uc->setHubUrl(t->second.hubUrl);
+		tokens.erase(t);
+		return make_pair(true, type);
 	}
 
 	return make_pair(false, CONNECTION_TYPE_LAST);
@@ -900,6 +908,15 @@ void ConnectionManager::disconnect(const UserPtr& user, ConnectionType type) {
 		{
 			uc->disconnect(true);
 			break;
+		}
+	}
+}
+
+void ConnectionManager::disconnectUploads(const string& hubUrl) {
+	Lock l(cs);
+	for(auto connection: userConnections) {
+		if(connection->isSet(UserConnection::FLAG_UPLOAD) && Util::stricmp(connection->getHubUrl(), hubUrl) == 0) {
+			connection->disconnect(true);
 		}
 	}
 }

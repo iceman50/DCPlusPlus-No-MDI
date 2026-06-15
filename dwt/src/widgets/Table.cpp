@@ -36,7 +36,6 @@
 #include <dwt/CanvasClasses.h>
 #include <dwt/util/check.h>
 #include <dwt/util/StringUtils.h>
-#include <dwt/util/win32/Version.h>
 #include <dwt/DWTException.h>
 #include <dwt/dwt_vsstyle.h>
 #include <dwt/dwt_vssym32.h>
@@ -47,35 +46,8 @@ namespace dwt {
 
 const TCHAR Table::windowClass[] = WC_LISTVIEW;
 
-/* the following dance adds Vista members to LVGROUP (notably iTitleImage to have group icons)
-without requiring a global switch of WINVER / _WIN32_WINNT / etc to Vista values. */
-typedef LVGROUP legacyLVGROUP;
-#if(_WIN32_WINNT < 0x600)
-struct LVGROUP_ : LVGROUP {
-	LPWSTR  pszSubtitle;
-    UINT    cchSubtitle;
-    LPWSTR  pszTask;
-    UINT    cchTask;
-    LPWSTR  pszDescriptionTop;
-    UINT    cchDescriptionTop;
-    LPWSTR  pszDescriptionBottom;
-    UINT    cchDescriptionBottom;
-    int     iTitleImage;
-    int     iExtendedImage;
-    int     iFirstItem;
-    UINT    cItems;
-    LPWSTR  pszSubsetTitle;
-    UINT    cchSubsetTitle;
-	LVGROUP_(const LVGROUP& lvg) : LVGROUP(lvg) { }
-};
-#define LVGROUP LVGROUP_
-#define LVGF_TITLEIMAGE 0x00001000
-#define ListView_SetGroupHeaderImageList(hwnd, himl) \
-    (HIMAGELIST)SNDMSG((hwnd), LVM_SETIMAGELIST, (WPARAM)LVSIL_GROUPHEADER, (LPARAM)(HIMAGELIST)(himl))
-#endif
-
-namespace { legacyLVGROUP makeLVGROUP() {
-	legacyLVGROUP lvg = { static_cast<UINT>(util::win32::ensureVersion(util::win32::VISTA) ? sizeof(LVGROUP) : sizeof(legacyLVGROUP)) };
+namespace { LVGROUP makeLVGROUP() {
+	LVGROUP lvg = { sizeof(LVGROUP) };
 	return lvg;
 } }
 
@@ -344,7 +316,6 @@ std::vector<int> Table::getColumnWidthsImpl() const {
 void Table::setGroups(const std::vector<tstring>& groups) {
 	bool wasGrouped = grouped;
 
-	// must be called every time on XP
 	grouped = ListView_EnableGroupView(handle(), TRUE) >= 0;
 	if(!grouped)
 		return;
@@ -376,12 +347,10 @@ void Table::setGroups(const std::vector<tstring>& groups) {
 }
 
 bool Table::getGroupRect(unsigned groupId, Rectangle& rect) const {
-	if(util::win32::ensureVersion(util::win32::VISTA)) {
-		::RECT rc;
-		if(ListView_GetGroupRect(handle(), groupId, LVGGR_HEADER, &rc)) {
-			rect = Rectangle(rc);
-			return true;
-		}
+	::RECT rc;
+	if(ListView_GetGroupRect(handle(), groupId, LVGGR_HEADER, &rc)) {
+		rect = Rectangle(rc);
+		return true;
 	}
 	return false;
 }
@@ -527,10 +496,8 @@ void Table::setStateImageList( ImageListPtr imageList ) {
 }
 
 void Table::setGroupImageList(ImageListPtr imageList) {
-	if(util::win32::ensureVersion(util::win32::VISTA)) {
-		groupImageList = imageList;
-		ListView_SetGroupHeaderImageList(handle(), groupImageList->handle());
-	}
+	groupImageList = imageList;
+	ListView_SetGroupHeaderImageList(handle(), groupImageList->handle());
 }
 
 void Table::setView( int view ) {

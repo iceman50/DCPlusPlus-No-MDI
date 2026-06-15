@@ -64,8 +64,6 @@ bool ensureVersion(Version version) {
 	};
 
 	static const VersionInfo requirements[] = {
-		/* XP */           { 5, 1, 0 },
-		/* VISTA */        { 6, 0, 0 },
 		/* SEVEN */        { 6, 1, 0 },
 		/* EIGHT */        { 6, 2, 0 },
 		/* EIGHT_ONE */    { 6, 3, 0 },

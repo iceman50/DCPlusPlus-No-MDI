@@ -75,35 +75,49 @@ public:
 	void renameDirectory(const string& realPath, const string& virtualName);
 
 	string toVirtual(const TTHValue& tth) const;
+	string toVirtual(const TTHValue& tth, const string& hubUrl) const;
 	optional<TTHValue> getTTHFromReal(const string& realPath) noexcept;
 	string toReal(const string& virtualFile);
+	string toReal(const string& virtualFile, const string& hubUrl);
 	/** @return Actual file path & size. Returns 0 for file lists. */
 	pair<string, int64_t> toRealWithSize(const string& virtualFile);
+	pair<string, int64_t> toRealWithSize(const string& virtualFile, const string& hubUrl);
 	StringList getRealPaths(const string& virtualPath);
 	optional<TTHValue> getTTH(const string& virtualFile) const;
+	optional<TTHValue> getTTH(const string& virtualFile, const string& hubUrl) const;
 
 	void refresh(bool dirs = false, bool aUpdate = true, bool block = false, function<void (float)> progressF = nullptr) noexcept;
 	void setDirty() { xmlDirty = true; }
 
 	SearchResultList search(const StringList& adcParams, size_t maxResults) noexcept;
+	SearchResultList search(const StringList& adcParams, size_t maxResults, const string& hubUrl) noexcept;
 	SearchResultList search(const string& nmdcString, int searchType, int64_t size, int fileType, size_t maxResults) noexcept;
+	SearchResultList search(const string& nmdcString, int searchType, int64_t size, int fileType, size_t maxResults, const string& hubUrl) noexcept;
 
 	StringPairList getDirectories() const noexcept;
 
 	MemoryInputStream* generatePartialList(const string& dir, bool recurse) const;
+	MemoryInputStream* generatePartialList(const string& dir, bool recurse, const string& hubUrl) const;
 	MemoryInputStream* getTree(const string& virtualFile) const;
+	MemoryInputStream* getTree(const string& virtualFile, const string& hubUrl) const;
+	MemoryInputStream* generateFileList(const string& hubUrl, bool compressed) const;
+	bool hasCustomShare(const string& hubUrl) const;
 
 	AdcCommand getFileInfo(const string& aFile);
+	AdcCommand getFileInfo(const string& aFile, const string& hubUrl);
 
 	int64_t getShareSize() const noexcept;
+	int64_t getShareSizeForHub(const string& hubUrl) const;
 	int64_t getShareSize(const string& realPath) const noexcept;
 
 	size_t getSharedFiles() const noexcept;
+	size_t getSharedFiles(const string& hubUrl) const;
 
 	string getShareSizeString() const { return std::to_string(getShareSize()); }
 	string getShareSizeString(const string& aDir) const { return std::to_string(getShareSize(aDir)); }
 
 	void getBloom(ByteVector& v, size_t k, size_t m, size_t h) const;
+	void getBloom(ByteVector& v, size_t k, size_t m, size_t h, const string& hubUrl) const;
 
 	SearchManager::TypeModes getType(const string& fileName) const noexcept;
 
@@ -131,6 +145,11 @@ public:
 
 private:
 	struct SearchQuery;
+
+	struct ShareAccess {
+		bool unrestricted = false;
+		std::set<string> directories;
+	};
 
 	class Directory : public FastAlloc<Directory>, public intrusive_ptr_base<Directory> {
 	public:
@@ -281,6 +300,10 @@ private:
 	std::list<StringMatch> cachedFilterSkiplistPaths;
 
 	const Directory::File& findFile(const string& virtualFile) const;
+	ShareAccess getShareAccess(const string& hubUrl) const;
+	bool isVirtualAllowed(const string& virtualName, const ShareAccess& access) const;
+	bool isFileAllowed(const Directory::File& file, const ShareAccess& access) const;
+	string generateFileListData(const string& hubUrl, bool compressed) const;
 
 	Directory::Ptr buildTree(const string& realPath, optional<std::reference_wrapper<const string>> dirName = nullopt, const Directory::Ptr& parent = nullptr);
 	bool checkHidden(const string& realPath) const;
@@ -304,6 +327,7 @@ private:
 	string findRealRoot(const string& virtualRoot, const string& virtualLeaf) const;
 
 	SearchResultList search(SearchQuery&& query, size_t maxResults) noexcept;
+	SearchResultList search(SearchQuery&& query, size_t maxResults, const ShareAccess& access) noexcept;
 
 	/** Get the directory pointer corresponding to a given real path (on disk). Note that only
 	directories are considered here but not the file's base name. */

@@ -99,6 +99,13 @@ public:
 	}
 
 	size_t getSize() { return size; }
+	bool setPos(size_t newPos) {
+		if(newPos > size) {
+			return false;
+		}
+		pos = newPos;
+		return true;
+	}
 
 private:
 	size_t pos;

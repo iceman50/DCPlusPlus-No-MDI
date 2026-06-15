@@ -829,7 +829,7 @@ void NmdcHub::myInfo(bool alwaysSend) {
 	string myInfoB = tmp4 + Util::toString(SETTING(SLOTS));
 	string myInfoC = uMin +
 		">$ $" + uploadSpeed + "\x01$" + fromUtf8(escape(get(Email))) + '$';
-	string myInfoD = ShareManager::getInstance()->getShareSizeString() + "$|";
+	string myInfoD = std::to_string(ShareManager::getInstance()->getShareSizeForHub(getHubUrl())) + "$|";
 	// we always send A and C; however, B (slots) and D (share size) can frequently change so we delay them if needed
  	if(lastMyInfoA != myInfoA || lastMyInfoC != myInfoC ||
 		alwaysSend || ((lastMyInfoB != myInfoB || lastMyInfoD != myInfoD) && lastUpdate + 15*60*1000 < GET_TICK())) {

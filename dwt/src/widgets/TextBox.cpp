@@ -35,7 +35,6 @@
 #include <dwt/Texts.h>
 #include <dwt/WidgetCreator.h>
 #include <dwt/util/check.h>
-#include <dwt/util/win32/Version.h>
 
 namespace dwt {
 
@@ -210,9 +209,7 @@ void TextBox::setText(const tstring& txt) {
 }
 
 void TextBox::setCue(const tstring& text) {
-	if(util::win32::ensureVersion(util::win32::VISTA)) {
-		Edit_SetCueBannerTextFocused(handle(), text.c_str(), TRUE);
-	}
+	Edit_SetCueBannerTextFocused(handle(), text.c_str(), TRUE);
 }
 
 tstring TextBox::getLine(int line) {

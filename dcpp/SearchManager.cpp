@@ -430,7 +430,8 @@ void SearchManager::respond(const AdcCommand& cmd, const OnlineUser& user) {
 	if(user.getUser() == ClientManager::getInstance()->getMe())
 		return;
 
-	auto results = ShareManager::getInstance()->search(cmd.getParameters(), user.getIdentity().isUdpActive() ? 10 : 5);
+	auto results = ShareManager::getInstance()->search(cmd.getParameters(), user.getIdentity().isUdpActive() ? 10 : 5,
+		user.getClient().getHubUrl());
 	if(results.empty())
 		return;
 

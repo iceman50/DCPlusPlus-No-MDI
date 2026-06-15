@@ -553,7 +553,7 @@ void AdcHub::handle(AdcCommand::GET, AdcCommand& c) noexcept {
 			return;
 		}
 
-		size_t n = ShareManager::getInstance()->getSharedFiles();
+		size_t n = ShareManager::getInstance()->getSharedFiles(getHubUrl());
 
 		// Ideal size for m is n * k / ln(2), but we allow some slack
 		// When h >= 32, m can't go above 2^h anyway since it's stored in a size_t.
@@ -564,7 +564,7 @@ void AdcHub::handle(AdcCommand::GET, AdcCommand& c) noexcept {
 		}
 
 		if (m > 0) {
-			ShareManager::getInstance()->getBloom(v, k, m, h);
+			ShareManager::getInstance()->getBloom(v, k, m, h, getHubUrl());
 		}
 		AdcCommand cmd(AdcCommand::CMD_SND, AdcCommand::TYPE_HUB);
 		cmd.addParam(c.getParam(0));
@@ -992,8 +992,8 @@ void AdcHub::infoImpl() {
 	addParam(lastInfoMap, c, "DE", get(Description));
 	addParam(lastInfoMap, c, "SL", Util::toString(SETTING(SLOTS)));
 	addParam(lastInfoMap, c, "FS", Util::toString(UploadManager::getInstance()->getFreeSlots()));
-	addParam(lastInfoMap, c, "SS", ShareManager::getInstance()->getShareSizeString());
-	addParam(lastInfoMap, c, "SF", std::to_string(ShareManager::getInstance()->getSharedFiles()));
+	addParam(lastInfoMap, c, "SS", std::to_string(ShareManager::getInstance()->getShareSizeForHub(getHubUrl())));
+	addParam(lastInfoMap, c, "SF", std::to_string(ShareManager::getInstance()->getSharedFiles(getHubUrl())));
 	addParam(lastInfoMap, c, "EM", get(Email));
 	addParam(lastInfoMap, c, "HN", std::to_string(counts[COUNT_NORMAL]));
 	addParam(lastInfoMap, c, "HR", std::to_string(counts[COUNT_REGISTERED]));

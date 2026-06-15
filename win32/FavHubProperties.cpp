@@ -20,6 +20,9 @@
 
 #include <dcpp/FavoriteManager.h>
 #include <dcpp/HubEntry.h>
+#include <dcpp/ClientManager.h>
+#include <dcpp/ConnectionManager.h>
+#include <dcpp/ShareManager.h>
 #include <dcpp/version.h>
 
 #include <dwt/widgets/Grid.h>
@@ -38,7 +41,7 @@ using dwt::Label;
 std::map<UINT, std::wstring> FavHubProperties::encodings;
 
 FavHubProperties::FavHubProperties(dwt::Widget* parent, FavoriteHubEntry *_entry) :
-GridDialog(parent, 400, DS_CONTEXTHELP),
+GridDialog(parent, 620, DS_CONTEXTHELP),
 name(0),
 address(0),
 hubDescription(0),
@@ -53,6 +56,9 @@ showJoins(0),
 favShowJoins(0),
 logMainChat(0),
 groups(0),
+defaultShare(0),
+shareFolders(0),
+updatingShareFolders(false),
 entry(_entry)
 {
 	onInitDialog([this] { return handleInitDialog(); });
@@ -65,7 +71,7 @@ FavHubProperties::~FavHubProperties() {
 bool FavHubProperties::handleInitDialog() {
 	setHelpId(IDH_FAVORITE_HUB);
 
-	grid = addChild(Grid::Seed(5, 2));
+	grid = addChild(Grid::Seed(6, 2));
 	grid->column(0).mode = GridInfo::FILL;
 	grid->column(1).mode = GridInfo::FILL;
 
@@ -190,6 +196,59 @@ bool FavHubProperties::handleInitDialog() {
 		manage->onClicked([this] { handleGroups(); });
 	}
 
+	{
+		auto group = grid->addChild(GroupBox::Seed(T_("Shared folders")));
+		grid->setWidget(group, 4, 0, 1, 2);
+
+		auto cur = group->addChild(Grid::Seed(2, 1));
+		cur->column(0).mode = GridInfo::FILL;
+		cur->row(1).mode = GridInfo::STATIC;
+		cur->row(1).size = 180;
+		cur->row(1).align = GridInfo::STRETCH;
+
+		defaultShare = cur->addChild(CheckBox::Seed(T_("Use the default share on this hub")));
+		defaultShare->setChecked(!entry->hasShareProfile());
+
+		dwt::Tree::Seed seed;
+		seed.style |= TVS_CHECKBOXES | TVS_HASBUTTONS | TVS_LINESATROOT;
+		shareFolders = cur->addChild(seed);
+		shareFolders->addColumn(T_("Virtual folder"), 120);
+		shareFolders->addColumn(T_("Shared directories"), 240);
+		shareFolders->addColumn(T_("Hashed size"), 100, dwt::Column::RIGHT);
+
+		fillShareFolders();
+		defaultShare->onClicked([this] {
+			if(defaultShare->getChecked()) {
+				updatingShareFolders = true;
+				selectedShareDirectories.clear();
+				for(const auto& item: shareFolderPaths) {
+					shareFolders->setChecked(item.first, true);
+					selectedShareDirectories.insert(item.second.begin(), item.second.end());
+				}
+				updatingShareFolders = false;
+			}
+		});
+		shareFolders->onCheckStateChanged([this](HTREEITEM item, bool checked) {
+			if(updatingShareFolders) {
+				return;
+			}
+
+			auto paths = shareFolderPaths.find(item);
+			if(paths == shareFolderPaths.end()) {
+				return;
+			}
+
+			if(checked) {
+				selectedShareDirectories.insert(paths->second.begin(), paths->second.end());
+			} else {
+				for(const auto& path: paths->second) {
+					selectedShareDirectories.erase(path);
+				}
+			}
+			defaultShare->setChecked(false);
+		});
+	}
+
 	WinUtil::addDlgButtons(grid,
 		[this] { handleOKClicked(); },
 		[this] { endDialog(IDCANCEL); });
@@ -205,6 +264,10 @@ bool FavHubProperties::handleInitDialog() {
 }
 
 void FavHubProperties::handleOKClicked() {
+	const auto oldServer = entry->getServer();
+	const auto oldShareProfile = entry->hasShareProfile();
+	const auto oldShareDirectories = entry->getShareDirectories();
+
 	tstring addressText = address->getText();
 	if(addressText.empty()) {
 		dwt::MessageBox(this).show(T_("Hub address cannot be empty"), _T(APPNAME) _T(" ") _T(VERSIONSTRING), dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONEXCLAMATION);
@@ -228,8 +291,69 @@ void FavHubProperties::handleOKClicked() {
 	entry->get(HubSettings::FavShowJoins) = to3bool(favShowJoins->getSelected());
 	entry->get(HubSettings::LogMainChat) = to3bool(logMainChat->getSelected());
 	entry->setGroup(Text::fromT(groups->getText()));
+
+	if(defaultShare->getChecked()) {
+		entry->clearShareProfile();
+	} else {
+		entry->setShareDirectories(selectedShareDirectories);
+	}
 	FavoriteManager::getInstance()->save();
+	if(oldShareProfile != entry->hasShareProfile() || oldShareDirectories != entry->getShareDirectories()) {
+		ConnectionManager::getInstance()->disconnectUploads(oldServer);
+	}
+	ClientManager::getInstance()->infoUpdated();
 	endDialog(IDOK);
+}
+
+void FavHubProperties::fillShareFolders() {
+	updatingShareFolders = true;
+	selectedShareDirectories.clear();
+
+	std::map<string, std::set<string>> grouped;
+	for(const auto& item: ShareManager::getInstance()->getDirectories()) {
+		grouped[item.first].insert(item.second);
+	}
+
+	for(const auto& group: grouped) {
+		tstring paths;
+		int64_t size = 0;
+		bool checked = !entry->hasShareProfile();
+
+		if(entry->hasShareProfile()) {
+			checked = true;
+			for(const auto& path: group.second) {
+				auto found = find_if(entry->getShareDirectories().begin(), entry->getShareDirectories().end(), [&path](const string& allowed) {
+					return Util::stricmp(path, allowed) == 0;
+				});
+				if(found == entry->getShareDirectories().end()) {
+					checked = false;
+					break;
+				}
+			}
+		}
+
+		for(const auto& path: group.second) {
+			if(!paths.empty()) {
+				paths += _T("; ");
+			}
+			paths += Text::toT(path);
+			auto pathSize = ShareManager::getInstance()->getShareSize(path);
+			if(pathSize > 0) {
+				size += pathSize;
+			}
+		}
+
+		auto item = shareFolders->insert(Text::toT(group.first), nullptr);
+		shareFolders->setText(item, 1, paths);
+		shareFolders->setText(item, 2, Text::toT(Util::formatBytes(size)));
+		shareFolderPaths.emplace(item, group.second);
+		shareFolders->setChecked(item, checked);
+		if(checked) {
+			selectedShareDirectories.insert(group.second.begin(), group.second.end());
+		}
+	}
+
+	updatingShareFolders = false;
 }
 
 void FavHubProperties::handleGroups() {

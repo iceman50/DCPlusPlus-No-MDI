@@ -207,6 +207,9 @@ public:
 	  * for the item states.
 	  */
 	void setStateImageList( ImageListPtr stateImageList );
+	bool getChecked(HTREEITEM item) const;
+	void setChecked(HTREEITEM item, bool checked);
+	void onCheckStateChanged(const std::function<void(HTREEITEM, bool)>& f);
 	/// Returns the text of the current selected node
 	/** Returns the text of the current selected node in the tree view.
 	  */

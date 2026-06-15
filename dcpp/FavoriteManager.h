@@ -91,6 +91,7 @@ public:
 	void removeFavorite(FavoriteHubEntry* entry);
 	bool isFavoriteHub(const std::string& aUrl);
 	FavoriteHubEntryPtr getFavoriteHubEntry(const string& aServer) const;
+	bool getHubShareDirectories(const string& aServer, std::set<string>& directories) const;
 
 	void mergeHubSettings(const FavoriteHubEntry& entry, HubSettings& settings) const;
 

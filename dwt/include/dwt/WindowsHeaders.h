@@ -51,13 +51,14 @@
 #define WINVER 0x601
 #endif
 
+// Expose the current common-control declarations while retaining Windows 7 as the OS baseline.
 #ifndef _WIN32_IE
-#define _WIN32_IE 0x0600
+#define _WIN32_IE 0x0A00
 #endif
 // TEMP TEMP TEMP
 
-#if _WIN32_WINNT < 0x502 || WINVER < 0x502
-#error _WIN32_WINNT / WINVER must require Windows XP SP2 (0x502)
+#if _WIN32_WINNT < 0x601 || WINVER < 0x601
+#error _WIN32_WINNT / WINVER must require Windows 7 (0x601)
 #endif
 
 #if _WIN32_IE < 0x600

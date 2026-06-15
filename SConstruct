@@ -238,7 +238,7 @@ if dev.is_win32():
         CPPDEFINES=[
             "_WIN32_WINNT=0x601",  # Windows 7
             "WINVER=0x601",  # Windows 7
-            "_WIN32_IE=0x600",  # Common Controls 6
+            "_WIN32_IE=0x0A00",  # expose current common-control declarations
             # other defs that influence Windows headers
             "NOMINMAX",
             "STRICT",

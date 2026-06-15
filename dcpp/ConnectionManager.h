@@ -74,20 +74,25 @@ public:
 
 	StringPair remove(const string& aNick) {
 		Lock l(cs);
-		auto i = expectedConnections.find(aNick);
-
-		if(i == expectedConnections.end())
+		auto range = expectedConnections.equal_range(aNick);
+		if(range.first == range.second)
 			return make_pair(Util::emptyString, Util::emptyString);
 
-		StringPair tmp = i->second;
-		expectedConnections.erase(i);
+		auto next = range.first;
+		++next;
+		if(next != range.second) {
+			expectedConnections.erase(range.first, range.second);
+			return make_pair(Util::emptyString, Util::emptyString);
+		}
 
+		StringPair tmp = range.first->second;
+		expectedConnections.erase(range.first);
 		return tmp;
 	}
 
 private:
 	/** Nick -> myNick, hubUrl for expected NMDC incoming connections */
-	typedef unordered_map<string, StringPair> ExpectMap;
+	typedef std::unordered_multimap<string, StringPair> ExpectMap;
 	ExpectMap expectedConnections;
 
 	CriticalSection cs;
@@ -116,6 +121,7 @@ public:
 
 	void disconnect(const UserPtr& user); // disconnect all transfers for the user
 	void disconnect(const UserPtr& user, ConnectionType type);
+	void disconnectUploads(const string& hubUrl);
 	void disconnectAll(); // disconnect all transfers for all users
 
 	void shutdown();
@@ -159,7 +165,12 @@ private:
 	StringList features;
 	StringList adcFeatures;
 
-	unordered_map<string, pair<CID, ConnectionType>> tokens;
+	struct TokenInfo {
+		CID cid;
+		ConnectionType type;
+		string hubUrl;
+	};
+	unordered_map<string, TokenInfo> tokens;
 
 	ExpectedMap expectedConnections;
 
@@ -188,7 +199,7 @@ private:
 	void accept(const Socket& sock, bool secure) noexcept;
 
 	bool checkKeyprint(UserConnection* aSource);
-	pair<bool, ConnectionType> checkToken(const UserConnection* uc) const;
+	pair<bool, ConnectionType> checkToken(UserConnection* uc);
 	bool checkDownload(const UserConnection* uc) const;
 
 	void failed(UserConnection* aSource, const string& aError, bool protocolError);

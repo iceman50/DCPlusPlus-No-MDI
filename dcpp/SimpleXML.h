@@ -44,6 +44,7 @@ public:
 	~SimpleXML() { }
 
 	void addTag(const string& aName, const string& aData = Util::emptyString);
+	void addChildTag(const string& aName, const string& aData = Util::emptyString);
 	void addTag(const string& aName, int aData) {
 		addTag(aName, std::to_string(aData));
 	}
@@ -105,6 +106,17 @@ public:
 	const string& getChildData() const {
 		checkChildSelected();
 		return (*currentChild)->data;
+	}
+
+	StringList getChildDataList(const string& aName) const {
+		checkChildSelected();
+		StringList ret;
+		for(const auto child: (*currentChild)->children) {
+			if(child->name == aName) {
+				ret.push_back(child->data);
+			}
+		}
+		return ret;
 	}
 
 	StringMap getCurrentChildren() {

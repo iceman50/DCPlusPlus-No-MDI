@@ -24,6 +24,7 @@
 #include "GridDialog.h"
 
 #include <map>
+#include <set>
 
 class FavHubProperties : public GridDialog
 {
@@ -46,6 +47,12 @@ private:
 	ComboBoxPtr favShowJoins;
 	ComboBoxPtr logMainChat;
 	ComboBoxPtr groups;
+	CheckBoxPtr defaultShare;
+	dwt::TreePtr shareFolders;
+
+	std::map<HTREEITEM, std::set<string>> shareFolderPaths;
+	std::set<string> selectedShareDirectories;
+	bool updatingShareFolders;
 
 	FavoriteHubEntry *entry;
 
@@ -56,6 +63,7 @@ private:
 	void fillGroups();
 
 	void fillEncodings();
+	void fillShareFolders();
 
 	static std::map<UINT, std::wstring> encodings;
 	static BOOL CALLBACK EnumCodePageProc(LPTSTR lpCodePageString);

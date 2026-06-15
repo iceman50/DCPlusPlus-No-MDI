@@ -18,6 +18,7 @@
 #ifndef DCPLUSPLUS_DCPP_HUBENTRY_H_
 #define DCPLUSPLUS_DCPP_HUBENTRY_H_
 
+#include <set>
 #include <string>
 
 #include "GetSet.h"
@@ -58,9 +59,9 @@ public:
 
 class FavoriteHubEntry : public HubSettings {
 public:
-	FavoriteHubEntry() : encoding(Text::systemCharset) { }
+	FavoriteHubEntry() : encoding(Text::systemCharset), shareProfileSet(false) { }
 	FavoriteHubEntry(const HubEntry& rhs) : name(rhs.getName()), server(rhs.getServer()),
-		hubDescription(rhs.getDescription()), encoding(Text::systemCharset) { }
+		hubDescription(rhs.getDescription()), encoding(Text::systemCharset), shareProfileSet(false) { }
 
 	GETSET(string, name, Name);
 	GETSET(string, server, Server);
@@ -68,6 +69,21 @@ public:
 	GETSET(string, password, Password);
 	GETSET(string, encoding, Encoding);
 	GETSET(string, group, Group);
+
+	bool hasShareProfile() const { return shareProfileSet; }
+	const std::set<string>& getShareDirectories() const { return shareDirectories; }
+	void setShareDirectories(const std::set<string>& directories) {
+		shareDirectories = directories;
+		shareProfileSet = true;
+	}
+	void clearShareProfile() {
+		shareDirectories.clear();
+		shareProfileSet = false;
+	}
+
+private:
+	std::set<string> shareDirectories;
+	bool shareProfileSet;
 };
 
 }

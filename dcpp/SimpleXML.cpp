@@ -168,6 +168,16 @@ void SimpleXML::addTag(const string& aName, const string& aData /* = "" */) {
 	}
 }
 
+void SimpleXML::addChildTag(const string& aName, const string& aData /* = "" */) {
+	if(aName.empty()) {
+		throw SimpleXMLException("Empty tag names not allowed");
+	}
+
+	checkChildSelected();
+	auto parent = *currentChild;
+	parent->children.push_back(new Tag(aName, aData, parent));
+}
+
 void SimpleXML::addAttrib(const string& aName, const string& aData) {
 	if(current == &root)
 		throw SimpleXMLException("No tag is currently selected");

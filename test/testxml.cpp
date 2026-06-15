@@ -1,6 +1,7 @@
 #include "testbase.h"
 
 #include <dcpp/SimpleXMLReader.h>
+#include <dcpp/SimpleXML.h>
 #include <dcpp/Text.h>
 #include <unordered_map>
 
@@ -134,4 +135,48 @@ TEST(testxml, test_utf_validation)
 
 	const auto expected = Text::sanitizeUtf8("\xc3Name");
 	ASSERT_EQ(collector.attribValues[expected], 1);
+}
+
+TEST(testxml, test_selected_child_children)
+{
+	SimpleXML xml;
+	xml.addTag("Favorites");
+	xml.stepIn();
+	xml.addTag("Hubs");
+	xml.stepIn();
+
+	xml.addTag("Hub");
+	xml.addChildAttrib("Server", string("adc://first.example"));
+	xml.addChildAttrib("ShareProfile", true);
+	xml.addChildTag("ShareDirectory", "C:\\First\\");
+	xml.addChildTag("ShareDirectory", "D:\\Second\\");
+
+	xml.addTag("Hub");
+	xml.addChildAttrib("Server", string("adc://second.example"));
+	xml.addChildAttrib("ShareProfile", true);
+
+	xml.stepOut();
+	xml.addTag("Users");
+	xml.stepOut();
+
+	SimpleXML loaded;
+	loaded.fromXML(xml.toXML());
+	ASSERT_TRUE(loaded.findChild("Favorites"));
+	loaded.stepIn();
+	ASSERT_TRUE(loaded.findChild("Hubs"));
+	loaded.stepIn();
+
+	ASSERT_TRUE(loaded.findChild("Hub"));
+	auto directories = loaded.getChildDataList("ShareDirectory");
+	ASSERT_EQ(directories.size(), 2);
+	ASSERT_EQ(directories[0], "C:\\First\\");
+	ASSERT_EQ(directories[1], "D:\\Second\\");
+
+	ASSERT_TRUE(loaded.findChild("Hub"));
+	ASSERT_TRUE(loaded.getBoolChildAttrib("ShareProfile"));
+	ASSERT_TRUE(loaded.getChildDataList("ShareDirectory").empty());
+
+	loaded.stepOut();
+	loaded.resetCurrentChild();
+	ASSERT_TRUE(loaded.findChild("Users"));
 }

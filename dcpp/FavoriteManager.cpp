@@ -408,6 +408,12 @@ void FavoriteManager::save() {
 			xml.addChildAttrib("Encoding", i->getEncoding());
 			xml.addChildAttrib("Group", i->getGroup());
 			i->save(xml);
+			if(i->hasShareProfile()) {
+				xml.addChildAttrib("ShareProfile", true);
+				for(const auto& path: i->getShareDirectories()) {
+					xml.addChildTag("ShareDirectory", path);
+				}
+			}
 		}
 
 		xml.stepOut();
@@ -520,6 +526,15 @@ void FavoriteManager::load(SimpleXML& aXml) {
 			e->setEncoding(aXml.getChildAttrib("Encoding"));
 			e->setGroup(aXml.getChildAttrib("Group"));
 			e->load(aXml);
+			if(aXml.getBoolChildAttrib("ShareProfile")) {
+				std::set<string> directories;
+				for(const auto& path: aXml.getChildDataList("ShareDirectory")) {
+					if(!path.empty()) {
+						directories.insert(path);
+					}
+				}
+				e->setShareDirectories(directories);
+			}
 			favoriteHubs.push_back(e);
 		}
 
@@ -601,6 +616,18 @@ FavoriteHubEntryPtr FavoriteManager::getFavoriteHubEntry(const string& aServer) 
 		}
 	}
 	return NULL;
+}
+
+bool FavoriteManager::getHubShareDirectories(const string& aServer, std::set<string>& directories) const {
+	Lock l(cs);
+	for(auto hub: favoriteHubs) {
+		if(Util::stricmp(hub->getServer(), aServer) == 0 && hub->hasShareProfile()) {
+			directories = hub->getShareDirectories();
+			return true;
+		}
+	}
+	directories.clear();
+	return false;
 }
 
 void FavoriteManager::mergeHubSettings(const FavoriteHubEntry& entry, HubSettings& settings) const {
