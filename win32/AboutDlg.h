@@ -19,7 +19,6 @@
 #define DCPLUSPLUS_WIN32_ABOUT_DLG_H
 
 #include <memory>
-#include <mutex>
 #include <string>
 
 #include <dcpp/forward.h>
@@ -51,15 +50,10 @@ private:
 	void layout();
 
 	void completeDownload(bool success, const string& result);
-	void postDownloadResult(bool success, const string& result);
-
-	std::mutex downloadResultCS;
-	bool downloadResultSuccess = false;
-	string downloadResult;
 
 	// HttpManagerListener
-	void on(HttpManagerListener::Failed, HttpConnection*, const string&) noexcept override;
-	void on(HttpManagerListener::Complete, HttpConnection*, OutputStream*) noexcept override;
+	void on(HttpManagerListener::Failed, HttpConnection*, const string&) noexcept;
+	void on(HttpManagerListener::Complete, HttpConnection*, OutputStream*) noexcept;
 };
 
 #endif // !defined(DCPLUSPLUS_WIN32_ABOUT_DLG_H)
