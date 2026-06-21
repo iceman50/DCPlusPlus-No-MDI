@@ -113,6 +113,7 @@ private:
 
 	bool visible;
 	bool ignoreNextClick; // true after a double-click
+	ULONGLONG lastClickTick;
 	std::optional<GUID> guid;
 	DWORD lastNotifyError;
 

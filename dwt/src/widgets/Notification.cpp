@@ -54,6 +54,7 @@ Notification::Notification(Widget* parent) :
 parent(parent),
 visible(false),
 ignoreNextClick(false),
+lastClickTick(0),
 lastNotifyError(ERROR_SUCCESS),
 onlyBalloons(false),
 lastTick(0)
@@ -231,9 +232,11 @@ bool Notification::trayHandler(const MSG& msg) {
 	case NIN_SELECT:
 	case NIN_KEYSELECT:
 		{
+			auto now = ::GetTickCount64();
 			if(ignoreNextClick) {
 				ignoreNextClick = false;
-			} else if(iconClicked) {
+			} else if(now - lastClickTick >= 250 && iconClicked) {
+				lastClickTick = now;
 				iconClicked();
 			}
 			break;
@@ -244,6 +247,7 @@ bool Notification::trayHandler(const MSG& msg) {
 			if(iconDbClicked) {
 				iconDbClicked();
 				ignoreNextClick = true;
+				lastClickTick = ::GetTickCount64();
 			}
 			break;
 		}
