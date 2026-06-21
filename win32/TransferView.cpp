@@ -64,7 +64,9 @@ TransferView::TransferView(dwt::Widget* parent, TabViewPtr mdi_) :
 	mdi(mdi_),
 	downloadIcon(WinUtil::createIcon(IDI_DOWNLOAD, 16)),
 	uploadIcon(WinUtil::createIcon(IDI_UPLOAD, 16)),
-	updateList(false)
+	updateList(false),
+	resortList(false),
+	resortMask(0)
 {
 	create();
 	setHelpId(IDH_TRANSFERS);
@@ -819,6 +821,7 @@ void TransferView::addConn(const UpdateInfo& ui) {
 	if(!conn) {
 		transfer->conns.emplace_back(ui.user, *transfer);
 		conn = &transfer->conns.back();
+		connections[ui.type][ui.user.user] = conn;
 
 		// only show the child connection item when there are multiple children.
 		auto connCount = transfer->conns.size();
@@ -851,17 +854,9 @@ void TransferView::removeConn(const UpdateInfo& ui) {
 }
 
 TransferView::ConnectionInfo* TransferView::findConn(const HintedUser& user, ConnectionType type) {
-	if(!user) { return nullptr; }
-	for(auto& transfer: transferItems) {
-		if(transfer.type == type) {
-			for(auto& conn: transfer.conns) {
-				if(conn.getUser() == user) {
-					return &conn;
-				}
-			}
-		}
-	}
-	return nullptr;
+	if(!user || type < 0 || type >= CONNECTION_TYPE_LAST) { return nullptr; }
+	auto i = connections[type].find(user.user);
+	return i != connections[type].end() ? i->second : nullptr;
 }
 
 TransferView::TransferInfo* TransferView::findTransfer(const string& path, ConnectionType type) {
@@ -877,6 +872,7 @@ void TransferView::removeConn(ConnectionInfo& conn) {
 	auto& transfer = conn.parent;
 
 	transfers->eraseChild(reinterpret_cast<LPARAM>(&conn));
+	connections[transfer.type].erase(conn.getUser().user);
 
 	transfer.conns.remove(conn);
 
@@ -966,7 +962,45 @@ void TransferView::execTasks() {
 	}
 	tasks.clear();
 
-	transfers->resort();
+	if(resortList || needsResort(resortMask)) {
+		transfers->resort();
+	}
+	resortList = false;
+	resortMask = 0;
+}
+
+bool TransferView::needsResort(uint32_t updateMask) const {
+	auto column = transfers->getSortColumn();
+	if(column == -1) {
+		return false;
+	}
+
+	if(updateMask & UpdateInfo::MASK_STATUS) {
+		return true;
+	}
+
+	switch(column) {
+	case COLUMN_FILE:
+	case COLUMN_PATH:
+		return updateMask & UpdateInfo::MASK_PATH;
+	case COLUMN_STATUS:
+		return updateMask & (UpdateInfo::MASK_STATUS_STRING | UpdateInfo::MASK_TRANSFERRED);
+	case COLUMN_TIMELEFT:
+		return updateMask & (UpdateInfo::MASK_TRANSFERRED | UpdateInfo::MASK_SPEED);
+	case COLUMN_SPEED:
+		return updateMask & UpdateInfo::MASK_SPEED;
+	case COLUMN_TRANSFERRED:
+	case COLUMN_SIZE:
+		return updateMask & UpdateInfo::MASK_TRANSFERRED;
+	case COLUMN_CIPHER:
+		return updateMask & UpdateInfo::MASK_CIPHER;
+	case COLUMN_IP:
+		return updateMask & UpdateInfo::MASK_IP;
+	case COLUMN_COUNTRY:
+		return updateMask & UpdateInfo::MASK_COUNTRY;
+	default:
+		return false;
+	}
 }
 
 void TransferView::on(ConnectionManagerListener::Added, ConnectionQueueItem* aCqi) noexcept {
@@ -1044,9 +1078,15 @@ void TransferView::on(DownloadManagerListener::Starting, Download* d) noexcept {
 }
 
 void TransferView::on(DownloadManagerListener::Tick, const DownloadList& dl) noexcept  {
+	vector<UpdateInfo> updates;
+	updates.reserve(dl.size());
 	for(auto i: dl) {
-		onTransferTick(i, true);
+		updates.emplace_back(i->getHintedUser(), CONNECTION_TYPE_DOWNLOAD);
+		auto& ui = updates.back();
+		ui.setTransferred(i->getPos(), i->getActual(), i->getSize());
+		ui.setSpeed(i->getAverageSpeed());
 	}
+	updatedConns(move(updates));
 }
 
 void TransferView::on(DownloadManagerListener::Requesting, Download* d) noexcept {
@@ -1087,9 +1127,15 @@ void TransferView::on(UploadManagerListener::Starting, Upload* u) noexcept {
 }
 
 void TransferView::on(UploadManagerListener::Tick, const UploadList& ul) noexcept {
+	vector<UpdateInfo> updates;
+	updates.reserve(ul.size());
 	for(auto i: ul) {
-		onTransferTick(i, false);
+		updates.emplace_back(i->getHintedUser(), CONNECTION_TYPE_UPLOAD);
+		auto& ui = updates.back();
+		ui.setTransferred(i->getPos(), i->getActual(), i->getSize());
+		ui.setSpeed(i->getAverageSpeed());
 	}
+	updatedConns(move(updates));
 }
 
 void TransferView::on(QueueManagerListener::CRCFailed, Download* d, const string& aReason) noexcept {
@@ -1147,12 +1193,30 @@ void TransferView::addedConn(UpdateInfo* ui) {
 	callAsync([this, ui] {
 		tasks.emplace_back([=](const UpdateInfo& ui) { ui.isHttp() ? addHttpConn(ui) : addConn(ui); }, unique_ptr<UpdateInfo>(ui));
 		updateList = true;
+		resortList = true;
 	});
 }
 
 void TransferView::updatedConn(UpdateInfo* ui) {
 	callAsync([this, ui] {
+		resortMask |= ui->updateMask;
 		tasks.emplace_back([=](const UpdateInfo& ui) { ui.isHttp() ? updateHttpConn(ui) : updateConn(ui); }, unique_ptr<UpdateInfo>(ui));
+		updateList = true;
+	});
+}
+
+void TransferView::updatedConns(vector<UpdateInfo>&& updates) {
+	if(updates.empty()) {
+		return;
+	}
+
+	callAsync([this, updates = move(updates)]() mutable {
+		tasks.reserve(tasks.size() + updates.size());
+		for(auto& ui: updates) {
+			resortMask |= ui.updateMask;
+			tasks.emplace_back([=](const UpdateInfo& ui) { updateConn(ui); },
+				unique_ptr<UpdateInfo>(new UpdateInfo(move(ui))));
+		}
 		updateList = true;
 	});
 }
@@ -1161,6 +1225,7 @@ void TransferView::removedConn(UpdateInfo* ui) {
 	callAsync([this, ui] {
 		tasks.emplace_back([=](const UpdateInfo& ui) { ui.isHttp() ? removeHttpConn(ui) : removeConn(ui); }, unique_ptr<UpdateInfo>(ui));
 		updateList = true;
+		resortList = true;
 	});
 }
 
@@ -1173,13 +1238,6 @@ void TransferView::starting(UpdateInfo* ui, Transfer* t) {
 	ui->setCipher(Text::toT(uc.getCipherName()));
 	ui->setIP(Text::toT(uc.getRemoteIp()));
 	ui->setCountry(Text::toT(GeoManager::getInstance()->getCountry(uc.getRemoteIp())));
-}
-
-void TransferView::onTransferTick(Transfer* t, bool download) {
-	auto ui = new UpdateInfo(t->getHintedUser(), download ? CONNECTION_TYPE_DOWNLOAD : CONNECTION_TYPE_UPLOAD);
-	ui->setTransferred(t->getPos(), t->getActual(), t->getSize());
-	ui->setSpeed(t->getAverageSpeed());
-	updatedConn(ui);
 }
 
 void TransferView::onTransferComplete(Transfer* t, bool download) {

@@ -20,6 +20,7 @@
 
 #include <functional>
 #include <list>
+#include <unordered_map>
 
 #include <dcpp/DownloadManagerListener.h>
 #include <dcpp/UploadManagerListener.h>
@@ -39,6 +40,7 @@
 
 using std::function;
 using std::list;
+using std::unordered_map;
 
 class TransferView :
 	public dwt::Container,
@@ -233,6 +235,8 @@ private:
 	list<TransferInfo> transferItems; /* the LPARAM data of table entries are direct pointers to
 									  objects stored by this container, hence the std::list. */
 	list<HttpInfo> httpItems;
+	typedef unordered_map<UserPtr, ConnectionInfo*, User::Hash> ConnectionMap;
+	ConnectionMap connections[CONNECTION_TYPE_LAST];
 
 	TabViewPtr mdi;
 
@@ -241,6 +245,8 @@ private:
 
 	vector<pair<function<void (const UpdateInfo&)>, unique_ptr<UpdateInfo>>> tasks;
 	bool updateList;
+	bool resortList;
+	uint32_t resortMask;
 
 	ParamMap ucLineParams;
 
@@ -279,6 +285,7 @@ private:
 	UserInfoList selectedUsersImpl() const;
 
 	void execTasks();
+	bool needsResort(uint32_t updateMask) const;
 
 	virtual void on(ConnectionManagerListener::Added, ConnectionQueueItem* aCqi) noexcept;
 	virtual void on(ConnectionManagerListener::Removed, ConnectionQueueItem* aCqi) noexcept;
@@ -305,10 +312,10 @@ private:
 
 	void addedConn(UpdateInfo* ui);
 	void updatedConn(UpdateInfo* ui);
+	void updatedConns(vector<UpdateInfo>&& updates);
 	void removedConn(UpdateInfo* ui);
 
 	void starting(UpdateInfo* ui, Transfer* t);
-	void onTransferTick(Transfer* t, bool download);
 	void onTransferComplete(Transfer* t, bool download);
 	void onFailed(Download* aDownload, const string& aReason);
 	UpdateInfo* makeHttpUI(HttpConnection* c);
