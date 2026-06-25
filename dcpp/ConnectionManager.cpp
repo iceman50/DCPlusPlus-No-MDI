@@ -747,28 +747,36 @@ void ConnectionManager::on(AdcCommand::INF, UserConnection* aSource, const AdcCo
 		return;
 	}
 
-	if(aSource->isSet(UserConnection::FLAG_INCOMING)) {
-		// set the PM flag now in order to send a INF with PM1
-		if(type == CONNECTION_TYPE_PM || cmd.hasFlag("PM", 0)) {
-			if(!aSource->isSet(UserConnection::FLAG_PM)) {
-				aSource->setFlag(UserConnection::FLAG_PM);
-			}
+	const bool pmRequested = type == CONNECTION_TYPE_PM || aSource->isSet(UserConnection::FLAG_PM) || cmd.hasFlag("PM", 0);
 
-			if (!aSource->getUser()->isSet(User::TLS)) {
-				aSource->send(AdcCommand(AdcCommand::SEV_FATAL, AdcCommand::ERROR_GENERIC, "Unencrypted CCPM connections aren't allowed"));
-				putConnection(aSource);
-				return;
-			}
+	if(pmRequested && !aSource->isSecure()) {
+		aSource->send(AdcCommand(AdcCommand::SEV_FATAL, AdcCommand::ERROR_GENERIC, "Unencrypted CCPM connections aren't allowed"));
+		putConnection(aSource);
+		return;
+	}
+
+	const bool downloadRequested = type == CONNECTION_TYPE_DOWNLOAD || checkDownload(aSource);
+
+	if(downloadRequested && cmd.hasFlag("PM", 0)) {
+		aSource->send(AdcCommand(AdcCommand::SEV_FATAL, AdcCommand::ERROR_INF_FIELD, "INF PM: invalid token type").addParam("FB", "PM"));
+		putConnection(aSource);
+		return;
+	}
+
+	if(aSource->isSet(UserConnection::FLAG_INCOMING)) {
+		// Set the PM flag before replying so CCPM handshakes include PM1.
+		if(pmRequested && !aSource->isSet(UserConnection::FLAG_PM)) {
+			aSource->setFlag(UserConnection::FLAG_PM);
 		}
 
 		aSource->inf(false);
 	}
 
-	if(type == CONNECTION_TYPE_DOWNLOAD || checkDownload(aSource)) {
+	if(!pmRequested && downloadRequested) {
 		if(!aSource->isSet(UserConnection::FLAG_DOWNLOAD)) { aSource->setFlag(UserConnection::FLAG_DOWNLOAD); }
 		addDownloadConnection(aSource);
 
-	} else if(type == CONNECTION_TYPE_PM || aSource->isSet(UserConnection::FLAG_PM) || cmd.hasFlag("PM", 0)) {
+	} else if(pmRequested) {
 		if(!aSource->isSet(UserConnection::FLAG_PM)) { aSource->setFlag(UserConnection::FLAG_PM); }
 		addNewConnection(aSource, CONNECTION_TYPE_PM);
 

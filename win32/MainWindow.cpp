@@ -799,8 +799,12 @@ UserConnection* MainWindow::getPMConn(const UserPtr& user, UserConnectionListene
 	if(i != ccpms.end()) {
 		auto uc = i->second;
 		ccpms.erase(i);
-		uc->addListener(listener);
 		uc->removeListener(this);
+		if(!uc->isSecure()) {
+			uc->disconnect(true);
+			return nullptr;
+		}
+		uc->addListener(listener);
 		return uc;
 	}
 	return nullptr;
@@ -1128,6 +1132,9 @@ bool MainWindow::handleClosing() {
 
 			{
 				Lock l(ccpmMutex);
+				for(auto& i: ccpms) {
+					i.second->removeListener(this);
+				}
 				ccpms.clear();
 			}
 
@@ -2038,9 +2045,13 @@ void MainWindow::handleWhatsThis() {
 
 void MainWindow::on(ConnectionManagerListener::Connected, ConnectionQueueItem* cqi, UserConnection* uc) noexcept {
 	if(cqi->getType() == CONNECTION_TYPE_PM) {
+		if(!uc->isSecure()) {
+			uc->disconnect(true);
+			return;
+		}
 
 		// C-C PMs are not supported outside of PM windows.
-		if(!SETTING(POPUP_PMS)) {
+		if(!SETTING(POPUP_PMS) && !PrivateFrame::isOpen(cqi->getUser())) {
 			uc->disconnect(true);
 			return;
 		}

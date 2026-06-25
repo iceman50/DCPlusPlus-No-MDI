@@ -330,7 +330,13 @@ void PrivateFrame::startCC(bool silent) {
 }
 
 void PrivateFrame::closeCC(bool silent) {
-	if(ccReady()) {
+	UserConnection* activeConn = nullptr;
+	{
+		Lock l(mutex);
+		activeConn = conn;
+	}
+
+	if(activeConn) {
 		if(!silent) { addStatus(T_("Disconnecting the direct encrypted channel...")); }
 		ConnectionManager::getInstance()->disconnect(replyTo.getUser(), CONNECTION_TYPE_PM);
 	} else {
@@ -340,7 +346,7 @@ void PrivateFrame::closeCC(bool silent) {
 
 bool PrivateFrame::ccReady() const {
 	Lock l(mutex);
-	return conn;
+	return conn && conn->isSecure();
 }
 
 void PrivateFrame::enterImpl(const tstring& s) {
@@ -450,7 +456,7 @@ void PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson) {
 
 	{
 		Lock l(mutex);
-		if(conn) {
+		if(conn && conn->isSecure()) {
 			conn->pm(msg8, thirdPerson);
 			return;
 		}
@@ -551,6 +557,11 @@ void PrivateFrame::on(ClientManagerListener::UserDisconnected, const UserPtr& aU
 
 void PrivateFrame::on(ConnectionManagerListener::Connected, ConnectionQueueItem* cqi, UserConnection* uc) noexcept {
 	if(cqi->getType() == CONNECTION_TYPE_PM && cqi->getUser() == replyTo.getUser()) {
+		if(!uc->isSecure()) {
+			uc->disconnect(true);
+			return;
+		}
+
 		{
 			Lock l(mutex);
 			if(conn) {
