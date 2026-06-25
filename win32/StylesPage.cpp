@@ -174,6 +174,9 @@ showGen(0)
 	table->onSelectionChanged([this] { handleSelectionChanged(); });
 
 	table->setHelpId([this](unsigned& id) { handleTableHelpId(id); });
+
+	// User matching rows are owned by UserMatchPage, which may not exist yet with lazy settings pages.
+	callAsync([this] { static_cast<SettingsDialog*>(getRoot())->getPage<UserMatchPage>()->updateStyles(); });
 }
 
 StylesPage::~StylesPage() {
