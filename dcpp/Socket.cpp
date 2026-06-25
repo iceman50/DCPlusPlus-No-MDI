@@ -130,7 +130,20 @@ inline bool isConnected(socket_t sock) {
 	return false;
 }
 
-inline int readable(socket_t sock0, socket_t sock1) {
+inline socket_t readable(socket_t sock0, socket_t sock1) {
+	const bool valid0 = sock0 != INVALID_SOCKET;
+	const bool valid1 = sock1 != INVALID_SOCKET;
+
+	// Some listeners are IPv4-only or IPv6-only. Avoid passing INVALID_SOCKET
+	// into FD_SET, but keep the old "try a valid socket" nonblocking fallback.
+	if(!valid0) {
+		return valid1 ? sock1 : INVALID_SOCKET;
+	}
+
+	if(!valid1) {
+		return sock0;
+	}
+
 	fd_set rfd;
 	struct timeval tv = { 0 };
 
@@ -309,12 +322,18 @@ string Socket::listen(const string& port) {
 
 				check([&] { return ::bind(sock6, a->ai_addr, a->ai_addrlen); });
 				check([&] { return ::getsockname(sock6, a->ai_addr, (socklen_t*)&a->ai_addrlen); });
-				ret = ((sockaddr_in6*)a->ai_addr)->sin6_port;
+				auto boundPort = ((sockaddr_in6*)a->ai_addr)->sin6_port;
 
 				if(type == TYPE_TCP) {
 					check([&] { return ::listen(sock6, 20); });
 				}
-			} catch(const SocketException&) { }
+
+				// create() stores the handle in sock6 before bind/listen. Only keep
+				// it, and publish the port, after the whole listen setup succeeded.
+				ret = boundPort;
+			} catch(const SocketException&) {
+				sock6.reset();
+			}
 		}
 	}
 
@@ -329,12 +348,18 @@ string Socket::listen(const string& port) {
 
 			check([&] { return ::bind(sock4, a->ai_addr, a->ai_addrlen); });
 			check([&] { return ::getsockname(sock4, a->ai_addr, (socklen_t*)&a->ai_addrlen); });
-			ret = ((sockaddr_in*)a->ai_addr)->sin_port;
+			auto boundPort = ((sockaddr_in*)a->ai_addr)->sin_port;
 
 			if(type == TYPE_TCP) {
 				check([&] { return ::listen(sock4, 20); });
 			}
-		} catch(const SocketException&) { }
+
+			// create() stores the handle in sock4 before bind/listen. Only keep
+			// it, and publish the port, after the whole listen setup succeeded.
+			ret = boundPort;
+		} catch(const SocketException&) {
+			sock4.reset();
+		}
 	}
 
 	if(ret == 0) {

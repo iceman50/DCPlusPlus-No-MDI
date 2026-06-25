@@ -92,7 +92,8 @@ public:
 		TYPE_UDP = IPPROTO_UDP
 	};
 
-	explicit Socket(SocketType type) : type(type) { }
+	// Try both IPv4 and IPv6 by default; callers may force IPv4-only explicitly.
+	explicit Socket(SocketType type) : v4only(false), type(type) { }
 
 	virtual ~Socket() { }
 
