@@ -426,12 +426,12 @@ void ClientManager::connect(const HintedUser& user, const string& token, Connect
 	}
 }
 
-void ClientManager::privateMessage(const HintedUser& user, const string& msg, bool thirdPerson) {
+void ClientManager::privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo) {
 	Lock l(cs);
 	OnlineUser* u = findOnlineUser(user);
 
 	if(u && !PluginManager::getInstance()->runHook(HOOK_CHAT_PM_OUT, u, msg)) {
-		u->getClient().privateMessage(*u, msg, thirdPerson);
+		u->getClient().privateMessage(*u, msg, thirdPerson, echo);
 	}
 }
 

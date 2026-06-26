@@ -32,6 +32,7 @@
 #include "LogManager.h"
 #include "MappingManager.h"
 #include "PluginApiImpl.h"
+#include "PrivateChatManager.h"
 #include "QueueManager.h"
 #include "ResourceManager.h"
 #include "SearchManager.h"
@@ -71,6 +72,7 @@ void startup() {
 	SearchManager::newInstance();
 	ClientManager::newInstance();
 	ConnectionManager::newInstance();
+	PrivateChatManager::newInstance();
 	DownloadManager::newInstance();
 	UploadManager::newInstance();
 	ThrottleManager::newInstance();
@@ -137,6 +139,7 @@ void shutdown() {
 	TimerManager::getInstance()->shutdown();
 	HashManager::getInstance()->shutdown();
 	ThrottleManager::getInstance()->shutdown();
+	PrivateChatManager::deleteInstance();
 	ConnectionManager::getInstance()->shutdown();
 	HttpManager::getInstance()->shutdown();
 	MappingManager::getInstance()->close();

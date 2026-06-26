@@ -714,15 +714,22 @@ void AdcHub::hubMessage(const string& aMessage, bool thirdPerson) {
 	send(c);
 }
 
-void AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson) {
+void AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson, bool echo) {
 	if(state != STATE_NORMAL)
 		return;
-	AdcCommand c(AdcCommand::CMD_MSG, user.getIdentity().getSID(), AdcCommand::TYPE_ECHO);
+	AdcCommand c(AdcCommand::CMD_MSG, user.getIdentity().getSID(), echo ? AdcCommand::TYPE_ECHO : AdcCommand::TYPE_DIRECT);
 	c.addParam(aMessage);
 	if(thirdPerson)
 		c.addParam("ME", "1");
 	c.addParam("PM", getMySID());
 	send(c);
+
+	if(!echo) {
+		auto me = findUser(sid);
+		if(me && !PluginManager::getInstance()->runHook(HOOK_CHAT_PM_IN, me, aMessage)) {
+			fire(ClientListener::Message(), this, ChatMessage(aMessage, me, &user, me, thirdPerson));
+		}
+	}
 }
 
 void AdcHub::sendUserCmd(const UserCommand& command, const ParamMap& params) {

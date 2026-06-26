@@ -40,6 +40,7 @@
 #include <dcpp/TimerManager.h>
 #include <dcpp/UploadManager.h>
 #include <dcpp/PluginManager.h>
+#include <dcpp/PrivateChatManager.h>
 #include <dcpp/version.h>
 #include <dcpp/WindowInfo.h>
 
@@ -172,7 +173,8 @@ fullSlots(false)
 
 	for(auto& conn: conns) { conn = nullptr; }
 
-	ConnectionManager::getInstance()->addListener(this);
+	PrivateChatManager::getInstance()->setAcceptConnectionF([](const UserPtr& user) { return PrivateFrame::isOpen(user); });
+	PrivateChatManager::getInstance()->addListener(this);
 	HttpManager::getInstance()->addListener(this);
 	LogManager::getInstance()->addListener(this);
 	QueueManager::getInstance()->addListener(this);
@@ -793,23 +795,6 @@ void MainWindow::TrayPM() {
 	}
 }
 
-UserConnection* MainWindow::getPMConn(const UserPtr& user, UserConnectionListener* listener) {
-	Lock l(ccpmMutex);
-	auto i = ccpms.find(user);
-	if(i != ccpms.end()) {
-		auto uc = i->second;
-		ccpms.erase(i);
-		uc->removeListener(this);
-		if(!uc->isSecure()) {
-			uc->disconnect(true);
-			return nullptr;
-		}
-		uc->addListener(listener);
-		return uc;
-	}
-	return nullptr;
-}
-
 void MainWindow::handleTabsTitleChanged(const tstring& title) {
 	setText(title.empty() ? _T(APPNAME) _T(" ") _T(VERSIONSTRING) : _T(APPNAME) _T(" ") _T(VERSIONSTRING) _T(" - [") + title + _T("]"));
 }
@@ -1125,18 +1110,11 @@ bool MainWindow::handleClosing() {
 			if(transfers)
 				transfers->prepareClose();
 
-			ConnectionManager::getInstance()->removeListener(this);
+			PrivateChatManager::getInstance()->removeListener(this);
+			PrivateChatManager::getInstance()->setAcceptConnectionF(nullptr);
 			HttpManager::getInstance()->removeListener(this);
 			LogManager::getInstance()->removeListener(this);
 			QueueManager::getInstance()->removeListener(this);
-
-			{
-				Lock l(ccpmMutex);
-				for(auto& i: ccpms) {
-					i.second->removeListener(this);
-				}
-				ccpms.clear();
-			}
 
 			SearchManager::getInstance()->disconnect();
 			ConnectionManager::getInstance()->disconnect();
@@ -2043,51 +2021,12 @@ void MainWindow::handleWhatsThis() {
 	sendMessage(WM_SYSCOMMAND, SC_CONTEXTHELP);
 }
 
-void MainWindow::on(ConnectionManagerListener::Connected, ConnectionQueueItem* cqi, UserConnection* uc) noexcept {
-	if(cqi->getType() == CONNECTION_TYPE_PM) {
-		if(!uc->isSecure()) {
-			uc->disconnect(true);
-			return;
-		}
+void MainWindow::on(PrivateChatManagerListener::PrivateMessage, const ChatMessage& message, const HintedUser& user, bool fromBot) noexcept {
+	callAsync([this, message, user, fromBot] {
+		auto opened = PrivateFrame::isOpen(user) || PrivateFrame::gotMessage(getTabView(), message, user.hint, fromBot);
 
-		// C-C PMs are not supported outside of PM windows.
-		if(!SETTING(POPUP_PMS) && !PrivateFrame::isOpen(cqi->getUser())) {
-			uc->disconnect(true);
-			return;
-		}
-
-		// until a message is received, no need to open a PM window.
-		Lock l(ccpmMutex);
-		ccpms[cqi->getUser()] = uc;
-		uc->addListener(this);
-	}
-}
-
-void MainWindow::on(ConnectionManagerListener::Removed, ConnectionQueueItem* cqi) noexcept {
-	if(cqi->getType() == CONNECTION_TYPE_PM) {
-		Lock l(ccpmMutex);
-		ccpms.erase(cqi->getUser());
-	}
-}
-
-void MainWindow::on(UserConnectionListener::PrivateMessage, UserConnection* uc, const ChatMessage& message) noexcept {
-	auto user = uc->getHintedUser();
-	callAsync([this, message, user] {
-		auto opened = PrivateFrame::isOpen(user) || PrivateFrame::gotMessage(getTabView(), message, user.hint, false);
-
-		// remove our listener as the PM window now handles the conn.
-		{
-			Lock l(ccpmMutex);
-			auto i = ccpms.find(user);
-			if(i != ccpms.end()) {
-				auto uc = i->second;
-				uc->removeListener(this);
-				if(!opened) {
-					uc->disconnect(true);
-				}
-				ccpms.erase(i);
-			}
-		}
+		// remove the manager listener as the PM window now handles the conn.
+		PrivateChatManager::getInstance()->releasePMConn(user.user, !opened);
 
 		if(opened) {
 			TrayPM();

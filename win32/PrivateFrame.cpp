@@ -29,6 +29,7 @@
 #include <dcpp/ConnectionManager.h>
 #include <dcpp/LogManager.h>
 #include <dcpp/PluginManager.h>
+#include <dcpp/PrivateChatManager.h>
 #include <dcpp/User.h>
 #include <dcpp/UserConnection.h>
 #include <dcpp/WindowInfo.h>
@@ -178,7 +179,7 @@ lastMessageTime(time(NULL))
 	ConnectionManager::getInstance()->addListener(this);
 	{
 		Lock l(mutex);
-		conn = WinUtil::mainWindow->getPMConn(replyTo.getUser(), this);
+		conn = PrivateChatManager::getInstance()->getPMConn(replyTo.getUser().user, this);
 	}
 
 	callAsync([this] {
@@ -462,7 +463,7 @@ void PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson) {
 		}
 	}
 
-	ClientManager::getInstance()->privateMessage(replyTo.getUser(), msg8, thirdPerson);
+	ClientManager::getInstance()->privateMessage(replyTo.getUser(), msg8, thirdPerson, replyTo.getUser().user->isNMDC());
 }
 
 PrivateFrame::UserInfoList PrivateFrame::selectedUsersImpl() {

@@ -913,15 +913,17 @@ void NmdcHub::privateMessage(const string& nick, const string& message) {
 	send("$To: " + fromUtf8(nick) + " From: " + fromUtf8(getMyNick()) + " $" + fromUtf8(escape("<" + getMyNick() + "> " + message)) + "|");
 }
 
-void NmdcHub::privateMessage(const OnlineUser& aUser, const string& aMessage, bool /*thirdPerson*/) {
+void NmdcHub::privateMessage(const OnlineUser& aUser, const string& aMessage, bool /*thirdPerson*/, bool echo) {
 	checkstate();
 
 	privateMessage(aUser.getIdentity().getNick(), aMessage);
 	// Emulate a returning message...
-	Lock l(cs);
-	auto ou = findUser(getMyNick());
-	if(ou) {
-		fire(ClientListener::Message(), this, ChatMessage(aMessage, ou, &aUser, ou));
+	if(echo) {
+		Lock l(cs);
+		auto ou = findUser(getMyNick());
+		if(ou) {
+			fire(ClientListener::Message(), this, ChatMessage(aMessage, ou, &aUser, ou));
+		}
 	}
 }
 
