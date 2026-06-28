@@ -407,7 +407,15 @@ void FavoriteManager::save() {
 			xml.addChildAttrib("Server", i->getServer());
 			xml.addChildAttrib("Encoding", i->getEncoding());
 			xml.addChildAttrib("Group", i->getGroup());
+			i->save(xml);
+			if(i->hasShareProfile()) {
+				xml.addChildAttrib("ShareProfile", true);
+				for(const auto& path: i->getShareDirectories()) {
+					xml.addChildTag("ShareDirectory", path);
+				}
+			}
 			if(!i->getFailoverServers().empty()) {
+				xml.stepIn();
 				xml.addTag("Failovers");
 				xml.stepIn();
 				for(auto& url: i->getFailoverServers()) {
@@ -417,13 +425,7 @@ void FavoriteManager::save() {
 					xml.addChildAttrib("URL", url);
 				}
 				xml.stepOut();
-			}
-			i->save(xml);
-			if(i->hasShareProfile()) {
-				xml.addChildAttrib("ShareProfile", true);
-				for(const auto& path: i->getShareDirectories()) {
-					xml.addChildTag("ShareDirectory", path);
-				}
+				xml.stepOut();
 			}
 		}
 
@@ -536,6 +538,7 @@ void FavoriteManager::load(SimpleXML& aXml) {
 			e->setServer(aXml.getChildAttrib("Server"));
 			e->setEncoding(aXml.getChildAttrib("Encoding"));
 			e->setGroup(aXml.getChildAttrib("Group"));
+			aXml.stepIn();
 			if(aXml.findChild("Failovers")) {
 				StringList failovers;
 				aXml.stepIn();
@@ -543,9 +546,9 @@ void FavoriteManager::load(SimpleXML& aXml) {
 					failovers.push_back(aXml.getChildAttrib("URL"));
 				}
 				aXml.stepOut();
-				aXml.resetCurrentChild();
 				e->setFailoverServers(failovers);
 			}
+			aXml.stepOut();
 			e->load(aXml);
 			if(aXml.getBoolChildAttrib("ShareProfile")) {
 				std::set<string> directories;
