@@ -1,5 +1,17 @@
-== 06-13-2026 - xx-xx-xxxx ==
-* Current DC++ HG Rev [d2cf61] (as of 06-13-2026)
+== 06-28-2026 - 0.8831 !!!Experimental!!! ==
+* Current DC++ HG Rev [9ece08] (as of 06-21-2026)
+* Add CPMI notifications for direct private message channels (typing, message seen and coordinated window closing)
+* DWARF5 support for MinGW-w64 builds
+* Add support for DMSG in ADC
+* Add FailOver support for ADC
+* Separate CCPM logic from MainWindow and PrivateFrame into PrivateChatManager
+* Statically link libpwinthread
+* Lazy load SettingsDialog pages to increase responsiveness
+* OpenSSL wrapper for MinGW-w64 compilers built with UCRT (OpenSSL libs are compiled with msvcrt)
+* Decrease UI pressure from TransferView by grouping updates into one UI callback
+* Change to a true MDI setup versus the TabView setup
+* Add Per-Fav Hub shares
 * Remove boost 
 * Boost::tribool is replaced with a generic implementation
 * Use DWTLib's copy of IntrusivePtr to replace Boost::intrusive_ptr
+* This project makes use of ChatGPT Codex 5.5 with High Reasoning for debugging, code checking, and modifying scripts along with porting code

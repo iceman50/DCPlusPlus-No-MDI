@@ -38,7 +38,8 @@ protected:
 	}
 
 	void setText(const tstring& text) {
-		t().MDIChildFrame<T>::setText(text);
+		// cut to a safe length when needed, see L#2156600
+		t().MDIChildFrame<T>::setText(text.size() < 1000 ? text : text.substr(0, 1000)); 
 		updateRecent();
 	}
 

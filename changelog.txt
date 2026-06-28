@@ -1,4 +1,5 @@
-* Add CPMI notifications for direct private message channels (typing, message seen and coordinated window closing)
+* [L#2156460] Prevent a possible freeze during time formatting (emtee)
+* [L#2156600] Avoid freezes with overly long hub and nick names (emtee)
 * [L#2154041] Improved bounds check for NMDC search strings (emtee)
 * [L#2142457] Reject direct private messages that are received before the connection has been fully negotiated (fix adapted from AirDC++) (emtee)
 * [L#2143720] Prevent accepting overly high or out of range numeric setting values (emtee)

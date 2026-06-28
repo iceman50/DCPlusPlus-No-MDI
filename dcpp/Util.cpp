@@ -1015,6 +1015,7 @@ string Util::formatParams(const string& msg, const ParamMap& params, FilterF fil
 		}
 	}
 
+	std::replace(result.begin(), result.end(), '\0', '_');
 	result = formatTime(result, time(NULL));
 
 	return result;
@@ -1028,6 +1029,7 @@ string Util::formatTime(const string &msg, const time_t t) {
 		}
 
 		size_t bufsize = msg.size() + 256;
+		const size_t maxBufsize = bufsize + 1000 * 64;
 		string buf(bufsize, 0);
 
 		errno = 0;
@@ -1035,7 +1037,7 @@ string Util::formatTime(const string &msg, const time_t t) {
 		buf.resize(strftime(&buf[0], bufsize-1, msg.c_str(), loc));
 
 		while(buf.empty()) {
-			if(errno == EINVAL)
+			if(errno == EINVAL || bufsize >= maxBufsize)
 				return Util::emptyString;
 
 			bufsize+=64;

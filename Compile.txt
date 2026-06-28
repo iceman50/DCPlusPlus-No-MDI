@@ -106,7 +106,7 @@
 
 		Compiling with MSVC
 
-			Compilation requires the following additional packages to be installed above MSVS 2022:
+			Compilation requires the following additional packages to be installed above MSVS 2022+:
 
 			* Perl v5.32.1 or later (from Strawberry [tested] or ActiveState)
 			  <https://www.perl.org/get.html>
@@ -150,7 +150,7 @@
 		will only build DWT with MinGW in debug mode. By default, when no target is specified, SCons builds all targets.
 		For more possible arguments, consult the SCons manual.
 
-		If you have problems, use google. It works for me.
+		If you have problems, use google or ask an LLM. It works for us.
 
 
 4. Alternative compilers
@@ -166,6 +166,7 @@
 		All you have to do to use one is to download and extract it to a folder.
 		Prefer DWARF / SEH versions (usually marked with a "-dw") of the 32/64-bit compilers respectively; SJLJ ones should
 		be avoided for performance reasons.
+		Prefer tools coming with MSVCRT rather than UCRT; the latter is currently untested with the project, using it can result unforeseen regressions.
 
 		We are currently using these 2 packages by the MinGW-w64 project:
 		- 64-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/x86_64-11.2.0-release-win32-seh-rt_v9-rev1.7z>
@@ -188,8 +189,9 @@
 		Make sure that Cygwin\bin is in your PATH environment variable.
 		Note that building with MinGW compilers provided by Cygwin is not tested.
 
-	b. Microsoft Visual Studio 2022:
-	<https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=Community&channel=Release&version=VS2022>
+	b. Microsoft Visual Studio 2022 or later:
+		
+		<https://visualstudio.microsoft.com/downloads/>
 
 		To generate project files for MSVC, run "scons" with "msvcproj=1" and "tools=default".
 		The resulting solution file (DCPlusPlus.sln) will be in msvc/[mode-arch]/.
@@ -208,18 +210,14 @@
 		the following command:
 			gdb -e DCPlusPlus.exe -s DCPlusPlus.pdb
 
-		c. Linux / Unix:
-
-			Look at <https://launchpad.net/linuxdcpp> for the *nix port of DC++ - they'll gladly accept any help. 	
-
-		d. Submitting patches
+		c. Submitting patches
 
 			If you think you've done something that more people could use, you can always submit a
-			patch for inclusion in the original distribution. I will then consider whether I like
+			patch for inclusion in the original distribution. We will then consider whether we like
 			the patch or not based on things that might seem to be completely random, which just
 			might be the case. Popular reasons for rejecting a patch include, but are not limited
-			to, ugly code, abusable features, features that I don't like that bloat the application
-			and incompatibility with other modifications I've already done.
+			to, ugly code, abusable features, features that we don't like that bloat the application
+			and incompatibility with other modifications we've already done.
 
 			The Mercurial code repository is at <https://sourceforge.net/p/dcplusplus/code/>.
 
@@ -227,12 +225,19 @@
 
 		e. Licensing issues with submitted patches	
 
-			In order to avoid future licensing issues, I ask you to give me copyright over any submitted code. 
+			In order to avoid future licensing issues, the project's author and copyright holder 
+			asks you to give him copyright over any submitted code. 
 			If you don't like this policy, you are free to start your own distribution (as
-			many have done), and if you're lucky it might become more popular than the original =). Please
-			state explicitly when submitting the patch that you give me copyright over the code if the submission is larger 
-			than trivial.
-
+			many have done), and if you're lucky it might become more popular than the original =).
+			Please state explicitly when submitting the patch that you give the author copyright
+			over the code if the submission is larger than trivial.
+			For non-trivial submissions that partly or fully generated with LLM-gen-AI tools, 
+			please follow
+			<https://sfconservancy.org/llm-gen-ai/llm-backed-generative-ai-recommendations.html>,
+			especially points 5, 9, 10 & 13, and provide the information recommended by that
+			document, in particular the fact that such tool was used, the tool's name, and the
+			version used.
+ 
 		f. Developing plugins
 
 			The DC plugin SDK is at <https://launchpad.net/dc-plugin-sdk>.
