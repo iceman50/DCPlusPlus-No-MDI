@@ -955,9 +955,15 @@ void HubFrame::on(Connecting, Client*) noexcept {
 	});
 }
 
-void HubFrame::on(Connected, Client*) noexcept {
-	callAsync([this] { 
+void HubFrame::on(Connected, Client* aClient) noexcept {
+	const auto failover = aClient->isUsingFailover();
+	const auto hubUrl = aClient->getHubUrl();
+	callAsync([this, failover, hubUrl] {
 		onConnected();
+		if(failover) {
+			addStatus(str(TF_("Connected to failover hub address %1%") %
+				Text::toT(Util::addBrackets(hubUrl))));
+		}
 		setTabIcon();
 	});
 }

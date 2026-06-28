@@ -101,6 +101,7 @@ public:
 	string getHubDescription() const { return getHubIdentity().getDescription(); }
 
 	const string& getHubUrl() const { return hubUrl; }
+	bool isUsingFailover() const { return usingFailover; }
 
 	GETSET(Identity, hubIdentity, HubIdentity);
 	Identity& getHubIdentity() { return hubIdentity; }
@@ -192,6 +193,7 @@ private:
 	bool secure;
 	StringList failoverUrls;
 	size_t failoverIndex;
+	bool usingFailover;
 	CountType countType;
 };
 

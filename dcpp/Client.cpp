@@ -39,7 +39,7 @@ Client::Client(const string& hubURL, char separator_, bool secure_) :
 	reconnDelay(120), lastActivity(GET_TICK()), registered(false), autoReconnect(false),
 	encoding(Text::systemCharset), state(STATE_DISCONNECTED), sock(0),
 	hubUrl(hubURL), separator(separator_),
-	secure(secure_), failoverIndex(0), countType(COUNT_UNCOUNTED)
+	secure(secure_), failoverIndex(0), usingFailover(false), countType(COUNT_UNCOUNTED)
 {
 	string file, proto, query, fragment;
 	Util::decodeUrl(hubURL, proto, address, port, file, query, fragment);
@@ -200,8 +200,10 @@ bool Client::setHubUrl(const string& hubURL) {
 bool Client::advanceFailoverUrl() {
 	while(failoverIndex < failoverUrls.size()) {
 		const string url = failoverUrls[failoverIndex++];
-		if(setHubUrl(url))
+		if(setHubUrl(url)) {
+			usingFailover = true;
 			return true;
+		}
 	}
 	return false;
 }
