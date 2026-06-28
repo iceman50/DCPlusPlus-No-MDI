@@ -166,4 +166,14 @@ void PrivateChatManager::on(UserConnectionListener::PrivateMessage, UserConnecti
 	fire(PrivateChatManagerListener::PrivateMessage(), message, user, false);
 }
 
+void PrivateChatManager::on(AdcCommand::PMI, UserConnection* uc, const AdcCommand& cmd) noexcept {
+	if(cmd.hasFlag("QU", 0)) {
+		Lock l(cs);
+		auto i = ccpms.find(uc->getUser());
+		if(i != ccpms.end() && i->second == uc) {
+			uc->disconnect(false);
+		}
+	}
+}
+
 } // namespace dcpp

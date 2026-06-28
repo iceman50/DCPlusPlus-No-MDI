@@ -57,6 +57,14 @@ public:
 		STATUS_LAST
 	};
 
+	enum PMInfo {
+		PM_INFO_SEEN,
+		PM_INFO_TYPING_ON,
+		PM_INFO_TYPING_OFF,
+		PM_INFO_NO_AUTOCONNECT,
+		PM_INFO_QUIT
+	};
+
 	static const string id;
 	const string& getId() const;
 
@@ -75,11 +83,18 @@ public:
 	void sendMessage(const tstring& msg, bool thirdPerson = false);
 
 private:
+	enum { TIMER_CPMI_TYPING = 1 };
+
 	UserInfoBase replyTo;
 	bool online;
 
 	mutable CriticalSection mutex;
 	UserConnection* conn;
+	bool localTyping;
+	bool remoteTyping;
+	bool messageSeenPending;
+	bool allowAutoCCPM;
+	tstring lastStatus;
 
 	time_t lastMessageTime;
 
@@ -99,6 +114,10 @@ private:
 	void fillLogParams(ParamMap& params) const;
 	void addedChat(const tstring& message);
 	void addStatus(const tstring& text);
+	void updatePMInfo(PMInfo type);
+	void updateTypingState(bool refreshTimeout = true);
+	void sendSeenIfActive();
+	bool sendPMI(const char* name, const string& value);
 	void updateOnlineStatus(bool newChannel = false);
 	void updateChannel();
 	void startCC(bool silent = false);
@@ -130,6 +149,7 @@ private:
 
 	// UserConnectionListener
 	virtual void on(UserConnectionListener::PrivateMessage, UserConnection* uc, const ChatMessage& message) noexcept;
+	virtual void on(AdcCommand::PMI, UserConnection* uc, const AdcCommand& cmd) noexcept;
 };
 
 #endif // !defined(PRIVATE_FRAME_H)

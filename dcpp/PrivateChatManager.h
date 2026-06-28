@@ -62,6 +62,7 @@ private:
 
 	// UserConnectionListener
 	void on(UserConnectionListener::PrivateMessage, UserConnection* uc, const ChatMessage& message) noexcept;
+	void on(AdcCommand::PMI, UserConnection* uc, const AdcCommand& cmd) noexcept;
 };
 
 } // namespace dcpp

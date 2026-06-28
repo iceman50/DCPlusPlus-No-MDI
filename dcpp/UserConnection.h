@@ -51,6 +51,7 @@ public:
 	static const string FEATURE_ADC_BASE;
 	static const string FEATURE_ADC_BZIP;
 	static const string FEATURE_ADC_TIGR;
+	static const string FEATURE_ADC_CPMI;
 
 	static const string FILE_NOT_AVAILABLE;
 
@@ -82,7 +83,8 @@ public:
 		FLAG_SUPPORTS_ADCGET = FLAG_SUPPORTS_XML_BZLIST << 1,
 		FLAG_SUPPORTS_ZLIB_GET = FLAG_SUPPORTS_ADCGET << 1,
 		FLAG_SUPPORTS_TTHL = FLAG_SUPPORTS_ZLIB_GET << 1,
-		FLAG_SUPPORTS_TTHF = FLAG_SUPPORTS_TTHL << 1
+		FLAG_SUPPORTS_TTHF = FLAG_SUPPORTS_TTHL << 1,
+		FLAG_SUPPORTS_CPMI = FLAG_SUPPORTS_TTHF << 1
 	};
 
 	enum States {
@@ -147,6 +149,7 @@ public:
 	void get(const string& aType, const string& aName, const int64_t aStart, const int64_t aBytes);
 	void snd(const string& aType, const string& aName, const int64_t aStart, const int64_t aBytes);
 	void pm(const string& message, bool thirdPerson = false);
+	void pmi(const char* name, const string& value);
 	void send(const AdcCommand& c) { send(c.toString(0, isSet(FLAG_NMDC))); }
 
 	void setDataMode(int64_t aBytes = -1) { dcassert(socket); socket->setDataMode(aBytes); }
@@ -189,6 +192,7 @@ public:
 	void handle(AdcCommand::GET t, const AdcCommand& c) { fire(t, this, c); }
 	void handle(AdcCommand::SND t, const AdcCommand& c) { fire(t, this, c);	}
 	void handle(AdcCommand::STA t, const AdcCommand& c);
+	void handle(AdcCommand::PMI t, const AdcCommand& c);
 	void handle(AdcCommand::RES t, const AdcCommand& c) { fire(t, this, c); }
 	void handle(AdcCommand::GFI t, const AdcCommand& c) { fire(t, this, c);	}
 
@@ -199,6 +203,7 @@ public:
 	void updateChunkSize(int64_t leafSize, int64_t lastChunk, uint64_t ticks);
 
 	bool supportsTrees() const { return isSet(FLAG_SUPPORTS_TTHL); }
+	bool supportsCPMI() const { return isSet(FLAG_SUPPORTS_CPMI); }
 
 	GETSET(string, hubUrl, HubUrl);
 	GETSET(string, token, Token);

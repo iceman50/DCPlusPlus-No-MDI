@@ -49,7 +49,8 @@ ConnectionManager::ConnectionManager() :
 		"AD" + UserConnection::FEATURE_ADC_BAS0,
 		"AD" + UserConnection::FEATURE_ADC_BASE,
 		"AD" + UserConnection::FEATURE_ADC_TIGR,
-		"AD" + UserConnection::FEATURE_ADC_BZIP
+		"AD" + UserConnection::FEATURE_ADC_BZIP,
+		"AD" + UserConnection::FEATURE_ADC_CPMI
 	};
 }
 
@@ -447,6 +448,8 @@ void ConnectionManager::on(AdcCommand::SUP, UserConnection* aSource, const AdcCo
 				aSource->setFlag(UserConnection::FLAG_SUPPORTS_ZLIB_GET);
 			} else if(feat == UserConnection::FEATURE_ADC_BZIP) {
 				aSource->setFlag(UserConnection::FLAG_SUPPORTS_XML_BZLIST);
+			} else if(feat == UserConnection::FEATURE_ADC_CPMI) {
+				aSource->setFlag(UserConnection::FLAG_SUPPORTS_CPMI);
 			}
 		}
 	}

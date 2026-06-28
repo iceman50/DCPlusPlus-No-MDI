@@ -835,6 +835,7 @@ void DirectoryListingFrame::updateTitle() {
 	if(loaded) {
 		setText(text);
 	} else {
+		dwt::util::cutStr(text, 1000);
 		BaseType::setText(loading ? str(TF_("Loading file list: %1%") % text) : text);
 	}
 

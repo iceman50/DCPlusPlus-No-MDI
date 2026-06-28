@@ -73,6 +73,10 @@ bool PrivateFrame::gotMessage(TabViewPtr parent, const ChatMessage& message, con
 
 		p->addChat(message);
 		p->lastMessageTime = message.timestamp;
+		if(p->ccReady() && message.from != ClientManager::getInstance()->getMe()) {
+			p->messageSeenPending = true;
+			p->sendSeenIfActive();
+		}
 
 		if(Util::getAway() && !(SETTING(NO_AWAYMSG_TO_BOTS) && fromBot)) {
 			auto awayMessage = Util::getAwayMessage();
@@ -142,18 +146,38 @@ BaseType(parent, _T(""), IDH_PM, IDI_PRIVATE_OFF, false),
 replyTo(replyTo_),
 online(false),
 conn(nullptr),
+localTyping(false),
+remoteTyping(false),
+messageSeenPending(false),
+allowAutoCCPM(true),
 lastMessageTime(time(NULL))
 {
 	createChat(this);
 	chat->setHelpId(IDH_PM_CHAT);
 	addWidget(chat);
 	chat->onContextMenu([this](const dwt::ScreenCoordinate &sc) { return handleChatContextMenu(sc); });
+	chat->onFocus([this] { sendSeenIfActive(); });
 
 	message->setHelpId(IDH_PM_MESSAGE);
 	addWidget(message, ALWAYS_FOCUS);
 	message->onKeyDown([this](int c) { return handleMessageKeyDown(c); });
 	message->onSysKeyDown([this](int c) { return handleMessageKeyDown(c); });
 	message->onChar([this](int c) { return handleMessageChar(c); });
+	message->onUpdated([this] { updateTypingState(); });
+	message->onFocus([this] {
+		updateTypingState();
+		sendSeenIfActive();
+	});
+	message->onKillFocus([this](dwt::Widget*) { updateTypingState(false); });
+	addCallback(dwt::Message(WM_MDIACTIVATE), [this](const MSG& msg, LRESULT&) -> bool {
+		if(reinterpret_cast<HWND>(msg.lParam) == handle()) {
+			sendSeenIfActive();
+			updateTypingState();
+		} else {
+			updateTypingState(false);
+		}
+		return false;
+	});
 
 	initStatus();
 
@@ -209,7 +233,10 @@ void PrivateFrame::addedChat(const tstring& message) {
 }
 
 void PrivateFrame::addStatus(const tstring& text) {
-	status->setText(STATUS_STATUS, Text::toT("[" + Util::getShortTimeString() + "] ") + text);
+	lastStatus = Text::toT("[" + Util::getShortTimeString() + "] ") + text;
+	if(!remoteTyping) {
+		status->setText(STATUS_STATUS, lastStatus);
+	}
 
 	if(SETTING(STATUS_IN_CHAT)) {
 		addChat(_T("*** ") + text);
@@ -219,10 +246,17 @@ void PrivateFrame::addStatus(const tstring& text) {
 }
 
 bool PrivateFrame::preClosing() {
+	updateTypingState(false);
 	{
 		Lock l(mutex);
 		if(conn) {
-			PrivateChatManager::getInstance()->returnPMConn(replyTo.getUser().user, conn, this);
+			if(conn->supportsCPMI()) {
+				conn->pmi("QU", "1");
+				PrivateChatManager::getInstance()->returnPMConn(replyTo.getUser().user, conn, this);
+			} else {
+				conn->removeListener(this);
+				conn->disconnect(false);
+			}
 			conn = nullptr;
 		}
 	}
@@ -291,7 +325,7 @@ void PrivateFrame::updateOnlineStatus(bool newChannel) {
 	if(newChannel) {
 		updateChannel();
 
-		if(online && SETTING(ALWAYS_CCPM) && !ccReady()) {
+		if(online && allowAutoCCPM && SETTING(ALWAYS_CCPM) && !ccReady()) {
 			startCC(true);
 		}
 	}
@@ -327,6 +361,7 @@ void PrivateFrame::startCC(bool silent) {
 	}
 
 	if(!silent) { addStatus(T_("Establishing a direct encrypted channel...")); }
+	if(!silent) { allowAutoCCPM = true; }
 	ClientManager::getInstance()->connect(replyTo.getUser(), ConnectionManager::getInstance()->makeToken(), CONNECTION_TYPE_PM);
 }
 
@@ -339,7 +374,11 @@ void PrivateFrame::closeCC(bool silent) {
 
 	if(activeConn) {
 		if(!silent) { addStatus(T_("Disconnecting the direct encrypted channel...")); }
-		ConnectionManager::getInstance()->disconnect(replyTo.getUser(), CONNECTION_TYPE_PM);
+		allowAutoCCPM = false;
+		if(activeConn->supportsCPMI()) {
+			activeConn->pmi("AC", "0");
+		}
+		activeConn->disconnect(false);
 	} else {
 		if(!silent) { addStatus(T_("No direct encrypted channel available")); }
 	}
@@ -348,6 +387,68 @@ void PrivateFrame::closeCC(bool silent) {
 bool PrivateFrame::ccReady() const {
 	Lock l(mutex);
 	return conn && conn->isSecure();
+}
+
+void PrivateFrame::updatePMInfo(PMInfo type) {
+	switch(type) {
+	case PM_INFO_SEEN:
+		addStatus(T_("Message seen"));
+		break;
+	case PM_INFO_TYPING_ON:
+		remoteTyping = true;
+		status->setText(STATUS_STATUS, T_("User is typing..."));
+		break;
+	case PM_INFO_TYPING_OFF:
+		remoteTyping = false;
+		status->setText(STATUS_STATUS, lastStatus);
+		break;
+	case PM_INFO_NO_AUTOCONNECT:
+		allowAutoCCPM = false;
+		break;
+	case PM_INFO_QUIT:
+		remoteTyping = false;
+		addStatus(T_("User closed the private message window"));
+		break;
+	}
+}
+
+bool PrivateFrame::sendPMI(const char* name, const string& value) {
+	Lock l(mutex);
+	if(conn && conn->isSecure() && conn->supportsCPMI()) {
+		conn->pmi(name, value);
+		return true;
+	}
+	return false;
+}
+
+void PrivateFrame::updateTypingState(bool refreshTimeout) {
+	bool cpmiReady;
+	{
+		Lock l(mutex);
+		cpmiReady = conn && conn->isSecure() && conn->supportsCPMI();
+	}
+	const auto typing = cpmiReady && refreshTimeout && !message->getText().empty() && message->hasFocus() && isActive();
+	if(typing != localTyping) {
+		localTyping = typing;
+		sendPMI("TP", typing ? "1" : "0");
+	}
+
+	if(typing) {
+		setTimer([this] {
+			updateTypingState(false);
+			return false;
+		}, 5000, TIMER_CPMI_TYPING);
+	} else {
+		setTimer(nullptr, 0, TIMER_CPMI_TYPING);
+	}
+}
+
+void PrivateFrame::sendSeenIfActive() {
+	if(messageSeenPending && isActive() && WinUtil::mainWindow->onForeground()) {
+		if(sendPMI("SN", "1")) {
+			messageSeenPending = false;
+		}
+	}
 }
 
 void PrivateFrame::enterImpl(const tstring& s) {
@@ -572,8 +673,12 @@ void PrivateFrame::on(ConnectionManagerListener::Connected, ConnectionQueueItem*
 			conn->addListener(this);
 		}
 		callAsync([this] {
+			localTyping = false;
+			remoteTyping = false;
 			updateOnlineStatus(true);
 			addStatus(T_("A direct encrypted channel has been established"));
+			updateTypingState();
+			sendSeenIfActive();
 		});
 	}
 }
@@ -588,6 +693,8 @@ void PrivateFrame::on(ConnectionManagerListener::Removed, ConnectionQueueItem* c
 		// frame returned this connection to it.
 		PrivateChatManager::getInstance()->releasePMConn(replyTo.getUser().user, false);
 		callAsync([this] {
+			updateTypingState(false);
+			remoteTyping = false;
 			updateOnlineStatus(true);
 			addStatus(T_("The direct encrypted channel has been disconnected"));
 		});
@@ -599,7 +706,36 @@ void PrivateFrame::on(UserConnectionListener::PrivateMessage, UserConnection* uc
 	callAsync([this, message, user] {
 		addChat(message);
 		lastMessageTime = message.timestamp;
+		if(message.from != ClientManager::getInstance()->getMe()) {
+			messageSeenPending = true;
+			sendSeenIfActive();
+		}
 		WinUtil::notify(WinUtil::NOTIFICATION_PM, Text::toT(message.message), [user] { activateWindow(user); });
 		WinUtil::mainWindow->TrayPM();
 	});
+}
+
+void PrivateFrame::on(AdcCommand::PMI, UserConnection* uc, const AdcCommand& cmd) noexcept {
+	{
+		Lock l(mutex);
+		if(conn != uc) {
+			return;
+		}
+	}
+
+	PMInfo type;
+	string value;
+	if(cmd.hasFlag("SN", 0)) {
+		type = PM_INFO_SEEN;
+	} else if(cmd.getParam("TP", 0, value) && (value == "0" || value == "1")) {
+		type = value == "1" ? PM_INFO_TYPING_ON : PM_INFO_TYPING_OFF;
+	} else if(cmd.getParam("AC", 0, value) && value == "0") {
+		type = PM_INFO_NO_AUTOCONNECT;
+	} else if(cmd.hasFlag("QU", 0)) {
+		type = PM_INFO_QUIT;
+	} else {
+		return;
+	}
+
+	callAsync([this, type] { updatePMInfo(type); });
 }
