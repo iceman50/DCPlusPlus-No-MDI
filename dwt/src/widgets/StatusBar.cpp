@@ -165,7 +165,7 @@ int StatusBar::refresh() {
 	sendMessage(WM_SIZE);
 
 	auto sz = BaseType::getWindowSize();
-	layoutSections(sz);
+	layoutSections(BaseType::getClientSize());
 	return sz.y;
 }
 
@@ -221,10 +221,16 @@ StatusBar::Part& StatusBar::getPart(unsigned part) {
 }
 
 void StatusBar::layoutSections() {
-	layoutSections(getWindowSize());
+	layoutSections(getClientSize());
 }
 
 void StatusBar::layoutSections(const Point& sz) {
+	const auto parent = getParent();
+	const auto parentHasSizeGrip = parent && parent->hasStyle(WS_THICKFRAME) && !::IsZoomed(parent->handle());
+	const auto hasSizeGrip = hasStyle(SBARS_SIZEGRIP) || parentHasSizeGrip;
+	const auto gripWidth = hasSizeGrip ? std::max(getSystemMetric(SM_CXVSCROLL), static_cast<int>(sz.y)) : 0;
+	const auto width = static_cast<unsigned>(std::max(0L, sz.x - gripWidth));
+
 	std::vector<unsigned> sizes(parts.size());
 	for(size_t i = 0, n = sizes.size(); i < n; ++i)
 		sizes[i] = parts[i]->desiredSize;
@@ -232,12 +238,12 @@ void StatusBar::layoutSections(const Point& sz) {
 	sizes[fill] = 0;
 
 	const auto total = std::accumulate(sizes.begin(), sizes.end(), 0);
-	if(total + fillMin < static_cast<unsigned>(sz.x)) {
+	if(total + fillMin < width) {
 		// cool, there's enough room to fit all the parts.
 		for(auto& part: parts) {
 			part->actualSize = part->desiredSize;
 		}
-		parts[fill]->actualSize = sizes[fill] = sz.x - total;
+		parts[fill]->actualSize = sizes[fill] = width - total;
 
 		// transform sizes into offsets
 		unsigned offset = 0;
@@ -249,10 +255,16 @@ void StatusBar::layoutSections(const Point& sz) {
 	} else {
 		// only show the "fill" part if the status bar is too narrow.
 		for(auto& part: parts) { part->actualSize = 0; }
-		for(auto& size: sizes) { size = 0; }
-		parts[fill]->actualSize = sizes[fill] = sz.x;
+		parts[fill]->actualSize = width;
+		for(size_t i = 0; i < sizes.size(); ++i) {
+			// SB_SETPARTS expects right-edge coordinates. Parts before the fill
+			// part collapse at the left edge; parts after it collapse at the right.
+			sizes[i] = i < fill ? 0 : width;
+		}
 	}
 
+	// A -1 edge extends underneath a sizing grip, so reserve the grip explicitly.
+	sizes.back() = hasSizeGrip ? width : static_cast<unsigned>(-1);
 	sendMessage(SB_SETPARTS, sizes.size(), reinterpret_cast<LPARAM>(sizes.data()));
 
 	// reposition embedded widgets.
