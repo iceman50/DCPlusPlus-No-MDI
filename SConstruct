@@ -286,8 +286,8 @@ if "mingw" in env["TOOLS"]:
 
     env.Append(
         LINKFLAGS=[
-            "-static-libgcc",
-            "-static-libstdc++",
+            # Keep the MinGW runtimes, including winpthreads, in the executable.
+            "-static",
             "-mthreads",
             "-Wl,--enable-runtime-pseudo-reloc",
         ]
