@@ -5,8 +5,11 @@ def runUnitTest(env, target, source):
     import subprocess
 
     app = str(source[0].abspath)
-    if not subprocess.call(app):
-        open(str(target[0]), "w").write("PASSED\n")
+    result = subprocess.call(app)
+    if result:
+        return result
+    open(str(target[0]), "w").write("PASSED\n")
+    return 0
 
 
 env, target, sources = dev.prepare_build(
@@ -46,9 +49,20 @@ if env["msvcproj"]:
     ret = dev.build_lib(env, target, sources, dev.cpp_lib)
 else:
     ret = dev.build_program(env, target, sources)
+    test_sources = [ret[0].abspath]
+    if "mingw" in env["TOOLS"]:
+        debug_companion = env.Command(
+            target + ".pdb",
+            ret[0],
+            Action(
+                env["strip"] + ' --only-keep-debug "$SOURCE" -o "$TARGET"',
+                "Extracting debugging symbols to $TARGET",
+            ),
+        )
+        test_sources.append(debug_companion[0].abspath)
     ret = env.Command(
         dev.get_target(source_path, "gtest.passed", in_bin=False),
-        ret[0].abspath,
+        test_sources,
         runUnitTest,
     )
 

@@ -243,14 +243,27 @@ string getType(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Error& error, bool recursin
 void getDebugInfo(string path, DWORD_PTR addr, string& file, int& line, int& column, string& function) {
 	if(path.empty())
 		return;
-	// replace the extension by "pdb".
+
+	// Replace the extension with "pdb". Local release builds keep symbols for
+	// DCPlusPlus-stripped.exe in DCPlusPlus.pdb, so also try the unstripped stem.
 	auto dot = path.rfind('.');
 	if(dot != string::npos)
 		path.replace(dot, path.size() - dot, ".pdb");
 
 	// GNU debug companions are PE/COFF images. Native Microsoft PDB files are handled by DbgHelp.
 	if(!isPortableExecutable(path)) {
-		return;
+		const string strippedSuffix = "-stripped.pdb";
+		if(path.size() <= strippedSuffix.size() ||
+			path.compare(path.size() - strippedSuffix.size(), strippedSuffix.size(), strippedSuffix) != 0)
+		{
+			return;
+		}
+
+		path.erase(path.size() - strippedSuffix.size(), strippedSuffix.size());
+		path += ".pdb";
+		if(!isPortableExecutable(path)) {
+			return;
+		}
 	}
 
 	Dwarf_Debug dbg = nullptr;
@@ -336,56 +349,9 @@ void getDebugInfo(string path, DWORD_PTR addr, string& file, int& line, int& col
 							getName(dbg, cu_die, file, error);
 						}
 
-						/* to find the enclosing function, skim through the children and siblings
-						of this CU's DIE to find the one DIE that contains the frame address. */
-						Dwarf_Die die = browseDIE(dbg, addr, cu_die, error);
-						if(die) {
-
-							/* check if the DIE has a "specification" attribute which, according to
-							section 5.5.5 of the DWARF 2 spec, is a pointer to the DIE that
-							actually describes the function. */
-							Dwarf_Die spec_die = followRef(dbg, die, DW_AT_specification, error);
-
-							/* as specified in section 3.3.1 of the DWARF 2 spec, the name of this
-							function-representing DIE should be what we are looking for. */
-							getName(dbg, spec_die ? spec_die : die, function, error);
-
-							if(!function.empty()) {
-								/* according to section 3.3.2 of the DWARF 2 spec, the type of this
-								function-representing DIE is the return value of the function. */
-								function = getType(dbg, spec_die ? spec_die : die, error) + ' ' + function + '(';
-
-								/* now get the parameters of the function. each parameter is
-								represented by a DIE that is a child of the function-representing
-								DIE (section 3.3.4 of the DWARF 2 spec). */
-								Dwarf_Die child;
-								if(dwarf_child(die, &child, &error) == DW_DLV_OK) {
-									Dwarf_Die next = 0;
-									string name;
-									while(true) {
-										if(getName(dbg, child, name, error)) {
-											if(next) // not the first iteration
-												function += ", ";
-											function += getType(dbg, child, error) + ' ' + name;
-										}
-										bool ok = dwarf_siblingof_c(child, &next, &error) == DW_DLV_OK;
-										dwarf_dealloc(dbg, child, DW_DLA_DIE);
-										if(ok) {
-											child = next;
-										} else {
-											break;
-										}
-									}
-								}
-
-								function += ')';
-							}
-
-							if(spec_die) {
-								dwarf_dealloc(dbg, spec_die, DW_DLA_DIE);
-							}
-							dwarf_dealloc(dbg, die, DW_DLA_DIE);
-						}
+						// Function-level DIE traversal is intentionally skipped here. On some
+						// MinGW DWARF images this walk can fault inside the crash handler,
+						// preventing any stack trace output. File/line data is still reported.
 
 						dwarf_dealloc(dbg, cu_die, DW_DLA_DIE);
 					}
@@ -541,6 +507,7 @@ inline DWORD64 getPreferredImageBase(const char* path) {
 inline void writeBacktrace(LPCONTEXT context) {
 	HANDLE const process = GetCurrentProcess();
 	HANDLE const thread = GetCurrentThread();
+	CONTEXT walkContext = *context;
 
 #if defined(__MINGW32__)
 	SymSetOptions(SYMOPT_DEFERRED_LOADS);
@@ -561,16 +528,16 @@ inline void writeBacktrace(LPCONTEXT context) {
 	frame.AddrStack.Mode = AddrModeFlat;
 
 #ifdef _WIN64
-	frame.AddrPC.Offset = context->Rip;
-	frame.AddrFrame.Offset = context->Rbp;
-	frame.AddrStack.Offset = context->Rsp;
+	frame.AddrPC.Offset = walkContext.Rip;
+	frame.AddrFrame.Offset = walkContext.Rbp;
+	frame.AddrStack.Offset = walkContext.Rsp;
 
 #define WALK_ARCH IMAGE_FILE_MACHINE_AMD64
 
 #else
-	frame.AddrPC.Offset = context->Eip;
-	frame.AddrFrame.Offset = context->Ebp;
-	frame.AddrStack.Offset = context->Esp;
+	frame.AddrPC.Offset = walkContext.Eip;
+	frame.AddrFrame.Offset = walkContext.Ebp;
+	frame.AddrStack.Offset = walkContext.Esp;
 
 #define WALK_ARCH IMAGE_FILE_MACHINE_I386
 
@@ -579,13 +546,14 @@ inline void writeBacktrace(LPCONTEXT context) {
 	char symbolBuf[sizeof(IMAGEHLP_SYMBOL64) + 255];
 
 	for(uint8_t step = 0; step < 128; ++step) { // 128 steps max to avoid too long traces
+		const DWORD64 currentAddr = frame.AddrPC.Offset;
+		if(!currentAddr) {
+			break;
+		}
 
 		/* in case something unexpected happens when reading the next address, we want to at least
 		record the information that has been gathered so far. */
 		fflush(f);
-
-		if(!StackWalk64(WALK_ARCH, process, thread, &frame, context,
-			0, SymFunctionTableAccess64, SymGetModuleBase64, 0)) { break; }
 
 		string file;
 		int line = -1;
@@ -593,26 +561,35 @@ inline void writeBacktrace(LPCONTEXT context) {
 		string function;
 
 		IMAGEHLP_MODULE64 module = { sizeof(IMAGEHLP_MODULE64) };
-		if(!SymGetModuleInfo64(process, frame.AddrPC.Offset, &module))
-			continue;
-		fprintf(f, "%s: ", module.ModuleName);
+		const bool hasModule = SymGetModuleInfo64(process, currentAddr, &module) == TRUE;
+		fprintf(f, "%s: ", hasModule ? module.ModuleName : "?");
 
 #if defined(__MINGW32__)
 		// @todo add check for pdb file format, skip DWARF read if we have a MS format symbols file (made by e.g. cv2pdb)
 		// to avoid printing errors to the crashlog
 
 		// read DWARF debugging info if available.
-		if(module.LoadedImageName[0] ||
+		if(hasModule && (module.LoadedImageName[0] ||
 			// LoadedImageName is not always correctly filled in XP... @todo test whether we can safely remove this
-			::GetModuleFileNameA(reinterpret_cast<HMODULE>(module.BaseOfImage), module.LoadedImageName, sizeof(module.LoadedImageName)))
+			::GetModuleFileNameA(reinterpret_cast<HMODULE>(module.BaseOfImage), module.LoadedImageName, sizeof(module.LoadedImageName))))
 		{
-			DWORD64 debugAddress = frame.AddrPC.Offset;
 			const DWORD64 preferredImageBase = getPreferredImageBase(module.LoadedImageName);
-			if(preferredImageBase && frame.AddrPC.Offset >= module.BaseOfImage) {
-				debugAddress = preferredImageBase + (frame.AddrPC.Offset - module.BaseOfImage);
-			}
+			const bool hasModuleOffset = currentAddr >= module.BaseOfImage;
+			const DWORD64 moduleOffset = hasModuleOffset ? (currentAddr - module.BaseOfImage) : 0;
 
-			getDebugInfo(module.LoadedImageName, static_cast<DWORD_PTR>(debugAddress), file, line, column, function);
+			auto tryDwarf = [&](DWORD64 candidateAddress) {
+				if(file.empty() && line < 0 && function.empty()) {
+					getDebugInfo(module.LoadedImageName, static_cast<DWORD_PTR>(candidateAddress), file, line, column, function);
+				}
+			};
+
+			if(preferredImageBase && hasModuleOffset) {
+				tryDwarf(preferredImageBase + moduleOffset);
+			}
+			tryDwarf(currentAddr);
+			if(hasModuleOffset) {
+				tryDwarf(moduleOffset);
+			}
 		}
 #endif
 
@@ -622,13 +599,13 @@ inline void writeBacktrace(LPCONTEXT context) {
 			IMAGEHLP_SYMBOL64* symbol = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbolBuf);
 			symbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
 			symbol->MaxNameLength = 254;
-			if(SymGetSymFromAddr64(process, frame.AddrPC.Offset, 0, symbol)) {
+			if(SymGetSymFromAddr64(process, currentAddr, 0, symbol)) {
 				file = symbol->Name;
 			}
 
 			IMAGEHLP_LINE64 info = { sizeof(IMAGEHLP_LINE64) };
 			DWORD col;
-			if(SymGetLineFromAddr64(process, frame.AddrPC.Offset, &col, &info)) {
+			if(SymGetLineFromAddr64(process, currentAddr, &col, &info)) {
 				function = file;
 				file = info.FileName;
 				line = info.LineNumber;
@@ -649,6 +626,9 @@ inline void writeBacktrace(LPCONTEXT context) {
 			fprintf(f, ", function: %s", function.c_str());
 		}
 		fputs("\n", f);
+
+		if(!StackWalk64(WALK_ARCH, process, thread, &frame, &walkContext,
+			0, SymFunctionTableAccess64, SymGetModuleBase64, 0)) { break; }
 	}
 
 	SymCleanup(process);
@@ -658,8 +638,8 @@ inline void writeBacktrace(LPCONTEXT context) {
 
 LONG WINAPI exceptionFilter(LPEXCEPTION_POINTERS info) {
 	if(f) {
-		// only log the first exception.
-		return EXCEPTION_CONTINUE_EXECUTION;
+		// Avoid re-entering the logger if symbolization faults; let normal crash handling continue.
+		return EXCEPTION_CONTINUE_SEARCH;
 	}
 
 	f = _wfopen(CrashLogger::getPath().c_str(), L"w");
