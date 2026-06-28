@@ -43,6 +43,7 @@ public:
 	void setAcceptConnectionF(AcceptConnectionF f);
 
 	UserConnection* getPMConn(const UserPtr& user, UserConnectionListener* listener);
+	void returnPMConn(const UserPtr& user, UserConnection* uc, UserConnectionListener* listener);
 	void releasePMConn(const UserPtr& user, bool disconnect);
 
 private:

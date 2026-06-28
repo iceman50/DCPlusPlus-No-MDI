@@ -222,8 +222,8 @@ bool PrivateFrame::preClosing() {
 	{
 		Lock l(mutex);
 		if(conn) {
-			conn->removeListener(this);
-			conn->disconnect(true);
+			PrivateChatManager::getInstance()->returnPMConn(replyTo.getUser().user, conn, this);
+			conn = nullptr;
 		}
 	}
 
@@ -584,6 +584,9 @@ void PrivateFrame::on(ConnectionManagerListener::Removed, ConnectionQueueItem* c
 			Lock l(mutex);
 			conn = nullptr;
 		}
+		// The manager may have received the removal event just before a closing
+		// frame returned this connection to it.
+		PrivateChatManager::getInstance()->releasePMConn(replyTo.getUser().user, false);
 		callAsync([this] {
 			updateOnlineStatus(true);
 			addStatus(T_("The direct encrypted channel has been disconnected"));

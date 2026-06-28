@@ -62,6 +62,28 @@ UserConnection* PrivateChatManager::getPMConn(const UserPtr& user, UserConnectio
 	return uc;
 }
 
+void PrivateChatManager::returnPMConn(const UserPtr& user, UserConnection* uc, UserConnectionListener* listener) {
+	if(!uc) {
+		return;
+	}
+
+	uc->removeListener(listener);
+	if(!uc->isSecure()) {
+		uc->disconnect(true);
+		return;
+	}
+
+	Lock l(cs);
+	auto i = ccpms.find(user);
+	if(i != ccpms.end() && i->second != uc) {
+		i->second->removeListener(this);
+		i->second = uc;
+	} else if(i == ccpms.end()) {
+		ccpms.emplace(user, uc);
+	}
+	uc->addListener(this);
+}
+
 void PrivateChatManager::releasePMConn(const UserPtr& user, bool disconnect) {
 	UserConnection* uc = nullptr;
 	{
@@ -91,19 +113,21 @@ void PrivateChatManager::on(ConnectionManagerListener::Connected, ConnectionQueu
 		return;
 	}
 
-	auto accept = SETTING(POPUP_PMS);
-	if(!accept) {
-		AcceptConnectionF f;
-		{
-			Lock l(cs);
-			f = acceptConnectionF;
-		}
+	AcceptConnectionF f;
+	{
+		Lock l(cs);
+		f = acceptConnectionF;
+	}
+	const auto frameOpen = f && f(cqi->getUser());
 
-		accept = f && f(cqi->getUser());
+	if(!SETTING(POPUP_PMS) && !frameOpen) {
+		uc->disconnect(true);
+		return;
 	}
 
-	if(!accept) {
-		uc->disconnect(true);
+	// An open PM frame adopts the connection through its ConnectionManager listener.
+	// Parking it here as well would deliver the first direct message twice.
+	if(frameOpen) {
 		return;
 	}
 
