@@ -9,7 +9,6 @@
 * Lazy load SettingsDialog pages to increase responsiveness
 * OpenSSL wrapper for MinGW-w64 compilers built with UCRT (OpenSSL libs are compiled with msvcrt)
 * Decrease UI pressure from TransferView by grouping updates into one UI callback
-* Change to a true MDI setup versus the TabView setup
 * Add Per-Fav Hub shares
 * Remove boost 
 * Boost::tribool is replaced with a generic implementation

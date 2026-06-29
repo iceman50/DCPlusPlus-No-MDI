@@ -103,3 +103,4 @@ Desktop.ini
 **/.hgignore
 .hgtags
 **/.hgtags
+dcpp/version-rev-id.inc
