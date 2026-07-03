@@ -85,18 +85,6 @@ int compare(const std::wstring& a, const std::wstring& b);
 int compare(const char* a, const char* b);
 int compare(const wchar_t* a, const wchar_t* b);
 
-/** Uses SFINAE to determine whether a type provides a function; stores the result in "value".
-Inspired by <https://stackoverflow.com/a/8752988>. */
-#define HAS_FUNC(name, funcRet, funcTest) \
-	template<typename HAS_FUNC_T> struct name { \
-		typedef char yes[1]; \
-		typedef char no[2]; \
-		template<typename HAS_FUNC_U> static yes& check( \
-			typename std::enable_if<std::is_same<funcRet, decltype(std::declval<HAS_FUNC_U>().funcTest)>::value>::type*); \
-		template<typename> static no& check(...); \
-		static const bool value = sizeof(check<HAS_FUNC_T>(nullptr)) == sizeof(yes); \
-	}
-
 class Util
 {
 public:

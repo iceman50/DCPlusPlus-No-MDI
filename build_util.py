@@ -7,7 +7,6 @@ import fnmatch
 class Dev:
     def __init__(self, env):
         self.env = env
-        self.openssl_compat = None
 
         self.build_root = "#/build/" + env["mode"] + "-" + env["tools"]
         if env["arch"] != "x86":
@@ -76,10 +75,11 @@ class Dev:
                             'Using a non-prefixed version of "%s" from "%s".'
                             % (tool_bin, base_tool_path)
                         )
-                        self.env[tool_ref] = os.path.join(
-                            base_tool_path,
-                            tool_bin,
-                        )
+                        tool_path = os.path.join(base_tool_path, tool_bin)
+                        # SCons interpolates tool variables directly into its
+                        # command strings, so absolute paths containing spaces
+                        # must carry their own shell quoting.
+                        self.env[tool_ref] = '"%s"' % tool_path
 
             # when cross-compiling, be explicit about bin extensions.
             if sys.platform != "win32":
@@ -383,13 +383,6 @@ class Dev:
                 env.Prepend(LIBS=["libssl", "libcrypto"])
         else:
             env.Prepend(LIBS=["ssl", "crypto"])
-            if "mingw" in env["TOOLS"]:
-                if self.openssl_compat is None:
-                    self.openssl_compat = self.env.Object(
-                        self.get_build_path("mingw/OpenSSLCompat"),
-                        "#/mingw/OpenSSLCompat.cpp",
-                    )
-                env.Append(LIBS=self.openssl_compat)
 
     def force_console(self, env):
         if "-mwindows" in env["CCFLAGS"]:

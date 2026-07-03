@@ -18,6 +18,12 @@
 #ifndef DCPLUSPLUS_WIN32_TYPED_TABLE_H
 #define DCPLUSPLUS_WIN32_TYPED_TABLE_H
 
+#include <cstdio>
+#include <memory>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
 #include "forward.h"
 #include "WinUtil.h"
 
@@ -55,12 +61,70 @@ class TypedTable : public TableType
 	typedef TableType BaseType;
 	typedef TypedTable<ContentType, managed, TableType> ThisType;
 
+	template<typename T>
+	using text_expr_t = decltype(std::declval<T&>().getText(0));
+
+	template<typename T>
+	using image_expr_t = decltype(std::declval<T&>().getImage(0));
+
+	template<typename T>
+	using sort_expr_t = decltype(T::compareItems(std::declval<T*>(), std::declval<T*>(), 0));
+
+	template<typename T>
+	using style_expr_t = decltype(std::declval<T&>().getStyle(
+		std::declval<HFONT&>(),
+		std::declval<COLORREF&>(),
+		std::declval<COLORREF&>(),
+		0));
+
+	template<typename T>
+	using tooltip_expr_t = decltype(std::declval<T&>().getTooltip());
+
+	template<typename T, typename = void>
+	struct HasText : std::false_type { };
+
+	template<typename T>
+	struct HasText<T, std::void_t<text_expr_t<T>>> :
+		std::integral_constant<bool, std::is_convertible_v<text_expr_t<T>, const tstring&>> { };
+
+	template<typename T, typename = void>
+	struct HasImage : std::false_type { };
+
+	template<typename T>
+	struct HasImage<T, std::void_t<image_expr_t<T>>> :
+		std::integral_constant<bool, std::is_convertible_v<image_expr_t<T>, int>> { };
+
+	template<typename T, typename = void>
+	struct HasSort : std::false_type { };
+
+	template<typename T>
+	struct HasSort<T, std::void_t<sort_expr_t<T>>> :
+		std::integral_constant<bool, std::is_convertible_v<sort_expr_t<T>, int>> { };
+
+	template<typename T, typename = void>
+	struct HasStyle : std::false_type { };
+
+	template<typename T>
+	struct HasStyle<T, std::void_t<style_expr_t<T>>> :
+		std::integral_constant<bool, std::is_convertible_v<style_expr_t<T>, int>> { };
+
+	template<typename T, typename = void>
+	struct HasTooltip : std::false_type { };
+
+	template<typename T>
+	struct HasTooltip<T, std::void_t<tooltip_expr_t<T>>> :
+		std::integral_constant<bool, std::is_convertible_v<tooltip_expr_t<T>, tstring>> { };
+
+	static constexpr bool hasText = HasText<ContentType>::value;
+	static constexpr bool hasImage = HasImage<ContentType>::value;
+	static constexpr bool hasSort = HasSort<ContentType>::value;
+	static constexpr bool hasStyle = HasStyle<ContentType>::value;
+	static constexpr bool hasTooltip = HasTooltip<ContentType>::value;
+
 public:
 	typedef ThisType* ObjectType;
 
-	explicit TypedTable( dwt::Widget * parent ) : BaseType(parent) {
-
-	}
+	explicit TypedTable(dwt::Widget* parent) : BaseType(parent) { }
 
 	struct Seed : public BaseType::Seed {
 		typedef ThisType WidgetType;
@@ -69,8 +133,10 @@ public:
 		}
 	};
 
-	virtual ~TypedTable() {
-	}
+	virtual ~TypedTable() = default;
+
+	using BaseType::find;
+	using BaseType::insert;
 
 	void create(const Seed& seed) {
 #ifdef _DEBUG
@@ -78,13 +144,12 @@ public:
 #endif
 		BaseType::create(seed);
 
-		addTextEvent();
-		addImageEvent();
+		addDisplayEvent();
 		addSortEvent();
 		addStyleEvent();
 		addTooltipEvent();
 
-		if(managed) {
+		if constexpr (managed) {
 			this->onDestroy([this] { this->clear(); });
 		}
 	}
@@ -103,47 +168,51 @@ public:
 	}
 
 	void setData(int iItem, ContentType* lparam) {
-		if(managed) {
-			delete getData(iItem);
+		if constexpr (managed) {
+			auto old = getData(iItem);
+			BaseType::setData(iItem, reinterpret_cast<LPARAM>(lparam));
+			if(old != lparam) {
+				delete old;
+			}
+		} else {
+			BaseType::setData(iItem, reinterpret_cast<LPARAM>(lparam));
 		}
-		BaseType::setData(iItem, reinterpret_cast<LPARAM>(lparam));
 	}
 
 	ContentType* getSelectedData() {
 		int item = this->getSelected();
-		return item == -1 ? 0 : getData(item);
+		return item == -1 ? nullptr : getData(item);
 	}
-
-	using BaseType::find;
 
 	int find(ContentType* item) {
 		return this->findData(reinterpret_cast<LPARAM>(item));
 	}
 
 	struct CompFirst {
-		CompFirst() { }
-		bool operator()(ContentType& a, const tstring& b) {
+		bool operator()(const ContentType& a, const tstring& b) const {
 			return Util::stricmp(a.getText(0), b) < 0;
 		}
 	};
 
 	void forEach(void (ContentType::*func)()) {
-		for(int i = 0, n = static_cast<int>(this->size()); i < n; ++i)
+		for(int i = 0, n = static_cast<int>(this->size()); i < n; ++i) {
 			(getData(i)->*func)();
+		}
 	}
 	void forEachSelected(void (ContentType::*func)(), bool removing = false) {
 		int i = -1;
-		while((i = ListView_GetNextItem(this->handle(), removing ? -1 : i, LVNI_SELECTED)) != -1)
+		while((i = ListView_GetNextItem(this->handle(), removing ? -1 : i, LVNI_SELECTED)) != -1) {
 			(getData(i)->*func)();
+		}
 	}
-	template<class _Function>
-	_Function forEachT(_Function pred) {
+	template<class Function>
+	Function forEachT(Function pred) {
 		for(int i = 0, n = static_cast<int>(this->size()); i < n; ++i)
 			pred(getData(i));
 		return pred;
 	}
-	template<class _Function>
-	_Function forEachSelectedT(_Function pred, bool removing = false) {
+	template<class Function>
+	Function forEachSelectedT(Function pred, bool removing = false) {
 		int i = -1;
 		while((i = ListView_GetNextItem(this->handle(), removing ? -1 : i, LVNI_SELECTED)) != -1) {
 			pred(getData(i));
@@ -157,128 +226,152 @@ public:
 
 	void update(ContentType* item) { int i = find(item); if(i != -1) update(i); }
 
-	void clear() { if(managed) this->forEachT(DeleteFunction()); this->BaseType::clear(); }
-	void erase(int i) { if(managed) delete getData(i); this->BaseType::erase(i); }
+	void clear() {
+		if constexpr (managed) {
+			const int n = static_cast<int>(this->size());
+			std::vector<ContentType*> toDelete;
+			toDelete.reserve(static_cast<size_t>(n));
 
-	void erase(ContentType* item) { int i = find(item); if(i != -1) this->erase(i); }
+			for(int i = 0; i < n; ++i) {
+				toDelete.push_back(getData(i));
+			}
+
+			this->BaseType::clear();
+
+			for(auto p : toDelete) {
+				delete p;
+			}
+		} else {
+			this->BaseType::clear();
+		}
+	}
+
+	void erase(int i) {
+		if constexpr (managed) {
+			auto data = getData(i);
+			this->BaseType::erase(i);
+			delete data;
+		} else {
+			this->BaseType::erase(i);
+		}
+	}
+
+	void erase(ContentType* item) {
+		int i = find(item);
+		if(i != -1) {
+			this->erase(i);
+		}
+	}
 
 	void setSort(int col = -1, bool ascending = true) {
 		BaseType::setSort(col, BaseType::SORT_CALLBACK, ascending);
 	}
 
 private:
-	/// @todo simplify all these if/when the next C++ standard has static if or concepts...
-
-#define define_if(tester, retType) template<typename DeducedType = ContentType> \
-	typename std::enable_if<tester<DeducedType>::value, retType>::type
-
-	HAS_FUNC(HasText, const tstring&, getText(0));
-	HAS_FUNC(HasImage, int, getImage(0));
-	HAS_FUNC(HasSort, int, compareItems(nullptr, nullptr, 0));
-	// over-complicated to test for lvalue refs...
-	HAS_FUNC(HasStyle, int, getStyle(std::function<HFONT&()>()(), std::function<COLORREF&()>()(), std::function<COLORREF&()>()(), 0));
-	HAS_FUNC(HasTooltip, tstring, getTooltip());
-
-	define_if(HasText, void) addTextEvent() {
-		this->onRaw([this](WPARAM, LPARAM lParam) -> LRESULT {
-			auto& data = *reinterpret_cast<NMLVDISPINFO*>(lParam);
-			if(data.item.mask & LVIF_TEXT) {
-				this->handleText(data);
-			}
-			return 0;
-		}, dwt::Message(WM_NOTIFY, LVN_GETDISPINFO));
+	void addDisplayEvent() {
+		if constexpr (hasText || hasImage) {
+			this->onRaw([this](WPARAM, LPARAM lParam) -> LRESULT {
+				auto& data = *reinterpret_cast<NMLVDISPINFO*>(lParam);
+				handleDisplay(data);
+				return 0;
+			}, dwt::Message(WM_NOTIFY, LVN_GETDISPINFO));
+		}
 	}
-	define_if(!HasText, void) addTextEvent() { }
 
-	define_if(HasImage, void) addImageEvent() {
-		this->onRaw([this](WPARAM, LPARAM lParam) -> LRESULT {
-			auto& data = *reinterpret_cast<NMLVDISPINFO*>(lParam);
-			if(data.item.mask & LVIF_IMAGE) {
-				this->handleImage(data);
-			}
-			return 0;
-		}, dwt::Message(WM_NOTIFY, LVN_GETDISPINFO));
+	void addSortEvent() {
+		if constexpr (hasSort) {
+			this->onSortItems([this](LPARAM lhs, LPARAM rhs) { return this->handleSort(lhs, rhs); });
+			this->onColumnClick([this](int column) { this->handleColumnClick(column); });
+		}
 	}
-	define_if(!HasImage, void) addImageEvent() { }
 
-	define_if(HasSort, void) addSortEvent() {
-		this->onSortItems([this](LPARAM lhs, LPARAM rhs) { return this->handleSort(lhs, rhs); });
-		this->onColumnClick([this](int column) { this->handleColumnClick(column); });
+	void addStyleEvent() {
+		if constexpr (hasStyle) {
+			this->onCustomDraw([this](NMLVCUSTOMDRAW& data) { return this->handleCustomDraw(data); });
+		}
 	}
-	define_if(!HasSort, void) addSortEvent() { }
 
-	define_if(HasStyle, void) addStyleEvent() {
-		this->onCustomDraw([this](NMLVCUSTOMDRAW& data) { return this->handleCustomDraw(data); });
+	void addTooltipEvent() {
+		if constexpr (hasTooltip) {
+			this->setTooltips([this](int i) -> tstring {
+				auto data = this->getData(i);
+				return data ? data->getTooltip() : tstring();
+			});
+		}
 	}
-	define_if(!HasStyle, void) addStyleEvent() { }
-
-	define_if(HasTooltip, void) addTooltipEvent() {
-		this->setTooltips([this](int i) -> tstring { return this->getData(i)->getTooltip(); });
-	}
-	define_if(!HasTooltip, void) addTooltipEvent() { }
 
 #ifdef _DEBUG
 	void writeDebugInfo() {
 		typedef ContentType T;
 		printf("Creating a TypedTable<%s>; text: %d, images: %d, sorting: %d, custom styles: %d, tooltips: %d\n",
-			typeid(T).name(), HasText<T>::value, HasImage<T>::value, HasSort<T>::value, HasStyle<T>::value, HasTooltip<T>::value);
+			typeid(T).name(), hasText, hasImage, hasSort, hasStyle, hasTooltip);
 	}
 #endif
 
-	define_if(HasSort, int) getSortPos(ContentType* a) {
-		int high = static_cast<int>(this->size());
-		if((this->getSortColumn() == -1) || (high == 0))
-			return high;
+	void handleDisplay(NMLVDISPINFO& data) {
+		if((data.item.mask & (LVIF_TEXT | LVIF_IMAGE)) == 0) {
+			return;
+		}
 
-		high--;
+		auto content = reinterpret_cast<ContentType*>(data.item.lParam);
+		if(!content) {
+			return;
+		}
 
-		int low = 0;
-		int mid = 0;
-		ContentType* b = NULL;
-		int comp = 0;
-		while( low <= high ) {
-			mid = (low + high) / 2;
-			b = getData(mid);
-			comp = ContentType::compareItems(a, b, this->getSortColumn());
-
-			if(!this->isAscending())
-				comp = -comp;
-
-			if(comp == 0) {
-				return mid;
-			} else if(comp < 0) {
-				high = mid - 1;
-			} else if(comp > 0) {
-				low = mid + 1;
+		if constexpr (hasText) {
+			if(data.item.mask & LVIF_TEXT) {
+				handleText(*content, data);
 			}
 		}
 
-		comp = ContentType::compareItems(a, b, this->getSortColumn());
-		if(!this->isAscending())
-			comp = -comp;
-		if(comp > 0)
-			mid++;
-
-		return mid;
-	}
-	define_if(!HasSort, int) getSortPos(ContentType* a) {
-		return this->size();
+		if constexpr (hasImage) {
+			if(data.item.mask & LVIF_IMAGE) {
+				data.item.iImage = content->getImage(data.item.iSubItem);
+			}
+		}
 	}
 
-	define_if(HasText, void) handleText(NMLVDISPINFO& data) {
-		ContentType* content = reinterpret_cast<ContentType*>(data.item.lParam);
-		const tstring& text = content->getText(data.item.iSubItem);
-		const size_t length = std::min(text.size(), static_cast<size_t>(data.item.cchTextMax) - 1);
-		_tcsncpy(data.item.pszText, text.data(), length);
-		data.item.pszText[length] = 0;
+	int getSortPos(ContentType* a) {
+		if constexpr (!hasSort) {
+			return static_cast<int>(this->size());
+		} else {
+			int sortCol = this->getSortColumn();
+			int low = 0;
+			int high = static_cast<int>(this->size());
+
+			if(sortCol == -1 || high == 0) {
+				return high;
+			}
+
+			while(low < high) {
+				int mid = low + ((high - low) / 2);
+				int comp = ContentType::compareItems(a, getData(mid), sortCol);
+
+				if(!this->isAscending()) {
+					comp = -comp;
+				}
+
+				if(comp > 0) {
+					low = mid + 1;
+				} else {
+					high = mid;
+				}
+			}
+
+			return low;
+		}
 	}
 
-	define_if(HasImage, void) handleImage(NMLVDISPINFO& data) {
-		ContentType* content = reinterpret_cast<ContentType*>(data.item.lParam);
-		data.item.iImage = content->getImage(data.item.iSubItem);
+	void handleText(ContentType& content, NMLVDISPINFO& data) {
+		if(!data.item.pszText || data.item.cchTextMax <= 0) {
+			return;
+		}
+
+		const tstring& text = content.getText(data.item.iSubItem);
+		_tcsncpy_s(data.item.pszText, static_cast<size_t>(data.item.cchTextMax), text.c_str(), _TRUNCATE);
 	}
 
-	define_if(HasSort, void) handleColumnClick(int column) {
+	void handleColumnClick(int column) {
 		if(column != this->getSortColumn()) {
 			this->setSort(column, true);
 		} else if(this->isAscending()) {
@@ -288,11 +381,11 @@ private:
 		}
 	}
 
-	define_if(HasSort, int) handleSort(LPARAM lhs, LPARAM rhs) {
+	int handleSort(LPARAM lhs, LPARAM rhs) {
 		return ContentType::compareItems(reinterpret_cast<ContentType*>(lhs), reinterpret_cast<ContentType*>(rhs), this->getSortColumn());
 	}
 
-	define_if(HasStyle, LRESULT) handleCustomDraw(NMLVCUSTOMDRAW& data) {
+	LRESULT handleCustomDraw(NMLVCUSTOMDRAW& data) {
 		if(data.nmcd.dwDrawStage == CDDS_PREPAINT) {
 			return CDRF_NOTIFYITEMDRAW;
 		}
