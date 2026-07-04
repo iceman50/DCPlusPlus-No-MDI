@@ -15,11 +15,13 @@ dev.add_openssl(env)
 if dev.is_win32():
     env.Append(CPPPATH=["#/dwt/include"])
     env.Append(
-        LIBS=[
-            "comctl32",
-            "comdlg32",
-            "oleaut32",
+		LIBS=[
+			"comctl32",
+			"comdlg32",
+			"ole32",
+			"oleaut32",
             "shlwapi",
+            "windowscodecs",
             "uuid",
             "uxtheme",
             "winmm",

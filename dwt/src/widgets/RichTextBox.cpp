@@ -32,6 +32,7 @@
 #include <dwt/widgets/RichTextBox.h>
 
 #include <algorithm>
+#include <limits>
 
 #include <dwt/Point.h>
 #include <dwt/util/check.h>
@@ -164,18 +165,21 @@ inline int RichTextBox::lineFromChar(int c) {
 
 tstring RichTextBox::getSelection() const {
 	std::pair<int, int> range = getCaretPosRange();
+	const int64_t selected = static_cast<int64_t>(range.second) - range.first;
+	if(selected <= 0) return tstring();
 
-	DWORD size = ((range.second - range.first) * sizeof(TCHAR) * 2) + 1; // Double buf size due to possible CRLFs
-
-	if (size < 2)
-		return tstring();
-
-	auto buf = std::make_unique<TCHAR[]>(size);
+	// GT_USECRLF may double the character count. GETTEXTEX expresses its capacity in DWORD bytes.
+	constexpr uint64_t maxChars = (std::numeric_limits<DWORD>::max() / sizeof(TCHAR) - 1) / 2;
+	if(static_cast<uint64_t>(selected) > maxChars) return tstring();
+	const size_t capacity = static_cast<size_t>(selected) * 2 + 1;
+	auto buf = std::make_unique<TCHAR[]>(capacity);
+	buf[capacity - 1] = 0;
 
 	// This gets text with consistent line endigs and without rtf hidden control fields content across
 	// all modern Windows versions. 
 	// Wine doesn't support GT_NOHIDDENTEXT as of 2024.05 but nor does those rtf fields so there's nothing to avoid...
-	GETTEXTEX gte { size, GT_SELECTION | GT_NOHIDDENTEXT | GT_USECRLF, 1200, NULL, NULL };
+	GETTEXTEX gte { static_cast<DWORD>(capacity * sizeof(TCHAR)),
+		GT_SELECTION | GT_NOHIDDENTEXT | GT_USECRLF, 1200, NULL, NULL };
 	sendMessage(EM_GETTEXTEX, reinterpret_cast< WPARAM >(&gte), reinterpret_cast< LPARAM >(buf.get()));
 
 	return buf.get();
@@ -192,10 +196,25 @@ void RichTextBox::setScrollPos(Point& scrollPos) {
 }
 
 tstring RichTextBox::textUnderCursor(const ScreenCoordinate& p, bool includeSpaces) {
-	tstring tmp = getText();
+	const int character = charFromPos(p);
+	const int line = lineFromChar(character);
+	const int lineStart = lineIndex(line);
+	if(lineStart < 0) return tstring();
+	const int lineSize = lineLength(lineStart);
+	if(lineSize <= 0 || lineStart > std::numeric_limits<int>::max() - lineSize) return tstring();
+	const int lineEnd = lineStart + lineSize;
+	if(lineEnd <= lineStart) return tstring();
+
+	auto buffer = std::make_unique<TCHAR[]>(static_cast<size_t>(lineEnd - lineStart) + 1);
+	buffer[lineEnd - lineStart] = 0;
+	TEXTRANGE range { { lineStart, lineEnd }, buffer.get() };
+	const auto copied = std::clamp<LRESULT>(sendMessage(EM_GETTEXTRANGE, 0,
+		reinterpret_cast<LPARAM>(&range)), 0, lineEnd - lineStart);
+	tstring tmp(buffer.get(), static_cast<size_t>(copied));
+	const auto localCharacter = static_cast<tstring::difference_type>(std::clamp(character - lineStart, 0, lineEnd - lineStart));
 
 	tstring::size_type start = tmp.find_last_of(includeSpaces ? _T("<\t\r\n") : _T(" <\t\r\n"),
-		fixupLineEndings(tmp.begin(), tmp.end(), charFromPos(p) - 1));
+		localCharacter > 0 ? static_cast<size_t>(localCharacter - 1) : 0);
 	if(start == tstring::npos)
 		start = 0;
 	else
@@ -245,61 +264,78 @@ void RichTextBox::addText(const std::string & txt) {
 }
 
 void RichTextBox::addTextSteady(const tstring& txtRaw) {
+	addTextSteadyBatch({ txtRaw });
+}
+
+std::vector<std::pair<int, int>> RichTextBox::addTextSteadyBatch(const std::vector<tstring>& documents) {
+	std::vector<std::pair<int, int>> ranges;
+	if(documents.empty()) return ranges;
+
 	HoldScroll hold { this };
+	/* RICHEDIT50W accepts plain RTF through EM_SETTEXTEX while read-only, but silently discards
+	 * embedded picture objects. Temporarily permit programmatic editing for the atomic, redraw-held
+	 * insertion and restore the user-facing read-only state before repainting. */
+	const bool wasReadOnly = isReadOnly();
+	struct RestoreReadOnly {
+		RichTextBox* box;
+		bool value;
+		~RestoreReadOnly() { if(value) box->setReadOnly(); }
+	} restoreReadOnly { this, wasReadOnly };
+	if(wasReadOnly) setReadOnly(false);
 
 	std::pair<int, int> cr = getCaretPosRange();
-	std::string txt = escapeUnicode(txtRaw);
 
-	int charsToRemove = 0;
+	const int previousLength = static_cast<int>(std::min<size_t>(length(), std::numeric_limits<int>::max()));
+	const int configuredLimit = getTextLimit();
+	const int limit = configuredLimit > 0 ? configuredLimit : std::numeric_limits<int>::max();
 
-	/* this will include more chars than there actually are because of RTF codes. not a problem
-	here; accuracy isn't necessary since whole lines are getting chopped anyway. */
-	size_t prevLen = length();
-	size_t addedLen = txtRaw.size();
-	size_t limit = getTextLimit();
+	/* RTF byte size is unrelated to the resulting character count (a small image may use thousands
+	 * of hexadecimal RTF bytes). Temporarily lift the control limit, append, then trim using the
+	 * actual Rich Edit character count so image-rich messages don't evict history prematurely. */
+	struct RestoreLimit {
+		RichTextBox* box;
+		int value;
+		~RestoreLimit() { box->setTextLimit(value); }
+	} restoreLimit { this, configuredLimit };
+	if(configuredLimit < std::numeric_limits<int>::max()) setTextLimit(std::numeric_limits<int>::max());
 
-	if(prevLen + addedLen > limit) {
-		/* adding text would overflow the char limit. -> remove some (or all) existing lines. */
-
-		if(addedLen >= limit) {
-			/* adding more text than the box can contain. -> remove all previous lines. */
-			charsToRemove = static_cast<int>(prevLen);
-			hold.scroll = true;
-
-		} else {
-			/* the text being added fits within the box, but not when appended to current contents.
-			 * -> find out how many lines have to be removed. we try from 10 % to 80 % of the text
-			 *    limit. */
-			for(auto multiplier = 1; multiplier <= 8; ++multiplier) {
-				auto charsToDivLimit = lineIndex(lineFromChar(static_cast<int>(limit * multiplier / 10)));
-				if(charsToDivLimit >= 0 && prevLen + addedLen - charsToDivLimit < limit) {
-					/* good, got enough room for the new text! */
-					charsToRemove = charsToDivLimit;
-					if(!hold.scroll) {
-						/* when not in auto-scroll mode, adjust the scroll pos to stay on the same
-						 * line, despite removing some at the top of the box. adjust based on the
-						 * origin of the box (posFromChar 0) as posFromChar coordinates are
-						 * relative to the current scroll pos (we want coordinates relative to the
-						 * origin of the box). */
-						hold.scrollPos.y -= posFromChar(charsToRemove).y - posFromChar(0).y;
-					}
-					break;
-				}
-			}
-			if(charsToRemove <= 0) {
-				/* clearing out 80 % of the current text would not be enough. -> remove all
-				 * previous lines. */
-				charsToRemove = static_cast<int>(prevLen);
-				hold.scroll = true;
-			}
-		}
-
-		setSelection(0, charsToRemove);
-		replaceSelection(_T(""));
+	ranges.reserve(documents.size());
+	for(const auto& document: documents) {
+		const auto begin = static_cast<int>(length());
+		addText(escapeUnicode(document));
+		ranges.emplace_back(begin, static_cast<int>(length()));
 	}
 
-	addText(txt);
-	setSelection(cr.first - charsToRemove, cr.second - charsToRemove);
+	int charsToRemove = 0;
+	const int finalLength = static_cast<int>(std::min<size_t>(length(), std::numeric_limits<int>::max()));
+	if(finalLength > limit) {
+		// Trim to a 90% low-water mark to avoid doing a deletion for every subsequent message.
+		const int targetLength = limit - limit / 10;
+		const int required = finalLength - targetLength;
+		const int line = lineFromChar(required);
+		charsToRemove = line >= 0 ? lineIndex(line + 1) : -1;
+		if(charsToRemove <= 0 || charsToRemove > finalLength) charsToRemove = required;
+
+		if(charsToRemove >= previousLength) {
+			hold.scroll = true;
+		} else if(!hold.scroll) {
+			hold.scrollPos.y -= posFromChar(charsToRemove).y - posFromChar(0).y;
+		}
+		setSelection(0, charsToRemove);
+		replaceSelection(_T(""));
+
+		for(auto& range: ranges) {
+			range.first = std::max(0, range.first - charsToRemove);
+			range.second = std::max(0, range.second - charsToRemove);
+		}
+	}
+
+	const int retainedLength = static_cast<int>(std::min<size_t>(length(), std::numeric_limits<int>::max()));
+	const auto adjustedCaret = [charsToRemove, retainedLength](int position) {
+		return position <= charsToRemove ? 0 : std::min(position - charsToRemove, retainedLength);
+	};
+	setSelection(adjustedCaret(cr.first), adjustedCaret(cr.second));
+	return ranges;
 }
 
 void RichTextBox::findText(tstring const& needle) {
@@ -361,6 +397,7 @@ std::string RichTextBox::unicodeEscapeFormatter(const tstring_range& match) {
 
 std::string RichTextBox::escapeUnicode(const tstring& str) {
 	std::string ret;
+	ret.reserve(str.size());
 	for (auto ch : str) {
 		if (ch > 0x7f) {
 			ret += unicodeEscapeFormatter(tstring_range(&ch, 1));
@@ -382,6 +419,7 @@ tstring RichTextBox::rtfEscapeFormatter(const tstring_range& match) {
 
 tstring RichTextBox::rtfEscape(const tstring& str) {
 	tstring escaped;
+	escaped.reserve(str.size());
 	for (auto ch : str) {
 		if (ch == '{' || ch == '}' || ch == '\\' || ch == '\n' || ch == '\r') {
 			tstring_range range(&ch, 1);
@@ -457,7 +495,7 @@ bool RichTextBox::handleMessage(const MSG& msg, LRESULT& retVal) {
 
 	/* when scrolling downwards, the content of the box sometimes scrolls up too far, leaving blank
 	space below the last line. this behavior seems to be specific to Rich Edit 4.1. */
-	if(msg.message == WM_VSCROLL && msg.wParam == SB_PAGEDOWN) {
+	if(msg.message == WM_VSCROLL && LOWORD(msg.wParam) == SB_PAGEDOWN) {
 		retVal = getDispatcher().chain(msg);
 		if(scrollIsAtEnd())
 			scrollToBottom();

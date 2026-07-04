@@ -23,8 +23,12 @@
 #include <dcpp/SimpleXML.h>
 #include <dcpp/Tagger.h>
 #include <dcpp/PluginManager.h>
+#include <dcpp/User.h>
 
 #include <dwt/WidgetCreator.h>
+
+#include <deque>
+#include <memory>
 
 #include "HoldRedraw.h"
 #include "HtmlToRtf.h"
@@ -40,10 +44,12 @@ class AspectChat {
 
 protected:
 	AspectChat() :
-	chat(0),
-	message(0),
-	messageLines(1),
-	curCommandPosition(0)
+		chat(0),
+		message(0),
+		messageLines(1),
+		chatFlushScheduled(false),
+		chatAlive(std::make_shared<bool>(true)),
+		curCommandPosition(0)
 	{
 	}
 
@@ -71,7 +77,7 @@ protected:
 		t().addAccel(0, VK_F3, [this] { this->findText(true); });
 	}
 
-	virtual ~AspectChat() { }
+	virtual ~AspectChat() { *chatAlive = false; }
 
 	/// add a chat message with some formatting and call addedChat.
 	void addChat(const tstring& message) {
@@ -82,38 +88,46 @@ protected:
 
 		PluginManager::getInstance()->onChatTags(tags);
 
-		string htmlMessage = "<span id=\"message\" style=\"white-space: pre-wrap;\">"
+		string htmlMessage = "<span id=\"systemMessage\" style=\"white-space: pre-wrap;\">"
 			"<span id=\"timestamp\">" + SimpleXML::escape("[" + Util::getShortTimeString() + "]", tmp, false) + "</span> "
 			"<span id=\"text\">" + tags.merge(tmp) + "</span></span>";
 
 		PluginManager::getInstance()->onChatDisplay(htmlMessage);
 
-		addChatHTML(htmlMessage);
+		addChatHTML(htmlMessage, message, Util::emptyStringT, Util::emptyString, time(nullptr));
 		t().addedChat(message);
 	}
 
 	/// add a ChatMessage and call addedChat.
 	void addChat(const ChatMessage& message) {
-		addChatHTML(message.htmlMessage);
+		addChatHTML(message.htmlMessage, Text::toT(message.message), Text::toT(message.nick),
+			message.from ? message.from->getCID().toBase32() : Util::emptyString, message.timestamp);
 		t().addedChat(Text::toT(message.message));
 	}
 
 	/// add a plain text string directly, with no formatting.
 	void addChatPlain(const tstring& message) {
-		addChatRTF(dwt::RichTextBox::rtfEscape(message));
+		string tmp;
+		addChatHTML("<span id=\"systemMessage\">" + SimpleXML::escape(Text::fromT(message), tmp, false) + "</span>",
+			message, Util::emptyStringT, Util::emptyString, time(nullptr));
 	}
 
 	/// add an RTF-formatted message.
-	void addChatRTF(tstring message) {
-		/// @todo factor out to dwt
-		if(chat->length() > 0)
-			message = _T("\\line\n") + message;
-		chat->addTextSteady(_T("{\\urtf1\n") + message + _T("}\n"));
+	void addChatRTF(tstring message, tstring plainText = Util::emptyStringT,
+		tstring author = Util::emptyStringT, string userId = Util::emptyString, time_t timestamp = 0) {
+		pendingChat.push_back({ std::move(message), std::move(plainText), std::move(author), std::move(userId), timestamp });
+		if(chatFlushScheduled) return;
+		chatFlushScheduled = true;
+		auto alive = chatAlive;
+		t().callAsync([this, alive] {
+			if(*alive) flushChat();
+		});
 	}
 
 	/// add an HTML-formatted message.
-	void addChatHTML(const string& message) {
-		addChatRTF(HtmlToRtf::convert(message, chat));
+	void addChatHTML(const string& message, const tstring& plainText = Util::emptyStringT,
+		tstring author = Util::emptyStringT, string userId = Util::emptyString, time_t timestamp = 0) {
+		addChatRTF(HtmlToRtf::convert(message, chat), plainText, std::move(author), std::move(userId), timestamp);
 	}
 
 	void readLog(const string& logPath, const unsigned setting) {
@@ -154,6 +168,9 @@ protected:
 
 	bool checkCommand(const tstring& cmd, const tstring& param, tstring& status) {
 		if(Util::stricmp(cmd.c_str(), _T("clear")) == 0) {
+			// A posted batch has already been received logically; discard it as part of the clear
+			// rather than allowing its delayed UI flush to make old messages reappear.
+			pendingChat.clear();
 			unsigned linesToKeep = 0;
 			if(!param.empty())
 				linesToKeep = Util::toInt(Text::fromT(param));
@@ -161,12 +178,17 @@ protected:
 				unsigned lineCount = chat->getLineCount();
 				if(linesToKeep < lineCount) {
 					dwt::RichTextBox::HoldScroll hold { chat };
-					chat->setSelection(0, chat->lineIndex(lineCount - linesToKeep));
-					chat->replaceSelection(_T(""));
+					const auto removeEnd = chat->lineIndex(lineCount - linesToKeep);
+					if(removeEnd > 0) {
+						chat->setSelection(0, removeEnd);
+						chat->replaceSelection(_T(""));
+						chat->discardMessagePrefix(removeEnd);
+					}
 				}
 			} else {
 				chat->setSelection();
 				chat->replaceSelection(_T(""));
+				chat->clearMessageMetadata();
 			}
 
 		} else if(Util::stricmp(cmd.c_str(), _T("f")) == 0) {
@@ -279,6 +301,30 @@ protected:
 	unsigned messageLines;
 
 private:
+	void flushChat() {
+		constexpr size_t maxBatchSize = 128;
+		std::vector<RichTextBox::RenderedMessage> batch;
+		batch.reserve(std::min(maxBatchSize, pendingChat.size()));
+		while(!pendingChat.empty() && batch.size() < maxBatchSize) {
+			batch.push_back(std::move(pendingChat.front()));
+			pendingChat.pop_front();
+		}
+		chat->appendMessages(std::move(batch));
+
+		if(pendingChat.empty()) {
+			chatFlushScheduled = false;
+		} else {
+			auto alive = chatAlive;
+			t().callAsync([this, alive] {
+				if(*alive) flushChat();
+			});
+		}
+	}
+
+	std::deque<RichTextBox::RenderedMessage> pendingChat;
+	bool chatFlushScheduled;
+	std::shared_ptr<bool> chatAlive;
+
 	TStringList prevCommands;
 	tstring currentCommand;
 	TStringList::size_type curCommandPosition; //can't use an iterator because StringList is a vector, and vector iterators become invalid after resizing

@@ -90,7 +90,7 @@ MenuPtr RichTextBox::getMenu(const tstring& searchText) {
 	auto menu = BaseType::getMenu();
 
 	menu->appendSeparator();
-	auto enabled = !getText().empty();
+	auto enabled = length() != 0;
 	menu->appendItem(T_("&Find...\tCtrl+F"), [this, searchText] { findTextNew(searchText); }, dwt::IconPtr(), enabled);
 	menu->appendItem(T_("Find &Next\tF3"), [this, searchText] { findTextNext(searchText); }, dwt::IconPtr(), enabled);
 
@@ -143,6 +143,55 @@ void RichTextBox::onLink(LinkF f) {
 	linkF = f;
 }
 
+void RichTextBox::appendMessages(std::vector<RenderedMessage> batch) {
+	if(batch.empty()) return;
+
+	const int oldLength = static_cast<int>(length());
+	bool addLine = oldLength != 0;
+	std::vector<tstring> documents;
+	documents.reserve(batch.size());
+	for(auto& message: batch) {
+		tstring document = _T("{\\urtf1\n");
+		if(addLine) document += _T("\\line\n");
+		document += message.rtf;
+		document += _T("}\n");
+		documents.push_back(std::move(document));
+		addLine = true;
+	}
+
+	auto ranges = addTextSteadyBatch(documents);
+	if(ranges.empty()) return;
+
+	const int removed = std::max(0, oldLength - ranges.front().first);
+	adjustMessageRanges(removed);
+	for(size_t i = 0; i < ranges.size(); ++i) {
+		if(ranges[i].second <= ranges[i].first) continue;
+		messages.push_back({ nextMessageId++, ranges[i].first, ranges[i].second,
+			std::move(batch[i].plainText), std::move(batch[i].author), std::move(batch[i].userId), batch[i].timestamp });
+	}
+}
+
+const RichTextBox::MessageRange* RichTextBox::messageAt(int character) const {
+	for(auto i = messages.rbegin(); i != messages.rend(); ++i) {
+		if(character >= i->begin && character < i->end) return &*i;
+		if(character > i->end) break;
+	}
+	return nullptr;
+}
+
+void RichTextBox::adjustMessageRanges(int removed) {
+	if(removed <= 0) return;
+	while(!messages.empty() && messages.front().end <= removed) messages.pop_front();
+	for(auto& message: messages) {
+		message.begin = std::max(0, message.begin - removed);
+		message.end = std::max(0, message.end - removed);
+	}
+}
+
+void RichTextBox::discardMessagePrefix(int characters) {
+	adjustMessageRanges(characters);
+}
+
 LRESULT RichTextBox::handleLink(ENLINK& link) {
 	/* the control doesn't handle click events, just "mouse down" & "mouse up". so we have to make
 	sure the mouse hasn't moved between "down" & "up". */
@@ -184,10 +233,17 @@ void RichTextBox::handleLinkTip(tstring& text) {
 }
 
 tstring RichTextBox::getLinkText(const ENLINK& link) {
-	std::unique_ptr<TCHAR[]> buf(new TCHAR[link.chrg.cpMax - link.chrg.cpMin + 1]);
-	TEXTRANGE text = { link.chrg, buf.get() };
-	sendMessage(EM_GETTEXTRANGE, 0, reinterpret_cast<LPARAM>(&text));
-	return buf.get();
+	const auto controlLength = static_cast<LONG>(std::min<size_t>(length(), LONG_MAX));
+	const LONG begin = std::clamp<LONG>(link.chrg.cpMin, 0, controlLength);
+	const LONG end = std::clamp<LONG>(link.chrg.cpMax, begin, controlLength);
+	if(end <= begin) return tstring();
+
+	auto buf = std::make_unique<TCHAR[]>(static_cast<size_t>(end - begin) + 1);
+	buf[end - begin] = 0;
+	TEXTRANGE text = { { begin, end }, buf.get() };
+	const auto copied = std::clamp<LRESULT>(sendMessage(EM_GETTEXTRANGE, 0,
+		reinterpret_cast<LPARAM>(&text)), 0, end - begin);
+	return tstring(buf.get(), static_cast<size_t>(copied));
 }
 
 void RichTextBox::openLink(const tstring& text) {

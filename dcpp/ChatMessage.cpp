@@ -19,6 +19,7 @@
 #include "ChatMessage.h"
 
 #include "Client.h"
+#include "EmoticonManager.h"
 #include "format.h"
 #include "Magnet.h"
 #include "OnlineUser.h"
@@ -53,20 +54,25 @@ messageTimestamp(messageTimestamp)
 		return ret;
 	};
 
+	// Self-authored messages use distinct semantic spans so presentation layers can color the
+	// timestamp, nickname and body independently without changing logs or plugin-facing text.
+	const bool ownMessage = from->getIdentity().isSelf();
+
 	htmlMessage += "<span id=\"message\" style=\"white-space: pre-wrap;\">";
 
 	if(SETTING(TIME_STAMPS)) {
 		tmp = "[" + Util::getShortTimeString(timestamp) + "]";
-		htmlMessage += addSpan("timestamp", tmp, Util::emptyString) + " ";
+		htmlMessage += addSpan(ownMessage ? "ownTimestamp" : "timestamp", tmp, Util::emptyString) + " ";
 	}
 
 	if(messageTimestamp) {
 		tmp = "["; tmp += str(F_("Sent %1%") % Util::getShortTimeString(messageTimestamp)); tmp += "]";
 		message += tmp + " ";
-		htmlMessage += addSpan("messageTimestamp", tmp, Util::emptyString) + " ";
+		htmlMessage += addSpan(ownMessage ? "ownMessageTimestamp" : "messageTimestamp", tmp, Util::emptyString) + " ";
 	}
 
-	tmp = from->getIdentity().getNick();
+	nick = from->getIdentity().getNick();
+	tmp = nick;
 	// let's *not* obey the spec here and add a space after the star. :P
 	tmp = thirdPerson ? "* " + tmp + " " : "<" + tmp + ">";
 	message += tmp + " ";
@@ -74,9 +80,10 @@ messageTimestamp(messageTimestamp)
 	auto style = from->getIdentity().getStyle();
 	string styleAttr;
 	if(!style.font.empty()) { styleAttr += "font: " + Util::cssFont(style.font) + ";"; }
-	if(style.textColor != -1) { styleAttr += "color: #" + Util::cssColor(style.textColor) + ";"; }
+	if(style.textColor != -1 && !ownMessage) { styleAttr += "color: #" + Util::cssColor(style.textColor) + ";"; }
 	if(style.bgColor != -1) { styleAttr += "background-color: #" + Util::cssColor(style.bgColor) + ";"; }
-	htmlMessage += addSpan("nick", tmp, styleAttr) + " ";
+	// The configured own-nickname color intentionally takes precedence over user-match text color.
+	htmlMessage += addSpan(ownMessage ? "ownNick" : "nick", tmp, styleAttr) + " ";
 
 	// Check all '<' and '[' after newlines as they're probably pastes...
 	tmp = text;
@@ -95,12 +102,12 @@ messageTimestamp(messageTimestamp)
 
 	/* format the message; this will involve adding custom tags. use the Tagger class to that end. */
 	Tagger tags(move(tmp));
-	format(tags, xmlTmp);
+	format(tags, xmlTmp, from->getClient().getMyNick());
 
 	// let plugins play with the tag list
 	PluginManager::getInstance()->onChatTags(tags, from);
 
-	htmlMessage += "<span id=\"text\">" + tags.merge(xmlTmp) + "</span></span>";
+	htmlMessage += "<span id=\"" + string(ownMessage ? "ownText" : "text") + "\">" + tags.merge(xmlTmp) + "</span></span>";
 
 	// forward to plugins
 	PluginManager::getInstance()->onChatDisplay(htmlMessage, from);
@@ -113,6 +120,10 @@ namespace { inline bool validSchemeChar(char c, bool first) {
 } }
 
 void ChatMessage::format(Tagger& tags, string& tmp) {
+	format(tags, tmp, SETTING(NICK));
+}
+
+void ChatMessage::format(Tagger& tags, string& tmp, const string& mentionNick) {
 	const auto& text = tags.getText();
 
 	/* link formatting - optimize the lookup a bit by using the fact that every link identifier
@@ -186,6 +197,44 @@ void ChatMessage::format(Tagger& tags, string& tmp) {
 			}
 		}
 		i += 5;
+	}
+
+	/* Keep recognition in the protocol-independent formatter. The semantic tag lets each UI render
+	the package icon without changing the logged/plain-text message. Rules and icon names are loaded
+	from the configured .dcemo package; boundary checks prevent matches inside URLs and words. */
+	if(SETTING(ENABLE_EMOTICONS)) {
+		auto isBoundary = [](char c) {
+			return std::isspace(static_cast<unsigned char>(c)) != 0 ||
+				c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' ||
+				c == ',' || c == '.' || c == '!' || c == '?';
+		};
+
+		for(const auto& emoticon: EmoticonManager::getRules()) {
+			const auto tokenLength = emoticon.text.size();
+			size_t pos = 0;
+			while((pos = text.find(emoticon.text, pos)) != string::npos) {
+				const size_t endPos = pos + tokenLength;
+				const bool left = pos == 0 || isBoundary(text[pos - 1]);
+				const bool right = endPos == text.size() || isBoundary(text[endPos]);
+				if(left && right) {
+					tags.addTag(pos, endPos, "emoticon", "name=\"" + SimpleXML::escape(emoticon.name, tmp, true) + "\"");
+				}
+				pos = endPos;
+			}
+		}
+	}
+
+	if(!mentionNick.empty()) {
+		size_t pos = 0;
+		while((pos = text.find(mentionNick, pos)) != string::npos) {
+			const auto endPos = pos + mentionNick.size();
+			const bool left = pos == 0 || !std::isalnum(static_cast<unsigned char>(text[pos - 1]));
+			const bool right = endPos == text.size() || !std::isalnum(static_cast<unsigned char>(text[endPos]));
+			if(left && right) {
+				tags.addTag(pos, endPos, "span", "id=\"mention\"");
+			}
+			pos = endPos;
+		}
 	}
 }
 

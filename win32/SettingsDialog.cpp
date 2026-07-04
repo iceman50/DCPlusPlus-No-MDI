@@ -45,6 +45,7 @@
 #include "UploadFilteringPage.h"
 
 #include "AppearancePage.h"
+#include "EmoticonsPage.h"
 #include "StylesPage.h"
 #include "TabsPage.h"
 #include "WindowsPage.h"
@@ -68,7 +69,7 @@ using dwt::GridInfo;
 
 using dwt::ToolTip;
 
-const int SettingsDialog::pluginPagePos = 23; // remember to change when adding pages...
+const int SettingsDialog::pluginPagePos = 24; // remember to change when adding pages...
 
 SettingsDialog::SettingsDialog(dwt::Widget* parent) :
 dwt::ModalDialog(parent),
@@ -173,6 +174,7 @@ bool SettingsDialog::initDialog() {
 
 		{
 			HTREEITEM item = addPage(T_("Appearance"), typeid(AppearancePage), [container] { return new AppearancePage(container); }, IDI_DCPP, TVI_ROOT);
+			addPage(T_("Emoticons"), typeid(EmoticonsPage), [container] { return new EmoticonsPage(container); }, IDI_CHAT, item);
 			addPage(T_("Styles"), typeid(StylesPage), [container] { return new StylesPage(container); }, IDI_STYLES, item);
 			addPage(T_("Tabs"), typeid(TabsPage), [container] { return new TabsPage(container); }, IDI_TABS, item);
 			addPage(T_("Windows"), typeid(WindowsPage), [container] { return new WindowsPage(container); }, IDI_WINDOWS, item);

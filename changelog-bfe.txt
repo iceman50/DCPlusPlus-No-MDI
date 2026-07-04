@@ -1,3 +1,17 @@
+== 07-04-2026 - 0.8832 !!!Experimental!!! ==
+* Add semantic RichEdit chat coloring for timestamps, nicknames, message text, system messages and mentions
+* Add separate timestamp, nickname and message colors for your own outgoing chat messages
+* Batch RichEdit chat updates to reduce UI pressure while preserving selection and scroll position
+* Harden RichEdit text limits, trimming, range handling and embedded-image insertion
+* Add configurable chat emoticons loaded from .dcemo ZIP packages
+* Add XML shortcut rules and BMP, ICO and PNG image support for emoticon packages
+* Add an Appearance > Emoticons settings page with package, display-size and preferred bit-depth selectors
+* Add a settings-based .dcemo package builder and exporter with package versions inherited from VERSIONSTRING
+* Add generic XML emoticon-package importing and conversion to .dcemo
+* Prefer 16-bpp or higher ICO frames and render full-color PNG images in RichEdit
+* Add archive extraction path validation for imported packages
+* Add chat-format tests for emoticon boundaries, disabling emoticons and hub-specific mentions
+
 == 06-28-2026 - 0.8831 !!!Experimental!!! ==
 * Current DC++ HG Rev [9ece08] (as of 06-21-2026)
 * Add CPMI notifications for direct private message channels (typing, message seen and coordinated window closing)

@@ -50,6 +50,19 @@ Archive::~Archive() {
 
 void Archive::extract(const string& path) {
 	auto isDir = [](const string& path) { return *(path.end() - 1) == '/' || *(path.end() - 1) == '\\'; };
+	auto isSafeEntry = [](string entry) {
+		if(entry.empty() || entry.front() == '/' || entry.front() == '\\' || entry.find(':') != string::npos) return false;
+		std::replace(entry.begin(), entry.end(), '\\', '/');
+		size_t begin = 0;
+		while(begin < entry.size()) {
+			const auto end = entry.find('/', begin);
+			const auto part = entry.substr(begin, end == string::npos ? string::npos : end - begin);
+			if(part.empty() || part == "." || part == "..") return false;
+			if(end == string::npos) break;
+			begin = end + 1;
+		}
+		return true;
+	};
 
 	dcassert(!path.empty() && isDir(path));
 
@@ -58,12 +71,12 @@ void Archive::extract(const string& path) {
 	do {
 		char pathBuf[PATH_MAX];
 		if(check(unzGetCurrentFileInfo(file, nullptr, pathBuf, PATH_MAX, nullptr, 0, nullptr, 0)) != UNZ_OK) { continue; }
-		if(check(unzOpenCurrentFile(file)) != UNZ_OK) { continue; }
-
 		string path_out(pathBuf);
 		if(path_out.empty() || isDir(path_out)) {
 			continue;
 		}
+		if(!isSafeEntry(path_out)) throw Exception(_("Invalid archive path"));
+		if(check(unzOpenCurrentFile(file)) != UNZ_OK) { continue; }
 		path_out = path + path_out;
 
 		File::ensureDirectory(path_out);

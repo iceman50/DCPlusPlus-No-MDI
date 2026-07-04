@@ -58,7 +58,7 @@ const string SettingsManager::settingTags[] =
 	"LogFileStatus", "LogFileUpload", "LogFileDownload", "LogFileFinishedDownload", "LogFileSystem",
 	"LogFormatSystem", "LogFormatStatus",
 	"TLSPrivateKeyFile", "TLSCertificateFile", "TLSTrustedCertificatesPath",
-	"Language", "Toolbar", "LastSearchType", "Mapper", "Mapper6",
+	"Language", "Toolbar", "LastSearchType", "Mapper", "Mapper6", "EmoticonPack",
 	"SoundMainChat", "SoundPM", "SoundPMWindow", "SoundFinishedDL", "SoundFinishedFL", "LastSharedFolder",
 	"SharingSkiplistExtensions", "SharingSkiplistRegEx", "SharingSkiplistPaths", "WhitelistOpenURIs",
 	"ACFrameOrder", "ACFrameWidths",
@@ -69,6 +69,10 @@ const string SettingsManager::settingTags[] =
 	"SocksPort", "SocketInBuffer", "SocketOutBuffer",
 	"TextColor", "BackgroundColor", "UploadTextColor", "UploadBgColor", "DownloadTextColor",
 	"DownloadBgColor", "LinkColor", "LogColor",
+	"ChatTimestampColor", "ChatNickColor", "ChatTextColor", "ChatSystemColor",
+	"ChatOwnTimestampColor", "ChatOwnNickColor", "ChatOwnTextColor",
+	"ChatMentionColor", "ChatMentionBgColor",
+	"EmoticonSize", "EmoticonBitDepth",
 	"BandwidthLimitStart", "BandwidthLimitEnd", "MaxDownloadSpeedRealTime",
 	"MaxUploadSpeedTime", "MaxDownloadSpeedPrimary", "MaxUploadSpeedPrimary",
 	"SlotsAlternateLimiting", "SlotsPrimaryLimiting",
@@ -95,7 +99,7 @@ const string SettingsManager::settingTags[] =
 	"AutoSearchAutoMatch", "AutoDropAll", "AutoDropDisconnect", "AutoDropFilelists",
 	"AwayCompLock", "AwayTimeStamp", "BoldFinishedDownloads", "BoldFinishedUploads", "BoldFL",
 	"BoldHub", "BoldPm", "BoldQueue", "BoldSearch", "BoldSystemLog", "ClearSearch",
-	"ClickableChatLinks",
+	"ClickableChatLinks", "EnableEmoticons",
 	"CompressTransfers", "ConfirmADLSRemoval", "ConfirmExit", "ConfirmHubClosing",
 	"ConfirmHubRemoval", "ConfirmItemRemoval", "ConfirmUserRemoval", "DcextRegister",
 	"DontDlAlreadyQueued", "DontDLAlreadyShared", "EnableCCPM", "FavShowJoins",
@@ -184,6 +188,10 @@ SettingsManager::SettingsManager() {
 	setDefault(AUTO_FOLLOW, true);
 	setDefault(CLEAR_SEARCH, true);
 	setDefault(CLICKABLE_CHAT_LINKS, true);
+	setDefault(ENABLE_EMOTICONS, true);
+	setDefault(EMOTICON_PACK, Util::emptyString);
+	setDefault(EMOTICON_SIZE, 16);
+	setDefault(EMOTICON_BIT_DEPTH, 16);
 	setDefault(SHARE_HIDDEN, false);
 	setDefault(FILTER_MESSAGES, true);
 	setDefault(MINIMIZE_TRAY, true);
@@ -391,6 +399,16 @@ SettingsManager::SettingsManager() {
 	setDefault(UPLOAD_BG_COLOR, RGB(205, 60, 55));
 	setDefault(DOWNLOAD_TEXT_COLOR, RGB(255, 255, 255));
 	setDefault(DOWNLOAD_BG_COLOR, RGB(55, 170, 85));
+	setDefault(CHAT_TIMESTAMP_COLOR, RGB(112, 112, 112));
+	setDefault(CHAT_NICK_COLOR, RGB(0, 102, 204));
+	setDefault(CHAT_TEXT_COLOR, getDefault(TEXT_COLOR));
+	setDefault(CHAT_SYSTEM_COLOR, RGB(96, 96, 160));
+	// Keep the established appearance until the user customizes the three self-message colors.
+	setDefault(CHAT_OWN_TIMESTAMP_COLOR, getDefault(CHAT_TIMESTAMP_COLOR));
+	setDefault(CHAT_OWN_NICK_COLOR, getDefault(CHAT_NICK_COLOR));
+	setDefault(CHAT_OWN_TEXT_COLOR, getDefault(CHAT_TEXT_COLOR));
+	setDefault(CHAT_MENTION_COLOR, RGB(0, 0, 0));
+	setDefault(CHAT_MENTION_BG_COLOR, RGB(255, 224, 128));
 
 	setDefault(ENABLE_TASKBAR_PREVIEW, true);
 #endif

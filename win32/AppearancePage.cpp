@@ -23,7 +23,6 @@
 
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/Label.h>
-#include <dwt/widgets/LoadDialog.h>
 #include <dwt/widgets/Spinner.h>
 
 #include "WinUtil.h"

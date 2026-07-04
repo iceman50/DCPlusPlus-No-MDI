@@ -20,9 +20,12 @@
 #include "stdafx.h"
 #include "HtmlToRtf.h"
 
+#include "Emoticons.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <unordered_map>
 
 #include <dcpp/debug.h>
 #include <dcpp/Flags.h>
@@ -82,14 +85,21 @@ private:
 	void parseFont(const string& s);
 	void parseColor(size_t& contextColor, const string& s);
 	void parseDecoration(const string& s);
+	void applySemanticStyle(Context& context, const string& id);
+	void ensureContrast(Context& context);
 	static tstring rtfEscape(const string& s);
 
 	tstring ret;
 
 	StringList fonts;
 	StringList colors;
+	std::unordered_map<string, size_t> fontIndexes;
+	std::unordered_map<COLORREF, size_t> colorIndexes;
+	vector<COLORREF> colorValues;
 
 	vector<Context> contexts;
+	unsigned suppressDepth = 0;
+	vector<bool> emoticonSuppressions;
 };
 
 tstring HtmlToRtf::convert(const string& html, dwt::RichTextBox* box) {
@@ -107,6 +117,26 @@ Parser::Parser(dwt::RichTextBox* box) {
 void Parser::startTag(const string& name_, StringPairList& attribs, bool simple) {
 	auto name = trimCopy(name_);
 
+	if(name == "emoticon") {
+		const auto emoticon = getAttrib(attribs, "name", 0);
+		// The source shortcut remains inside the tag for non-rich consumers. Suppress that text after
+		// emitting exactly one packaged icon. A missing/invalid asset leaves the shortcut untouched.
+		const auto configuredSize = SETTING(EMOTICON_SIZE);
+		const auto imageSize = configuredSize == 20 || configuredSize == 22 || configuredSize == 24 ?
+			configuredSize : 16;
+		const auto configuredDepth = SETTING(EMOTICON_BIT_DEPTH);
+		// Values written by builds that offered 4/8 bpp migrate to the new 16-bpp minimum.
+		const auto bitDepth = configuredDepth == 24 || configuredDepth == 32 ? configuredDepth : 16;
+		auto image = Emoticons::rtf(emoticon, imageSize, bitDepth);
+		const bool rendered = !image.empty();
+		if(rendered) ret += std::move(image);
+		if(!simple) {
+			emoticonSuppressions.push_back(rendered);
+			if(rendered) ++suppressDepth;
+		}
+		return;
+	}
+
 	if(name == "br") {
 		ret += _T("\\line\n");
 	}
@@ -117,6 +147,8 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 
 	contexts.push_back(contexts.back());
 	ScopedFunctor([this] { ret += contexts.back().getBegin(); });
+
+	applySemanticStyle(contexts.back(), getAttrib(attribs, "id", 0));
 
 	if(name == "b") {
 		contexts.back().setFlag(Context::Bold);
@@ -131,7 +163,7 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 	}
 
 	if(name == "a") {
-		const auto& link = getAttrib(attribs, "href", 0);
+		const auto link = getAttrib(attribs, "href", 0);
 		if(!link.empty()) {
 			auto& context = contexts.back();
 			context.link = link;
@@ -140,64 +172,28 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 		}
 	}
 
-	const auto& style = getAttrib(attribs, "style", 0);
-
-	enum { Declaration, Font, Decoration, TextColor, BgColor, Unknown } state = Declaration;
-
-	string tmp;
-	size_t i = 0, j;
-	while((j = style.find_first_of(":;", i)) != string::npos) {
-		tmp = style.substr(i, j - i);
-		i = j + 1;
-
-		trimInPlace(tmp);
-
-		switch(state) {
-		case Declaration:
-			{
-				if(tmp == "font") { state = Font; }
-				else if(tmp == "color") { state = TextColor; }
-				else if(tmp == "text-decoration") { state = Decoration; }
-				else if(tmp == "background-color") { state = BgColor; }
-				else { state = Unknown; }
-				break;
-			}
-
-		case Font:
-			{
-				parseFont(tmp);
-				state = Declaration;
-				break;
-			}
-
-		case Decoration:
-			{
-				parseDecoration(tmp);
-				state = Declaration;
-				break;
-			}
-
-		case TextColor:
-			{
-				parseColor(contexts.back().textColor, tmp);
-				state = Declaration;
-				break;
-			}
-
-		case BgColor:
-			{
-				parseColor(contexts.back().bgColor, tmp);
-				state = Declaration;
-				break;
-			}
-
-		case Unknown:
-			{
-				state = Declaration;
-				break;
-			}
+	const auto style = getAttrib(attribs, "style", 0);
+	size_t begin = 0;
+	while(begin < style.size()) {
+		auto end = style.find(';', begin);
+		if(end == string::npos) end = style.size();
+		auto declaration = style.substr(begin, end - begin);
+		auto separator = declaration.find(':');
+		if(separator != string::npos) {
+			auto property = declaration.substr(0, separator);
+			auto value = declaration.substr(separator + 1);
+			trimInPlace(property);
+			trimInPlace(value);
+			if(property == "font") parseFont(value);
+			else if(property == "color") parseColor(contexts.back().textColor, value);
+			else if(property == "background-color") parseColor(contexts.back().bgColor, value);
+			else if(property == "text-decoration") parseDecoration(value);
+			else if(property == "font-weight" && (value == "bold" || Util::toInt(value) >= FW_BOLD)) contexts.back().setFlag(Context::Bold);
+			else if(property == "font-style" && value == "italic") contexts.back().setFlag(Context::Italic);
 		}
+		begin = end + 1;
 	}
+	ensureContrast(contexts.back());
 }
 
 tstring Parser::rtfEscape(const string& data) {
@@ -205,10 +201,18 @@ tstring Parser::rtfEscape(const string& data) {
 }
 
 void Parser::data(const string& data) {
-	ret += rtfEscape(data);
+	if(suppressDepth == 0) ret += rtfEscape(data);
 }
 
 void Parser::endTag(const string& name) {
+	if(trimCopy(name) == "emoticon") {
+		if(!emoticonSuppressions.empty()) {
+			if(emoticonSuppressions.back() && suppressDepth) --suppressDepth;
+			emoticonSuppressions.pop_back();
+		}
+		return;
+	}
+	if(contexts.size() <= 1) return;
 	ret += contexts.back().getEnd();
 	contexts.pop_back();
 }
@@ -268,24 +272,73 @@ tstring Parser::Context::getEnd() const {
 }
 
 size_t Parser::addFont(string&& font) {
+	if(auto existing = fontIndexes.find(font); existing != fontIndexes.end()) return existing->second;
 	auto ret = fonts.size();
-	fonts.push_back("{\\f" + std::to_string(ret) + move(font) + ";}");
+	fontIndexes.emplace(font, ret);
+	fonts.push_back("{\\f" + std::to_string(ret) + std::move(font) + ";}");
 	return ret;
 }
 
 int Parser::rtfFontSize(float px) {
 	// the px value must not take DPI settings into account; the Rich Edit control handles that.
-	return std::floor(px
+	if(!std::isfinite(px)) px = 16.0f;
+	px = std::clamp(px, 1.0f, 256.0f);
+	return static_cast<int>(std::floor(px
 		* 72.0 / 96.0 // px -> font points
-		* 2.0); // RTF font sizes are expressed in half-points
+		* 2.0)); // RTF font sizes are expressed in half-points
 }
 
 size_t Parser::addColor(COLORREF color) {
-	auto ret = colors.size();
-	colors.push_back("\\red" + std::to_string(GetRValue(color)) +
+	if(auto existing = colorIndexes.find(color); existing != colorIndexes.end()) return existing->second;
+	const auto value = "\\red" + std::to_string(GetRValue(color)) +
 		"\\green" + std::to_string(GetGValue(color)) +
-		"\\blue" + std::to_string(GetBValue(color)) + ";");
+		"\\blue" + std::to_string(GetBValue(color)) + ";";
+	auto ret = colors.size();
+	colorIndexes.emplace(color, ret);
+	colors.push_back(value);
+	colorValues.push_back(color);
 	return ret;
+}
+
+void Parser::applySemanticStyle(Context& context, const string& id) {
+	if(id == "timestamp" || id == "messageTimestamp") {
+		context.textColor = addColor(SETTING(CHAT_TIMESTAMP_COLOR));
+	} else if(id == "ownTimestamp" || id == "ownMessageTimestamp") {
+		context.textColor = addColor(SETTING(CHAT_OWN_TIMESTAMP_COLOR));
+	} else if(id == "nick") {
+		context.textColor = addColor(SETTING(CHAT_NICK_COLOR));
+		context.setFlag(Context::Bold);
+	} else if(id == "ownNick") {
+		context.textColor = addColor(SETTING(CHAT_OWN_NICK_COLOR));
+		context.setFlag(Context::Bold);
+	} else if(id == "text") {
+		context.textColor = addColor(SETTING(CHAT_TEXT_COLOR));
+	} else if(id == "ownText") {
+		context.textColor = addColor(SETTING(CHAT_OWN_TEXT_COLOR));
+	} else if(id == "systemMessage") {
+		context.textColor = addColor(SETTING(CHAT_SYSTEM_COLOR));
+		context.setFlag(Context::Italic);
+	} else if(id == "mention") {
+		context.textColor = addColor(SETTING(CHAT_MENTION_COLOR));
+		context.bgColor = addColor(SETTING(CHAT_MENTION_BG_COLOR));
+		context.setFlag(Context::Bold);
+	}
+}
+
+void Parser::ensureContrast(Context& context) {
+	if(context.textColor >= colorValues.size() || context.bgColor >= colorValues.size()) return;
+	const auto luminance = [](COLORREF color) {
+		return (0.2126 * GetRValue(color) + 0.7152 * GetGValue(color) + 0.0722 * GetBValue(color)) / 255.0;
+	};
+	const auto background = luminance(colorValues[context.bgColor]);
+	const auto foreground = luminance(colorValues[context.textColor]);
+	const auto high = std::max(background, foreground);
+	const auto low = std::min(background, foreground);
+	if((high + 0.05) / (low + 0.05) < 3.0) {
+		const auto blackContrast = (background + 0.05) / 0.05;
+		const auto whiteContrast = 1.05 / (background + 0.05);
+		context.textColor = addColor(blackContrast >= whiteContrast ? RGB(0, 0, 0) : RGB(255, 255, 255));
+	}
 }
 
 void Parser::parseFont(const string& s) {

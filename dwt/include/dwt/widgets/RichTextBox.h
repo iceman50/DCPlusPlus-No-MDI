@@ -37,6 +37,7 @@
 #define DWT_RichTextBox_h
 
 #include <string_view>
+#include <vector>
 
 #include "TextBox.h"
 #include "../tstring.h"
@@ -120,6 +121,10 @@ public:
 
 	/** Append text into the box, keeping the scroll position steady. */
 	void addTextSteady(const tstring& txtRaw);
+
+	/** Append several independent RTF documents with one trim/redraw operation. Returns the
+	 * character range occupied by each inserted document. */
+	std::vector<std::pair<int, int>> addTextSteadyBatch(const std::vector<tstring>& documents);
 
 	void findText(tstring const& needle);
 

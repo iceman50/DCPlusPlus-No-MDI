@@ -174,6 +174,19 @@ void WinUtil::init() {
 		SettingsManager::getInstance()->setDefault(SettingsManager::LOG_COLOR, HLS2RGB(HLS(HLS_H(hls), 120, HLS_S(hls) / 2)));
 	}
 
+	// Semantic chat colors inherit the active Windows/application palette unless customized.
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TEXT_COLOR, textColor);
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TIMESTAMP_COLOR, SETTING(LOG_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_NICK_COLOR, SETTING(LINK_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_TEXT_COLOR, textColor);
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_TIMESTAMP_COLOR, SETTING(LOG_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_NICK_COLOR, SETTING(LINK_COLOR));
+	{
+		auto hls = RGB2HLS(textColor);
+		SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_SYSTEM_COLOR,
+			HLS2RGB(HLS((HLS_H(hls) + 30) % 239, HLS_L(hls), std::max<int>(80, HLS_S(hls)))));
+	}
+
 	fileImages = dwt::ImageListPtr(new dwt::ImageList(dwt::Point(16, 16)));
 
 	// get the directory icon (DIR_ICON).

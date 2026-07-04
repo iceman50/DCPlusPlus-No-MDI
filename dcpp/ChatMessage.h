@@ -45,6 +45,8 @@ struct ChatMessage {
 	string message;
 	/** HTML representation of the message. */
 	string htmlMessage;
+	/** Display nickname of the sender at the time the message was received. */
+	string nick;
 
 	UserPtr from;
 	UserPtr to;
@@ -61,6 +63,8 @@ struct ChatMessage {
 	/** Store context-agnostic formattings that can be applied to the given message in the tagger.
 	Note that the string may be modified. */
 	static void format(Tagger& tags, string& tmp);
+	/** Apply formatting with the hub-specific nickname used for mention recognition. */
+	static void format(Tagger& tags, string& tmp, const string& mentionNick);
 };
 
 } // namespace dcpp
