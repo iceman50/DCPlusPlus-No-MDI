@@ -601,36 +601,90 @@ string Util::getLocalIp(bool v6) {
 	return adapterDataList.front().ip;
 }
 
-bool Util::isLocalIp(const string& ip, bool v6) noexcept {
-	if(v6) {
-		return (ip.length() > 4 && ip.substr(0, 4) == "fe80") || ip == "::1";
+namespace {
+	bool parseIp4(const string& ip, in_addr& address) noexcept {
+		return !ip.empty() && ::inet_pton(AF_INET, ip.c_str(), &address) == 1;
 	}
 
-	return (ip.length() > 3 && strncmp(ip.c_str(), "169", 3) == 0) || ip == "127.0.0.1";
+	bool parseIp6(const string& ip, in6_addr& address) noexcept {
+		if(ip.empty()) {
+			return false;
+		}
+
+		// getnameinfo includes the zone identifier for scoped link-local addresses.
+		const auto zone = ip.find('%');
+		const auto addressPart = zone == string::npos ? ip : ip.substr(0, zone);
+		return !addressPart.empty() && ::inet_pton(AF_INET6, addressPart.c_str(), &address) == 1;
+	}
+}
+
+bool Util::isLocalIp(const string& ip, bool v6) noexcept {
+	if(v6) {
+		in6_addr address = {};
+		if(!parseIp6(ip, address)) {
+			return false;
+		}
+
+		const auto bytes = reinterpret_cast<const uint8_t*>(&address);
+		return IN6_IS_ADDR_LOOPBACK(&address) ||
+			(bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80); // fe80::/10
+	}
+
+	in_addr address = {};
+	if(!parseIp4(ip, address)) {
+		return false;
+	}
+
+	const auto hostAddress = ntohl(address.s_addr);
+	return (hostAddress & 0xff000000) == 0x7f000000 || // 127.0.0.0/8
+		(hostAddress & 0xffff0000) == 0xa9fe0000;        // 169.254.0.0/16
 }
 
 bool Util::isPrivateIp(const string& ip, bool v6) noexcept {
 	if(v6) {
-		// https://en.wikipedia.org/wiki/Unique_local_address
-		return ip.length() > 2 && ip.substr(0, 2) == "fd";
-
-	} else {
-		in_addr addr;
-
-		addr.s_addr = inet_addr(ip.c_str());
-
-		if(addr.s_addr != INADDR_NONE) {
-			unsigned long haddr = ntohl(addr.s_addr);
-			return ((haddr & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
-					(haddr & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
-					(haddr & 0xffff0000) == 0xc0a80000);  // 192.168.0.0/16
+		in6_addr address = {};
+		if(!parseIp6(ip, address)) {
+			return false;
 		}
+
+		const auto bytes = reinterpret_cast<const uint8_t*>(&address);
+		return (bytes[0] & 0xfe) == 0xfc; // fc00::/7
 	}
 
-	return false;
+	in_addr address = {};
+	if(!parseIp4(ip, address)) {
+		return false;
+	}
+
+	const auto hostAddress = ntohl(address.s_addr);
+	return (hostAddress & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
+		(hostAddress & 0xfff00000) == 0xac100000 ||     // 172.16.0.0/12
+		(hostAddress & 0xffff0000) == 0xc0a80000;       // 192.168.0.0/16
 }
 
 bool Util::isPublicIp(const string& ip, bool v6) noexcept {
+	if(v6) {
+		in6_addr address = {};
+		if(!parseIp6(ip, address) || IN6_IS_ADDR_UNSPECIFIED(&address) ||
+			IN6_IS_ADDR_MULTICAST(&address) || IN6_IS_ADDR_V4MAPPED(&address) ||
+			IN6_IS_ADDR_V4COMPAT(&address))
+		{
+			return false;
+		}
+	} else {
+		in_addr address = {};
+		if(!parseIp4(ip, address)) {
+			return false;
+		}
+
+		const auto hostAddress = ntohl(address.s_addr);
+		if(hostAddress == INADDR_ANY || hostAddress == INADDR_BROADCAST ||
+			IN_MULTICAST(hostAddress) || (hostAddress & 0xf0000000) == 0xf0000000)
+		{
+			return false;
+		}
+	}
+
 	return !isLocalIp(ip, v6) && !isPrivateIp(ip, v6);
 }
 

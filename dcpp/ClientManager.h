@@ -57,6 +57,8 @@ class ClientManager : public Speaker<ClientManagerListener>,
 public:
 	Client* getClient(const string& aHubURL);
 	void putClient(Client* aClient);
+	/** Stop and release any hubs that survived UI teardown. Safe to call repeatedly. */
+	void shutdown() noexcept;
 
 	size_t getUserCount() const;
 	int64_t getAvailable() const;

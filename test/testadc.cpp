@@ -12,8 +12,10 @@ public:
 	void handle(T, const AdcCommand&) { }
 
 	void handle(AdcCommand::PMI, const AdcCommand&) { pmiHandled = true; }
+	void handle(AdcCommand::TCP, const AdcCommand&) { tcpHandled = true; }
 
 	bool pmiHandled = false;
+	bool tcpHandled = false;
 };
 
 }
@@ -39,4 +41,6 @@ TEST(testadc, test_adccommand)
 	TestCommandHandler handler;
 	handler.dispatch("CPMI TP1");
 	ASSERT_TRUE(handler.pmiHandled);
+	handler.dispatch("ITCP I4203.0.113.1 P4411 TOtoken");
+	ASSERT_TRUE(handler.tcpHandled);
 }

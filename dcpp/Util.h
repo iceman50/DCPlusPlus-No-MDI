@@ -363,9 +363,15 @@ public:
 
 	template<typename T>
 	static void trim(T& s) {
-		auto l = std::locale{""};
-		s.erase(s.begin(), std::find_if_not(s.begin(), s.end(), [&l](char c){ return std::isspace(c, l); }));
- 		s.erase(std::find_if_not(s.rbegin(), s.rend(), [&l](char c){ return std::isspace(c, l); }).base(), s.end());
+		using CharT = typename T::value_type;
+		const auto isSpace = [](CharT c) noexcept {
+			return c == static_cast<CharT>(' ') || c == static_cast<CharT>('\t') ||
+				c == static_cast<CharT>('\n') || c == static_cast<CharT>('\r') ||
+				c == static_cast<CharT>('\f') || c == static_cast<CharT>('\v');
+		};
+
+		s.erase(s.begin(), std::find_if_not(s.begin(), s.end(), isSpace));
+		s.erase(std::find_if_not(s.rbegin(), s.rend(), isSpace).base(), s.end());
 	}
 	
 	/// make a color suitable for a CSS declaration (implementation dependant).

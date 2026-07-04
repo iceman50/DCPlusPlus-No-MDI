@@ -66,7 +66,8 @@ public:
 		ERROR_FILE_NOT_AVAILABLE = 51,
 		ERROR_FILE_PART_NOT_AVAILABLE = 52,
 		ERROR_SLOTS_FULL = 53,
-		ERROR_NO_CLIENT_HASH = 54
+		ERROR_NO_CLIENT_HASH = 54,
+		ERROR_HBRI_TIMEOUT = 55
 	};
 
 	enum Severity {
@@ -112,6 +113,7 @@ public:
 	C(ZON, 'Z','O','N');
 	C(ZOF, 'Z','O','F');
 	C(PMI, 'P','M','I');
+	C(TCP, 'T','C','P');
 #undef C
 
 	static const uint32_t HUB_SID = 0xffffffff;		// No client will have this sid
@@ -215,6 +217,7 @@ public:
 				C(ZON);
 				C(ZOF);
 				C(PMI);
+				C(TCP);
 			default:
 				dcdebug("Unknown ADC command: %.50s\n", aLine.c_str());
 				break;

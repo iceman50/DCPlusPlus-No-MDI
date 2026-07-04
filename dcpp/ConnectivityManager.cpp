@@ -179,13 +179,14 @@ bool ConnectivityManager::detectConnection(bool v6) {
 		return false;
 	}
 
-	// Disable connectivity when local & IPv6.
-	if(v6 && Util::isLocalIp(ip, v6)) {
+	// IPv6 port mapping isn't supported here. Without a public address there is
+	// no endpoint that hubs or HBRI validators can connect to.
+	if(v6) {
 		{
 			Lock l(cs);
 			autoSettings[incomingConnSetting] = SettingsManager::INCOMING_DISABLED;
 		}
-		log(_("All IPv6 addresses found are local; disabling connectivity"), logType);
+		log(_("No public IPv6 address was found; disabling connectivity"), logType);
 		return false;
 	}
 

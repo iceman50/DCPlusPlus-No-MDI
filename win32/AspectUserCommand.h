@@ -65,6 +65,7 @@ public:
 								if(cur->isPopup(k) && Util::stricmp(cur->getText(k), name) == 0) {
 									found = true;
 									cur = cur->getChild(k);
+									break;
 								}
 							}
 							if(!found) {

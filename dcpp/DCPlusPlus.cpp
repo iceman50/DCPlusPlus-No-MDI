@@ -144,6 +144,9 @@ void shutdown() {
 	HttpManager::getInstance()->shutdown();
 	MappingManager::getInstance()->close();
 	GeoManager::getInstance()->close();
+	// UI teardown normally releases hubs. Drain any survivors before waiting for
+	// their self-owned BufferedSocket workers, otherwise shutdown can wait forever.
+	ClientManager::getInstance()->shutdown();
 	BufferedSocket::waitShutdown();
 	FavoriteManager::getInstance()->shutdown();
 

@@ -1,3 +1,14 @@
+== 07-04-2026 - 0.8833 !!!Experimental!!! ==
+* Add ADC HBRI support for validating IPv4 and IPv6 connectivity through hubs connected over the other address family
+* HBRI support is based directly on and references the AirDC++ implementation
+* Run HBRI validation asynchronously with endpoint, response, timeout and shutdown handling
+* Drain surviving hub clients before buffered socket shutdown to prevent shutdown hangs
+* Fix a TransferView user-command submenu crash and use the correct user command context
+* Correct IPv4 and IPv6 public, private and link-local address classification, including scoped IPv6 addresses
+* Disable automatically detected IPv6 connectivity when no public IPv6 address is available
+* Make string trimming independent of the installed system locale
+* Add ADC TCP, HBRI, network address classification and locale-independent trimming tests
+
 == 07-04-2026 - 0.8832 !!!Experimental!!! ==
 * Add semantic RichEdit chat coloring for timestamps, nicknames, message text, system messages and mentions
 * Add separate timestamp, nickname and message colors for your own outgoing chat messages

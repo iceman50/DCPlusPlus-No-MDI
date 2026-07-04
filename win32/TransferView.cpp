@@ -570,7 +570,7 @@ bool TransferView::handleContextMenu(dwt::ScreenCoordinate pt) {
 		for(auto& i: selectedUsersImpl()) {
 			hubs.insert(i->getUser().hint);
 		}
-		prepareMenu(menu.get(), UserCommand::CONTEXT_HUB, StringList(hubs.begin(), hubs.end()));
+		prepareMenu(menu.get(), UserCommand::CONTEXT_USER, StringList(hubs.begin(), hubs.end()));
 
 		menu->open(pt);
 		return true;

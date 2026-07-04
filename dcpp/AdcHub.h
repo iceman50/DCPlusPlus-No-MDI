@@ -27,6 +27,7 @@
 namespace dcpp {
 
 class ClientManager;
+class HBRIValidator;
 
 class AdcHub : public Client, public CommandHandler<AdcHub> {
 public:
@@ -71,6 +72,7 @@ public:
 	static const string UCM0_SUPPORT;
 	static const string BLO0_SUPPORT;
 	static const string ZLIF_SUPPORT;
+	static const string HBRI_SUPPORT;
 	static const string SUDP_FEATURE;
 
 private:
@@ -91,6 +93,8 @@ private:
 	uint32_t sid;
 
 	std::unordered_set<uint32_t> forbiddenCommands;
+	bool supportsHBRI;
+	std::unique_ptr<HBRIValidator> hbriValidator;
 
 	static const vector<StringList> searchExts;
 
@@ -121,10 +125,13 @@ private:
 	void handle(AdcCommand::RNT, AdcCommand& c) noexcept;
 	void handle(AdcCommand::ZON, AdcCommand& c) noexcept;
 	void handle(AdcCommand::ZOF, AdcCommand& c) noexcept;
+	void handle(AdcCommand::TCP, AdcCommand& c) noexcept;
 
 	template<typename T> void handle(T, AdcCommand&) { }
 
 	void sendSearch(AdcCommand& c);
+	AdcCommand getHBRIRequest(bool v6, const string& token);
+	void resetHBRI() noexcept;
 	void sendUDP(const AdcCommand& cmd) noexcept;
 	void unknownProtocol(uint32_t target, const string& protocol, const string& token);
 	bool secureAvail(uint32_t target, const string& protocol, const string& token);

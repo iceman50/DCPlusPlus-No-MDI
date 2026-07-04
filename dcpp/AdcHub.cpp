@@ -26,6 +26,7 @@
 #include "CryptoManager.h"
 #include "FavoriteManager.h"
 #include "format.h"
+#include "HBRIValidation.h"
 #include "LogManager.h"
 #include "ShareManager.h"
 #include "StringTokenizer.h"
@@ -59,15 +60,17 @@ const string AdcHub::TIGR_SUPPORT("ADTIGR");
 const string AdcHub::UCM0_SUPPORT("ADUCM0");
 const string AdcHub::BLO0_SUPPORT("ADBLO0");
 const string AdcHub::ZLIF_SUPPORT("ADZLIF");
+const string AdcHub::HBRI_SUPPORT("ADHBRI");
 
 const vector<StringList> AdcHub::searchExts;
 
 AdcHub::AdcHub(const string& aHubURL, bool secure) :
-	Client(aHubURL, '\n', secure), oldPassword(false), udp(Socket::TYPE_UDP), sid(0) {
+	Client(aHubURL, '\n', secure), oldPassword(false), udp(Socket::TYPE_UDP), sid(0), supportsHBRI(false) {
 	TimerManager::getInstance()->addListener(this);
 }
 
 AdcHub::~AdcHub() {
+	resetHBRI();
 	TimerManager::getInstance()->removeListener(this);
 	clearUsers();
 }
@@ -217,10 +220,15 @@ void AdcHub::handle(AdcCommand::INF, AdcCommand& c) noexcept {
 }
 
 void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
-	if(state != STATE_PROTOCOL) /** @todo SUP changes */
+	// Hub capability state must never be changed by a relayed user command.
+	if(c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID) {
 		return;
+	}
+
+	const bool protocolNegotiation = state == STATE_PROTOCOL;
 	bool baseOk = false;
 	bool tigrOk = false;
+	bool hbriChanged = false;
 	for(auto& i: c.getParameters()) {
 		if(i == BAS0_SUPPORT) {
 			baseOk = true;
@@ -229,7 +237,21 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 			baseOk = true;
 		} else if(i == TIGR_SUPPORT) {
 			tigrOk = true;
+		} else if(i == HBRI_SUPPORT) {
+			hbriChanged = hbriChanged || !supportsHBRI;
+			supportsHBRI = true;
+		} else if(i == "RMHBRI") {
+			hbriChanged = hbriChanged || supportsHBRI;
+			supportsHBRI = false;
 		}
+	}
+
+	if(!protocolNegotiation) {
+		if(hbriChanged) {
+			infoImpl();
+			fire(ClientListener::HubUpdated(), this);
+		}
+		return;
 	}
 
 	if(!baseOk) {
@@ -511,6 +533,15 @@ void AdcHub::handle(AdcCommand::STA, AdcCommand& c) noexcept {
 			}
 			return;
 		}
+
+	case AdcCommand::ERROR_HBRI_TIMEOUT:
+		{
+			if(c.getFrom() == AdcCommand::HUB_SID && hbriValidator) {
+				resetHBRI();
+				fire(ClientListener::StatusMessage(), this, c.getParam(1));
+			}
+			return;
+		}
 	}
 
 	fire(ClientListener::Message(), this, ChatMessage(c.getParam(1), u));
@@ -658,6 +689,55 @@ void AdcHub::handle(AdcCommand::RNT, AdcCommand& c) noexcept {
 	// Trigger connection attempt sequence locally
 	dcdebug("triggering connecting attempt in RNT: remote port = %s, local port = %d\n", port.c_str(), sock->getLocalPort());
 	ConnectionManager::getInstance()->adcConnect(*u, port, std::to_string(sock->getLocalPort()), BufferedSocket::NAT_SERVER, token, secure);
+}
+
+void AdcHub::resetHBRI() noexcept {
+	if(hbriValidator) {
+		hbriValidator->stopAndWait();
+		hbriValidator.reset();
+	}
+}
+
+void AdcHub::handle(AdcCommand::TCP, AdcCommand& c) noexcept {
+	if(c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID ||
+		c.getParameters().size() < 3)
+	{
+		return;
+	}
+
+	const bool v6 = !sock->isV6Valid();
+	HBRIValidator::ConnectInfo connectInfo(v6, isSecure());
+	string token;
+	if(!c.getParam("TO", 2, token) || token.empty() || token.size() > 256 ||
+		!c.getParam(v6 ? "I6" : "I4", 0, connectInfo.ip) ||
+		!c.getParam(v6 ? "P6" : "P4", 0, connectInfo.port))
+	{
+		return;
+	}
+
+	try {
+		HBRIValidator::validateConnectInfo(connectInfo);
+	} catch(const Exception&) {
+		fire(ClientListener::StatusMessage(), this, _("The hub returned an invalid HBRI endpoint"));
+		return;
+	}
+
+	resetHBRI();
+	fire(ClientListener::StatusMessage(), this,
+		str(F_("Validating the %1% address...") % (v6 ? "IPv6" : "IPv4")));
+
+	hbriValidator = std::make_unique<HBRIValidator>(connectInfo,
+		getHBRIRequest(v6, token).toString(sid), [this](const string& message) {
+			fire(ClientListener::StatusMessage(), this, message);
+		});
+}
+
+AdcCommand AdcHub::getHBRIRequest(bool v6, const string& token) {
+	AdcCommand command(AdcCommand::CMD_TCP, AdcCommand::TYPE_HUB);
+	StringMap fields;
+	appendConnectivity(fields, command, !v6, v6);
+	command.addParam("TO", token);
+	return command;
 }
 
 void AdcHub::handle(AdcCommand::ZON, AdcCommand& c) noexcept {
@@ -1058,8 +1138,10 @@ void AdcHub::infoImpl() {
 		su += "," + SUDP_FEATURE;
 	}
 
-	bool addV4 = !sock->isV6Valid() || (get(HubSettings::Connection) != SettingsManager::INCOMING_DISABLED);
-	bool addV6 = sock->isV6Valid() || (get(HubSettings::Connection6) != SettingsManager::INCOMING_DISABLED);
+	bool addV4 = !sock->isV6Valid() ||
+		(get(HubSettings::Connection) != SettingsManager::INCOMING_DISABLED && supportsHBRI);
+	bool addV6 = sock->isV6Valid() ||
+		(get(HubSettings::Connection6) != SettingsManager::INCOMING_DISABLED && supportsHBRI);
 	
 	
 	if(addV4 && isActiveV4()) {
@@ -1122,6 +1204,7 @@ void AdcHub::unknownProtocol(uint32_t target, const string& protocol, const stri
 
 void AdcHub::on(Connected c) noexcept {
 	Client::on(c);
+	resetHBRI();
 
 	if(state != STATE_PROTOCOL) {
 		return;
@@ -1130,6 +1213,7 @@ void AdcHub::on(Connected c) noexcept {
 	lastInfoMap.clear();
 	sid = 0;
 	forbiddenCommands.clear();
+	supportsHBRI = false;
 
 	AdcCommand cmd(AdcCommand::CMD_SUP, AdcCommand::TYPE_HUB);
 	cmd.addParam(BAS0_SUPPORT).addParam(BASE_SUPPORT).addParam(TIGR_SUPPORT);
@@ -1142,6 +1226,7 @@ void AdcHub::on(Connected c) noexcept {
 	}
 	
 	cmd.addParam(ZLIF_SUPPORT);
+	cmd.addParam(HBRI_SUPPORT);
 	
 	send(cmd);
 }
@@ -1161,6 +1246,7 @@ void AdcHub::on(Line l, const string& aLine) noexcept {
 }
 
 void AdcHub::on(Failed f, const string& aLine) noexcept {
+	resetHBRI();
 	clearUsers();
 	Client::on(f, aLine);
 }

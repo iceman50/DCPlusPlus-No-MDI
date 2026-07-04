@@ -39,6 +39,7 @@ ClientManager::ClientManager() : udp(Socket::TYPE_UDP) {
 }
 
 ClientManager::~ClientManager() {
+	shutdown();
 	TimerManager::getInstance()->removeListener(this);
 }
 
@@ -65,15 +66,38 @@ Client* ClientManager::getClient(const string& aHubURL) {
 }
 
 void ClientManager::putClient(Client* aClient) {
-	fire(ClientManagerListener::ClientDisconnected(), aClient);
-	aClient->removeListeners();
-
 	{
 		Lock l(cs);
-		clients.erase(aClient);
+		if(!aClient || clients.erase(aClient) == 0) {
+			return;
+		}
 	}
+
+	fire(ClientManagerListener::ClientDisconnected(), aClient);
+	aClient->removeListeners();
 	aClient->shutdown();
 	delete aClient;
+}
+
+void ClientManager::shutdown() noexcept {
+	ClientList oldClients;
+	{
+		Lock l(cs);
+		clients.swap(oldClients);
+	}
+
+	if(oldClients.empty()) {
+		return;
+	}
+
+	// No UI listener may be called while the remaining clients are torn down.
+	removeListeners();
+	for(auto client: oldClients) {
+		client->removeListeners();
+		client->setAutoReconnect(false);
+		client->shutdown();
+		delete client;
+	}
 }
 
 size_t ClientManager::getUserCount() const {
