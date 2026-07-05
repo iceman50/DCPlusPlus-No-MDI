@@ -46,6 +46,37 @@ const char* SearchManager::getTypeStr(int type) {
 	return _(types[type]);
 }
 
+namespace {
+
+bool isAdcCommandChar(char c, bool first) noexcept {
+	return (c >= 'A' && c <= 'Z') || (!first && c >= '0' && c <= '9');
+}
+
+bool isBase32Char(char c) noexcept {
+	return (c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7');
+}
+
+}
+
+bool SearchManager::isAdcUdpPacket(const string& data) noexcept {
+	// Uxxx<space><CID>[<space>parameters...]<newline>
+	if(data.size() < 7 || data[0] != AdcCommand::TYPE_UDP || data[4] != ' ' || data.back() != '\n' ||
+		!isAdcCommandChar(data[1], true) || !isAdcCommandChar(data[2], false) || !isAdcCommandChar(data[3], false) ||
+		data.find('\n') != data.size() - 1 || !Text::validateUtf8(data)) {
+		return false;
+	}
+
+	const auto cidEnd = data.find(' ', 5);
+	const auto cidLength = (cidEnd == string::npos ? data.size() - 1 : cidEnd) - 5;
+	return cidLength > 0 && std::all_of(data.begin() + 5, data.begin() + 5 + cidLength, isBase32Char);
+}
+
+bool SearchManager::isPlaintextUdpPacket(const string& data) noexcept {
+	// $SR is the only NMDC command accepted by this UDP listener. Checking its
+	// complete command prefix also prevents arbitrary '$' data from bypassing SUDP.
+	return data.compare(0, 4, "$SR ") == 0 || isAdcUdpPacket(data);
+}
+
 SearchManager::SearchManager() :
 	stop(false),
 	lastSearch(GET_TICK())
@@ -138,7 +169,7 @@ int SearchManager::run() {
 			if((len = socket->read(&buf[0], BUFSIZE, remoteAddr)) > 0) {
 				string data(reinterpret_cast<char*>(&buf[0]), len);
 
-				if(SETTING(ENABLE_SUDP) && len >= 32 && ((len & 15) == 0)) {
+				if(SETTING(ENABLE_SUDP) && !isPlaintextUdpPacket(data) && len >= 32 && ((len & 15) == 0)) {
 					decryptPacket(data, len, buf.get());
 				}
 
@@ -417,7 +448,9 @@ bool SearchManager::decryptPacket(string& x, size_t aLen, const uint8_t* aBuf) {
 
 	for(auto it = searchKeys.rbegin(); it != searchKeys.rend(); ++it) {
 		const auto& i = *it;
-		if(CryptoManager::getInstance()->decryptSUDP(i.first.get(), aBuf, aLen, x)) {
+		string candidate;
+		if(CryptoManager::getInstance()->decryptSUDP(i.first.get(), aBuf, aLen, candidate) && isAdcUdpPacket(candidate)) {
+			x = move(candidate);
 			return true;
 		}
 	}

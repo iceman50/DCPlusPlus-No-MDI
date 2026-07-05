@@ -13,6 +13,7 @@
 * Restore full DWARF function prototypes and improve crash-log symbol resolution
 * Centralize transfer flags and display segmented downloads and uploads with the C flag
 * Add ADC MCN1 multi-connection transfers with per-user download and upload limits
+* Harden shared NMDC, ADC and SUDP packet handling by recognizing plaintext UDP traffic before decryption and validating decrypted ADC frames
 
 == 07-04-2026 - 0.8832 !!!Experimental!!! ==
 * Add semantic RichEdit chat coloring for timestamps, nicknames, message text, system messages and mentions

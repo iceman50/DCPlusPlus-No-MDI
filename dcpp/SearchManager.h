@@ -80,6 +80,11 @@ public:
 	void onRES(const AdcCommand& cmd, const UserPtr& from, const string& removeIp = Util::emptyString);
 	void onSR(const string& x, const string& remoteIP = Util::emptyString);
 
+	/** Validate the unencrypted UDP framing shared by NMDC and ADC search traffic. */
+	static bool isPlaintextUdpPacket(const string& data) noexcept;
+	/** Validate an ADC UDP frame, including its command, CID and line terminator. */
+	static bool isAdcUdpPacket(const string& data) noexcept;
+
 	int32_t timeToSearch() {
 		return 5 - (static_cast<int64_t>(GET_TICK() - lastSearch) / 1000);
 	}
