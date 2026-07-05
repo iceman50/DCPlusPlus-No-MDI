@@ -37,6 +37,8 @@ const string SettingsManager::settingTags[] =
 	// Strings
 	"Nick", "UploadSpeed", "Description", "DownloadDirectory", "EMail", "ExternalIp", "ExternalIp6",
 	"MainFont", "TextViewerFont", "UploadFont", "DownloadFont",
+	"LinkFont", "LogFont", "ChatTimestampFont", "ChatNickFont", "ChatTextFont", "ChatSystemFont",
+	"ChatOwnTimestampFont", "ChatOwnNickFont", "ChatOwnTextFont", "ChatMentionFont",
 	"ADLSearchFrameOrder", "ADLSearchFrameWidths",
 	"DirectoryListingFrameOrder", "DirectoryListingFrameWidths",
 	"FavHubsFrameOrder", "FavHubsFrameWidths",
@@ -68,9 +70,11 @@ const string SettingsManager::settingTags[] =
 	"UDPPort", "UDPPort6", "TLSPort", "TLSPort6",
 	"SocksPort", "SocketInBuffer", "SocketOutBuffer",
 	"TextColor", "BackgroundColor", "UploadTextColor", "UploadBgColor", "DownloadTextColor",
-	"DownloadBgColor", "LinkColor", "LogColor",
-	"ChatTimestampColor", "ChatNickColor", "ChatTextColor", "ChatSystemColor",
-	"ChatOwnTimestampColor", "ChatOwnNickColor", "ChatOwnTextColor",
+	"DownloadBgColor", "LinkColor", "LinkBgColor", "LogColor", "LogBgColor",
+	"ChatTimestampColor", "ChatTimestampBgColor", "ChatNickColor", "ChatNickBgColor",
+	"ChatTextColor", "ChatTextBgColor", "ChatSystemColor", "ChatSystemBgColor",
+	"ChatOwnTimestampColor", "ChatOwnTimestampBgColor", "ChatOwnNickColor", "ChatOwnNickBgColor",
+	"ChatOwnTextColor", "ChatOwnTextBgColor",
 	"ChatMentionColor", "ChatMentionBgColor",
 	"EmoticonSize", "EmoticonBitDepth",
 	"BandwidthLimitStart", "BandwidthLimitEnd", "MaxDownloadSpeedRealTime",
@@ -399,14 +403,23 @@ SettingsManager::SettingsManager() {
 	setDefault(UPLOAD_BG_COLOR, RGB(205, 60, 55));
 	setDefault(DOWNLOAD_TEXT_COLOR, RGB(255, 255, 255));
 	setDefault(DOWNLOAD_BG_COLOR, RGB(55, 170, 85));
+	setDefault(LINK_BG_COLOR, getDefault(BACKGROUND_COLOR));
+	setDefault(LOG_BG_COLOR, getDefault(BACKGROUND_COLOR));
 	setDefault(CHAT_TIMESTAMP_COLOR, RGB(112, 112, 112));
+	setDefault(CHAT_TIMESTAMP_BG_COLOR, getDefault(BACKGROUND_COLOR));
 	setDefault(CHAT_NICK_COLOR, RGB(0, 102, 204));
+	setDefault(CHAT_NICK_BG_COLOR, getDefault(BACKGROUND_COLOR));
 	setDefault(CHAT_TEXT_COLOR, getDefault(TEXT_COLOR));
+	setDefault(CHAT_TEXT_BG_COLOR, getDefault(BACKGROUND_COLOR));
 	setDefault(CHAT_SYSTEM_COLOR, RGB(96, 96, 160));
+	setDefault(CHAT_SYSTEM_BG_COLOR, getDefault(BACKGROUND_COLOR));
 	// Keep the established appearance until the user customizes the three self-message colors.
 	setDefault(CHAT_OWN_TIMESTAMP_COLOR, getDefault(CHAT_TIMESTAMP_COLOR));
+	setDefault(CHAT_OWN_TIMESTAMP_BG_COLOR, getDefault(CHAT_TIMESTAMP_BG_COLOR));
 	setDefault(CHAT_OWN_NICK_COLOR, getDefault(CHAT_NICK_COLOR));
+	setDefault(CHAT_OWN_NICK_BG_COLOR, getDefault(CHAT_NICK_BG_COLOR));
 	setDefault(CHAT_OWN_TEXT_COLOR, getDefault(CHAT_TEXT_COLOR));
+	setDefault(CHAT_OWN_TEXT_BG_COLOR, getDefault(CHAT_TEXT_BG_COLOR));
 	setDefault(CHAT_MENTION_COLOR, RGB(0, 0, 0));
 	setDefault(CHAT_MENTION_BG_COLOR, RGB(255, 224, 128));
 

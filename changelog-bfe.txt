@@ -8,6 +8,7 @@
 * Disable automatically detected IPv6 connectivity when no public IPv6 address is available
 * Make string trimming independent of the installed system locale
 * Add ADC TCP, HBRI, network address classification and locale-independent trimming tests
+* Add independent font, text color and background color customization for all chat styles
 
 == 07-04-2026 - 0.8832 !!!Experimental!!! ==
 * Add semantic RichEdit chat coloring for timestamps, nicknames, message text, system messages and mentions

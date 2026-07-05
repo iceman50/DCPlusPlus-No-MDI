@@ -164,16 +164,25 @@ showGen(0)
 	add(T_("Downloads"), IDH_SETTINGS_STYLES_DOWNLOADS, GROUP_TRANSFERS,
 		SettingsManager::DOWNLOAD_FONT, SettingsManager::DOWNLOAD_TEXT_COLOR, SettingsManager::DOWNLOAD_BG_COLOR);
 
-	add(T_("Links"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT, -1, SettingsManager::LINK_COLOR, -1);
-	add(T_("Logs"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT, -1, SettingsManager::LOG_COLOR, -1);
-	add(T_("Chat timestamps"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT, -1, SettingsManager::CHAT_TIMESTAMP_COLOR, -1);
-	add(T_("Chat nicknames"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT, -1, SettingsManager::CHAT_NICK_COLOR, -1);
-	add(T_("Chat text"), IDH_SETTINGS_STYLES_GLOBAL, GROUP_CHAT, -1, SettingsManager::CHAT_TEXT_COLOR, -1);
-	add(T_("Own chat timestamps"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT, -1, SettingsManager::CHAT_OWN_TIMESTAMP_COLOR, -1);
-	add(T_("Own chat nickname"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT, -1, SettingsManager::CHAT_OWN_NICK_COLOR, -1);
-	add(T_("Own chat text"), IDH_SETTINGS_STYLES_GLOBAL, GROUP_CHAT, -1, SettingsManager::CHAT_OWN_TEXT_COLOR, -1);
-	add(T_("Chat system messages"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT, -1, SettingsManager::CHAT_SYSTEM_COLOR, -1);
-	add(T_("Chat mentions"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT, -1,
+	add(T_("Links"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT,
+		SettingsManager::LINK_FONT, SettingsManager::LINK_COLOR, SettingsManager::LINK_BG_COLOR);
+	add(T_("Logs"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		SettingsManager::LOG_FONT, SettingsManager::LOG_COLOR, SettingsManager::LOG_BG_COLOR);
+	add(T_("Chat timestamps"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		SettingsManager::CHAT_TIMESTAMP_FONT, SettingsManager::CHAT_TIMESTAMP_COLOR, SettingsManager::CHAT_TIMESTAMP_BG_COLOR);
+	add(T_("Chat nicknames"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT,
+		SettingsManager::CHAT_NICK_FONT, SettingsManager::CHAT_NICK_COLOR, SettingsManager::CHAT_NICK_BG_COLOR);
+	add(T_("Chat text"), IDH_SETTINGS_STYLES_GLOBAL, GROUP_CHAT,
+		SettingsManager::CHAT_TEXT_FONT, SettingsManager::CHAT_TEXT_COLOR, SettingsManager::CHAT_TEXT_BG_COLOR);
+	add(T_("Own chat timestamps"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		SettingsManager::CHAT_OWN_TIMESTAMP_FONT, SettingsManager::CHAT_OWN_TIMESTAMP_COLOR, SettingsManager::CHAT_OWN_TIMESTAMP_BG_COLOR);
+	add(T_("Own chat nickname"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT,
+		SettingsManager::CHAT_OWN_NICK_FONT, SettingsManager::CHAT_OWN_NICK_COLOR, SettingsManager::CHAT_OWN_NICK_BG_COLOR);
+	add(T_("Own chat text"), IDH_SETTINGS_STYLES_GLOBAL, GROUP_CHAT,
+		SettingsManager::CHAT_OWN_TEXT_FONT, SettingsManager::CHAT_OWN_TEXT_COLOR, SettingsManager::CHAT_OWN_TEXT_BG_COLOR);
+	add(T_("Chat system messages"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		SettingsManager::CHAT_SYSTEM_FONT, SettingsManager::CHAT_SYSTEM_COLOR, SettingsManager::CHAT_SYSTEM_BG_COLOR);
+	add(T_("Chat mentions"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT, SettingsManager::CHAT_MENTION_FONT,
 		SettingsManager::CHAT_MENTION_COLOR, SettingsManager::CHAT_MENTION_BG_COLOR);
 
 	update(globalData);

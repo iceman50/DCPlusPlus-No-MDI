@@ -175,12 +175,21 @@ void WinUtil::init() {
 	}
 
 	// Semantic chat colors inherit the active Windows/application palette unless customized.
+	SettingsManager::getInstance()->setDefault(SettingsManager::LINK_BG_COLOR, bgColor);
+	SettingsManager::getInstance()->setDefault(SettingsManager::LOG_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TEXT_COLOR, textColor);
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TEXT_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TIMESTAMP_COLOR, SETTING(LOG_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TIMESTAMP_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_NICK_COLOR, SETTING(LINK_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_NICK_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_TEXT_COLOR, textColor);
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_TEXT_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_TIMESTAMP_COLOR, SETTING(LOG_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_TIMESTAMP_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_NICK_COLOR, SETTING(LINK_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_OWN_NICK_BG_COLOR, bgColor);
+	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_SYSTEM_BG_COLOR, bgColor);
 	{
 		auto hls = RGB2HLS(textColor);
 		SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_SYSTEM_COLOR,

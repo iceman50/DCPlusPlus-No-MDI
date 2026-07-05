@@ -82,3 +82,41 @@ TEST_F(testchatformat, hub_specific_nickname_is_colored_as_a_mention)
 	ASSERT_NE(string::npos, tags.merge(scratch).find(
 		"<span id=\"mention\">HubSpecificNick</span>"));
 }
+
+TEST_F(testchatformat, semantic_chat_styles_round_trip)
+{
+	const SettingsManager::StrSetting fonts[] = {
+		SettingsManager::LINK_FONT, SettingsManager::LOG_FONT,
+		SettingsManager::CHAT_TIMESTAMP_FONT, SettingsManager::CHAT_NICK_FONT,
+		SettingsManager::CHAT_TEXT_FONT, SettingsManager::CHAT_SYSTEM_FONT,
+		SettingsManager::CHAT_OWN_TIMESTAMP_FONT, SettingsManager::CHAT_OWN_NICK_FONT,
+		SettingsManager::CHAT_OWN_TEXT_FONT, SettingsManager::CHAT_MENTION_FONT
+	};
+	const SettingsManager::IntSetting backgrounds[] = {
+		SettingsManager::LINK_BG_COLOR, SettingsManager::LOG_BG_COLOR,
+		SettingsManager::CHAT_TIMESTAMP_BG_COLOR, SettingsManager::CHAT_NICK_BG_COLOR,
+		SettingsManager::CHAT_TEXT_BG_COLOR, SettingsManager::CHAT_SYSTEM_BG_COLOR,
+		SettingsManager::CHAT_OWN_TIMESTAMP_BG_COLOR, SettingsManager::CHAT_OWN_NICK_BG_COLOR,
+		SettingsManager::CHAT_OWN_TEXT_BG_COLOR, SettingsManager::CHAT_MENTION_BG_COLOR
+	};
+
+	auto settings = SettingsManager::getInstance();
+	for(size_t i = 0; i < std::size(fonts); ++i) {
+		settings->set(fonts[i], "TestFont" + std::to_string(i));
+		settings->set(backgrounds[i], static_cast<int>(RGB(i + 1, i + 11, i + 21)));
+	}
+
+	const auto path = Util::getTempPath() + "dcpp-test-chat-styles.xml";
+	File::deleteFile(path);
+	settings->save(path);
+	SettingsManager::deleteInstance();
+	SettingsManager::newInstance();
+	settings = SettingsManager::getInstance();
+	settings->load(path);
+
+	for(size_t i = 0; i < std::size(fonts); ++i) {
+		EXPECT_EQ("TestFont" + std::to_string(i), settings->get(fonts[i]));
+		EXPECT_EQ(static_cast<int>(RGB(i + 1, i + 11, i + 21)), settings->get(backgrounds[i]));
+	}
+	File::deleteFile(path);
+}

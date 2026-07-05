@@ -82,9 +82,11 @@ private:
 	static int rtfFontSize(float px);
 	size_t addColor(COLORREF color);
 
-	void parseFont(const string& s);
+	void parseFont(Context& context, const string& s);
 	void parseColor(size_t& contextColor, const string& s);
 	void parseDecoration(const string& s);
+	void applyConfiguredStyle(Context& context, SettingsManager::StrSetting fontSetting,
+		SettingsManager::IntSetting textColorSetting, SettingsManager::IntSetting bgColorSetting);
 	void applySemanticStyle(Context& context, const string& id);
 	void ensureContrast(Context& context);
 	static tstring rtfEscape(const string& s);
@@ -168,7 +170,8 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 			auto& context = contexts.back();
 			context.link = link;
 			context.setFlag(Context::Underlined);
-			context.textColor = addColor(SETTING(LINK_COLOR)); /// @todo move to styles
+			applyConfiguredStyle(context, SettingsManager::LINK_FONT,
+				SettingsManager::LINK_COLOR, SettingsManager::LINK_BG_COLOR);
 		}
 	}
 
@@ -184,7 +187,7 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 			auto value = declaration.substr(separator + 1);
 			trimInPlace(property);
 			trimInPlace(value);
-			if(property == "font") parseFont(value);
+			if(property == "font") parseFont(contexts.back(), value);
 			else if(property == "color") parseColor(contexts.back().textColor, value);
 			else if(property == "background-color") parseColor(contexts.back().bgColor, value);
 			else if(property == "text-decoration") parseDecoration(value);
@@ -300,28 +303,48 @@ size_t Parser::addColor(COLORREF color) {
 	return ret;
 }
 
+void Parser::applyConfiguredStyle(Context& context, SettingsManager::StrSetting fontSetting,
+	SettingsManager::IntSetting textColorSetting, SettingsManager::IntSetting bgColorSetting)
+{
+	auto settings = SettingsManager::getInstance();
+	parseFont(context, Util::cssFont(settings->get(fontSetting)));
+	context.textColor = addColor(settings->get(textColorSetting));
+	context.bgColor = addColor(settings->get(bgColorSetting));
+}
+
 void Parser::applySemanticStyle(Context& context, const string& id) {
+	auto settings = SettingsManager::getInstance();
 	if(id == "timestamp" || id == "messageTimestamp") {
-		context.textColor = addColor(SETTING(CHAT_TIMESTAMP_COLOR));
+		applyConfiguredStyle(context, SettingsManager::CHAT_TIMESTAMP_FONT,
+			SettingsManager::CHAT_TIMESTAMP_COLOR, SettingsManager::CHAT_TIMESTAMP_BG_COLOR);
 	} else if(id == "ownTimestamp" || id == "ownMessageTimestamp") {
-		context.textColor = addColor(SETTING(CHAT_OWN_TIMESTAMP_COLOR));
+		applyConfiguredStyle(context, SettingsManager::CHAT_OWN_TIMESTAMP_FONT,
+			SettingsManager::CHAT_OWN_TIMESTAMP_COLOR, SettingsManager::CHAT_OWN_TIMESTAMP_BG_COLOR);
 	} else if(id == "nick") {
-		context.textColor = addColor(SETTING(CHAT_NICK_COLOR));
-		context.setFlag(Context::Bold);
+		applyConfiguredStyle(context, SettingsManager::CHAT_NICK_FONT,
+			SettingsManager::CHAT_NICK_COLOR, SettingsManager::CHAT_NICK_BG_COLOR);
+		if(settings->isDefault(SettingsManager::CHAT_NICK_FONT)) context.setFlag(Context::Bold);
 	} else if(id == "ownNick") {
-		context.textColor = addColor(SETTING(CHAT_OWN_NICK_COLOR));
-		context.setFlag(Context::Bold);
+		applyConfiguredStyle(context, SettingsManager::CHAT_OWN_NICK_FONT,
+			SettingsManager::CHAT_OWN_NICK_COLOR, SettingsManager::CHAT_OWN_NICK_BG_COLOR);
+		if(settings->isDefault(SettingsManager::CHAT_OWN_NICK_FONT)) context.setFlag(Context::Bold);
 	} else if(id == "text") {
-		context.textColor = addColor(SETTING(CHAT_TEXT_COLOR));
+		applyConfiguredStyle(context, SettingsManager::CHAT_TEXT_FONT,
+			SettingsManager::CHAT_TEXT_COLOR, SettingsManager::CHAT_TEXT_BG_COLOR);
 	} else if(id == "ownText") {
-		context.textColor = addColor(SETTING(CHAT_OWN_TEXT_COLOR));
+		applyConfiguredStyle(context, SettingsManager::CHAT_OWN_TEXT_FONT,
+			SettingsManager::CHAT_OWN_TEXT_COLOR, SettingsManager::CHAT_OWN_TEXT_BG_COLOR);
 	} else if(id == "systemMessage") {
-		context.textColor = addColor(SETTING(CHAT_SYSTEM_COLOR));
-		context.setFlag(Context::Italic);
+		applyConfiguredStyle(context, SettingsManager::CHAT_SYSTEM_FONT,
+			SettingsManager::CHAT_SYSTEM_COLOR, SettingsManager::CHAT_SYSTEM_BG_COLOR);
+		if(settings->isDefault(SettingsManager::CHAT_SYSTEM_FONT)) context.setFlag(Context::Italic);
 	} else if(id == "mention") {
-		context.textColor = addColor(SETTING(CHAT_MENTION_COLOR));
-		context.bgColor = addColor(SETTING(CHAT_MENTION_BG_COLOR));
-		context.setFlag(Context::Bold);
+		applyConfiguredStyle(context, SettingsManager::CHAT_MENTION_FONT,
+			SettingsManager::CHAT_MENTION_COLOR, SettingsManager::CHAT_MENTION_BG_COLOR);
+		if(settings->isDefault(SettingsManager::CHAT_MENTION_FONT)) context.setFlag(Context::Bold);
+	} else if(id == "log") {
+		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
+			SettingsManager::LOG_COLOR, SettingsManager::LOG_BG_COLOR);
 	}
 }
 
@@ -341,7 +364,7 @@ void Parser::ensureContrast(Context& context) {
 	}
 }
 
-void Parser::parseFont(const string& s) {
+void Parser::parseFont(Context& context, const string& s) {
 	// this contains multiple params separated by spaces.
 	StringTokenizer<string> tok(s, ' ');
 	auto& l = tok.getTokens();
@@ -366,23 +389,23 @@ void Parser::parseFont(const string& s) {
 	family.erase(std::remove(family.begin(), family.end(), '\''), family.end());
 	if(family.empty())
 		return;
-	contexts.back().font = addFont("\\fnil " + std::move(family));
+	context.font = addFont("\\fnil " + std::move(family));
 
 	// parse the second to last param (font size).
 	/// @todo handle more than px sizes
 	auto& size = *(l.end() - 2);
 	if(size.size() > 2 && *(size.end() - 2) == 'p' && *(size.end() - 1) == 'x') { // 16px
-		contexts.back().fontSize = rtfFontSize(Util::toFloat(size.substr(0, size.size() - 2)));
+		context.fontSize = rtfFontSize(Util::toFloat(size.substr(0, size.size() - 2)));
 	}
 
 	// parse the optional third to last param (font weight).
 	if(l.size() > 2 && Util::toInt(*(l.end() - 3)) >= FW_BOLD) {
-		contexts.back().setFlag(Context::Bold);
+		context.setFlag(Context::Bold);
 	}
 
 	// parse the optional first param (font style).
 	if(l.size() > 2 && l[0] == "italic") {
-		contexts.back().setFlag(Context::Italic);
+		context.setFlag(Context::Italic);
 	}
 }
 

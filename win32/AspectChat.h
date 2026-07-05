@@ -162,7 +162,7 @@ protected:
 		}
 
 		if(!html.empty()) {
-			addChatHTML("<span style=\"white-space: pre-wrap; color: #" + Util::cssColor(SETTING(LOG_COLOR)) + ";\">" + html + "</span>");
+			addChatHTML("<span id=\"log\" style=\"white-space: pre-wrap;\">" + html + "</span>");
 		}
 	}
 
