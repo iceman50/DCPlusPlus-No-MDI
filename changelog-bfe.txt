@@ -11,6 +11,7 @@
 * Add independent font, text color and background color customization for all chat styles
 * Fix opening the configured downloads directory from the main window
 * Restore full DWARF function prototypes and improve crash-log symbol resolution
+* Centralize transfer flags and display segmented downloads and uploads with the C flag
 
 == 07-04-2026 - 0.8832 !!!Experimental!!! ==
 * Add semantic RichEdit chat coloring for timestamps, nicknames, message text, system messages and mentions

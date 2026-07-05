@@ -81,6 +81,7 @@ public:
 	}
 
 	virtual void getParams(const UserConnection& aSource, ParamMap& params);
+	virtual void appendFlags(StringList& flags) const;
 
 	UserPtr getUser();
 	const UserPtr getUser() const;

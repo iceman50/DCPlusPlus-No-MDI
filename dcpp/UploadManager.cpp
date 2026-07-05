@@ -157,6 +157,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	InputStream* is = 0;
 	int64_t start = 0;
 	int64_t size = 0;
+	int64_t fullSize = -1;
 
 	try {
 		switch(type) {
@@ -165,10 +166,10 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				File* f = new File(sourceFile, File::READ, File::OPEN);
 
 				start = aStartPos;
-				int64_t sz = f->getSize();
-				size = (aBytes == -1) ? sz - start : aBytes;
+				fullSize = f->getSize();
+				size = (aBytes == -1) ? fullSize - start : aBytes;
 
-				if(start > sz || size < 0 || size > sz - start) {
+				if(start > fullSize || size < 0 || size > fullSize - start) {
 					aSource.fileNotAvail();
 					delete f;
 					return false;
@@ -176,7 +177,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 
 				f->setPos(start);
 				is = f;
-				if((start + size) < sz) {
+				if((start + size) < fullSize) {
 					is = new LimitedInputStream<true>(is, size);
 				}
 				break;
@@ -186,7 +187,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 			{
 				if(preparedList) {
 					start = aStartPos;
-					auto fullSize = static_cast<int64_t>(preparedList->getSize());
+					fullSize = static_cast<int64_t>(preparedList->getSize());
 					size = (aBytes == -1) ? fullSize - start : aBytes;
 					if(start > fullSize || size < 0 || size > fullSize - start || !preparedList->setPos(static_cast<size_t>(start))) {
 						aSource.fileNotAvail();
@@ -202,7 +203,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 					CryptoManager::getInstance()->decodeBZ2(reinterpret_cast<const uint8_t*>(compressed.data()), compressed.size(), xml);
 					auto list = std::make_unique<MemoryInputStream>(xml);
 					start = aStartPos;
-					auto fullSize = static_cast<int64_t>(list->getSize());
+					fullSize = static_cast<int64_t>(list->getSize());
 					size = (aBytes == -1) ? fullSize - start : aBytes;
 					if(start > fullSize || size < 0 || size > fullSize - start || !list->setPos(static_cast<size_t>(start))) {
 						aSource.fileNotAvail();
@@ -215,7 +216,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				} else {
 					auto file = new File(sourceFile, File::READ, File::OPEN);
 					start = aStartPos;
-					auto fullSize = file->getSize();
+					fullSize = file->getSize();
 					size = (aBytes == -1) ? fullSize - start : aBytes;
 					if(start > fullSize || size < 0 || size > fullSize - start) {
 						delete file;
@@ -240,7 +241,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				}
 
 				start = 0;
-				size = mis->getSize();
+				fullSize = size = mis->getSize();
 				is = mis;
 				break;
 			}
@@ -255,7 +256,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				}
 
 				start = 0;
-				size = mis->getSize();
+				fullSize = size = mis->getSize();
 				is = mis;
 				break;
 			}
@@ -276,6 +277,9 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	Upload* u = new Upload(aSource, sourceFile, TTHValue());
 	u->setStream(is);
 	u->setSegment(Segment(start, size));
+	if(fullSize >= 0 && (start != 0 || size != fullSize)) {
+		u->setFlag(Upload::FLAG_CHUNKED);
+	}
 
 	u->setType(type);
 

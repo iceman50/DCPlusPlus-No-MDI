@@ -56,6 +56,12 @@ Download::Download(UserConnection& conn, QueueItem& qi) noexcept : Transfer(conn
 			setTreeValid(true);
 			setSegment(qi.getNextSegment(getTigerTree().getBlockSize(), 0));
 		}
+
+		if(getType() == TYPE_FILE && getSegment().getSize() >= 0 &&
+			(getStartPos() != 0 || getSegment().getSize() != qi.getSize()))
+		{
+			setFlag(FLAG_CHUNKED);
+		}
 	}
 }
 
@@ -93,6 +99,19 @@ AdcCommand Download::getCommand(bool zlib) {
 void Download::getParams(const UserConnection& aSource, ParamMap& params) {
 	Transfer::getParams(aSource, params);
 	params["target"] = getPath();
+}
+
+void Download::appendFlags(StringList& flags) const {
+	Transfer::appendFlags(flags);
+	if(isSet(FLAG_TTH_CHECK)) {
+		flags.emplace_back("T");
+	}
+	if(isSet(FLAG_ZDOWNLOAD)) {
+		flags.emplace_back("Z");
+	}
+	if(isSet(FLAG_CHUNKED)) {
+		flags.emplace_back("C");
+	}
 }
 
 string Download::getTargetFileName() const {

@@ -29,13 +29,15 @@ class Upload : public Transfer, public Flags {
 public:
 	enum Flags {
 		FLAG_ZUPLOAD = 1 << 0,
-		FLAG_PENDING_KICK = 1 << 1
+		FLAG_PENDING_KICK = 1 << 1,
+		FLAG_CHUNKED = 1 << 2
 	};
 
 	Upload(UserConnection& conn, const string& path, const TTHValue& tth);
 	virtual ~Upload();
 
 	virtual void getParams(const UserConnection& aSource, ParamMap& params);
+	void appendFlags(StringList& flags) const override;
 
 	GETSET(InputStream*, stream, Stream);
 };

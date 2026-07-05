@@ -92,6 +92,12 @@ void Transfer::getParams(const UserConnection& aSource, ParamMap& params) {
 	params["fileTR"] = getTTH().toBase32();
 }
 
+void Transfer::appendFlags(StringList& flags) const {
+	if(getUserConnection().isSecure()) {
+		flags.emplace_back(getUserConnection().isTrusted() ? "S" : "U");
+	}
+}
+
 UserPtr Transfer::getUser() {
 	return getUserConnection().getUser();
 }

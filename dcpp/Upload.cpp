@@ -37,4 +37,14 @@ void Upload::getParams(const UserConnection& aSource, ParamMap& params) {
 	params["source"] = getPath();
 }
 
+void Upload::appendFlags(StringList& flags) const {
+	Transfer::appendFlags(flags);
+	if(isSet(FLAG_ZUPLOAD)) {
+		flags.emplace_back("Z");
+	}
+	if(isSet(FLAG_CHUNKED)) {
+		flags.emplace_back("C");
+	}
+}
+
 } // namespace dcpp

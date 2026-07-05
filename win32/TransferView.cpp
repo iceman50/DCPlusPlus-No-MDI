@@ -1032,7 +1032,23 @@ void TransferView::on(ConnectionManagerListener::StatusChanged, ConnectionQueueI
 	updatedConn(ui);
 }
 
-namespace { tstring getFile(Transfer* t) {
+namespace {
+
+tstring getTransferFlags(const Transfer* transfer) {
+	StringList flags;
+	transfer->appendFlags(flags);
+
+	tstring ret;
+	for(const auto& flag: flags) {
+		ret += Text::toT('[' + flag + ']');
+	}
+	if(!ret.empty()) {
+		ret += _T(' ');
+	}
+	return ret;
+}
+
+tstring getFile(Transfer* t) {
 	if(t->getType() == Transfer::TYPE_TREE) {
 		return T_("TTH");
 	}
@@ -1041,7 +1057,9 @@ namespace { tstring getFile(Transfer* t) {
 	}
 	return Text::toT(str(F_("(%1%)") % (Util::formatBytes(t->getStartPos()) + " - " +
 		Util::formatBytes(t->getStartPos() + t->getSize()))));
-} }
+}
+
+}
 
 void TransferView::on(DownloadManagerListener::Complete, Download* d) noexcept {
 	onTransferComplete(d, true);
@@ -1054,23 +1072,7 @@ void TransferView::on(DownloadManagerListener::Failed, Download* d, const string
 void TransferView::on(DownloadManagerListener::Starting, Download* d) noexcept {
 	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD);
 
-	tstring statusString;
-	if(d->getUserConnection().isSecure()) {
-		if(d->getUserConnection().isTrusted()) {
-			statusString += _T("[S]");
-		} else {
-			statusString += _T("[U]");
-		}
-	}
-	if(d->isSet(Download::FLAG_TTH_CHECK)) {
-		statusString += _T("[T]");
-	}
-	if(d->isSet(Download::FLAG_ZDOWNLOAD)) {
-		statusString += _T("[Z]");
-	}
-	if(!statusString.empty()) {
-		statusString += _T(" ");
-	}
+	tstring statusString = getTransferFlags(d);
 	statusString += str(TF_("Downloading %1%") % getFile(d));
 	ui->setStatusString(move(statusString));
 
@@ -1106,20 +1108,7 @@ void TransferView::on(UploadManagerListener::Starting, Upload* u) noexcept {
 	auto ui = new UpdateInfo(u->getHintedUser(), CONNECTION_TYPE_UPLOAD);
 	starting(ui, u);
 
-	tstring statusString;
-	if(u->getUserConnection().isSecure()) {
-		if(u->getUserConnection().isTrusted()) {
-			statusString += _T("[S]");
-		} else {
-			statusString += _T("[U]");
-		}
-	}
-	if(u->isSet(Upload::FLAG_ZUPLOAD)) {
-		statusString += _T("[Z]");
-	}
-	if(!statusString.empty()) {
-		statusString += _T(" ");
-	}
+	tstring statusString = getTransferFlags(u);
 	statusString += str(TF_("Uploading %1%") % getFile(u));
 	ui->setStatusString(move(statusString));
 
