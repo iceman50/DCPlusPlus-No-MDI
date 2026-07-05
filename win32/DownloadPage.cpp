@@ -80,7 +80,7 @@ PropPage(parent, 3, 1)
 
 		GridPtr cur = group->addChild(Grid::Seed(2, 1));
 
-		GridPtr cur2 = cur->addChild(Grid::Seed(2, 2));
+		GridPtr cur2 = cur->addChild(Grid::Seed(3, 2));
 		cur2->column(0).size = 40;
 		cur2->column(0).mode = GridInfo::STATIC;
 
@@ -93,6 +93,16 @@ PropPage(parent, 3, 1)
 		spin->setHelpId(IDH_SETTINGS_DOWNLOAD_DOWNLOADS);
 
 		cur2->addChild(Label::Seed(T_("Maximum simultaneous downloads (0 = infinite)")))->setHelpId(IDH_SETTINGS_DOWNLOAD_DOWNLOADS);
+
+		box = cur2->addChild(WinUtil::Seeds::Dialog::intTextBox);
+		items.emplace_back(box, SettingsManager::MAX_MCN_DOWNLOADS, PropPage::T_INT_WITH_SPIN);
+		box->setHelpId(IDH_SETTINGS_DOWNLOAD_DOWNLOADS);
+
+		spin = cur2->addChild(Spinner::Seed(1, 100, box));
+		cur2->setWidget(spin);
+		spin->setHelpId(IDH_SETTINGS_DOWNLOAD_DOWNLOADS);
+
+		cur2->addChild(Label::Seed(T_("Maximum connections per user (MCN)")))->setHelpId(IDH_SETTINGS_DOWNLOAD_DOWNLOADS);
 
 		box = cur2->addChild(WinUtil::Seeds::Dialog::intTextBox);
 		items.emplace_back(box, SettingsManager::MAX_DOWNLOAD_SPEED, PropPage::T_INT_WITH_SPIN);
@@ -158,4 +168,3 @@ void DownloadPage::handleResetHubLists() {
 		SettingsManager::getInstance()->unset(SettingsManager::HUBLIST_SERVERS);
 	}
 }
-

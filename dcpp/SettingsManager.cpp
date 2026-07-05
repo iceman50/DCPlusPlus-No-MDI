@@ -94,7 +94,7 @@ const string SettingsManager::settingTags[] =
 	"MaxFilelistSize", "MaxHashSpeed", "MaxMessageLines", "MaxPMWindows", "MinMessageLines",
 	"MinUploadSpeed", "PMLastLogLines", "SearchHistory", "SetMinislotSize",
 	"SettingsSaveInterval", "Slots", "TabStyle", "TabWidth", "ToolbarSize", "AutoSearchInterval",
-	"MaxExtraSlots", "TestingStatus",
+	"MaxExtraSlots", "TestingStatus", "MaxMCNDownloads", "MaxMCNUploads",
 	"SENTRY",
 	// Bools
 	"AddFinishedInstantly", "AdlsBreakOnFirst",
@@ -211,6 +211,8 @@ SettingsManager::SettingsManager() {
 	setDefault(BUFFER_SIZE, 64);
 	setDefault(HUBLIST_SERVERS, "https://www.te-home.net/?do=hublist&get=hublist.xml.bz2;https://dchublist.org/hublist.xml.bz2;https://dchublist.ru/hublist.xml.bz2;https://hublist.pwiam.com/hublist.xml.bz2;https://dcnf.github.io/Hublist/hublist.xml.bz2;");
 	setDefault(DOWNLOAD_SLOTS, 6);
+	setDefault(MAX_MCN_DOWNLOADS, 2);
+	setDefault(MAX_MCN_UPLOADS, 2);
 	setDefault(MAX_DOWNLOAD_SPEED, 0);
 	setDefault(LOG_DIRECTORY, Util::getPath(Util::PATH_USER_LOCAL) + "Logs" PATH_SEPARATOR_STR);
 	setDefault(LOG_UPLOADS, false);

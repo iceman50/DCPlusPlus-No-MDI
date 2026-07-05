@@ -18,6 +18,7 @@
 #include "stdinc.h"
 #include "DownloadManager.h"
 
+#include "ConnectionManager.h"
 #include "QueueManager.h"
 #include "Download.h"
 #include "LogManager.h"
@@ -106,7 +107,9 @@ void DownloadManager::checkIdle(const UserPtr& user) {
 	for(auto uc: idlers) {
 		if(uc->getUser() == user) {
 			uc->callAsync([this, uc] { revive(uc); });
-			return;
+			if(!uc->isMCN()) {
+				return;
+			}
 		}
 	}
 }
@@ -242,6 +245,7 @@ void DownloadManager::startData(UserConnection* aSource, int64_t start, int64_t 
 	d->setStart(GET_TICK());
 	d->tick();
 	aSource->setState(UserConnection::STATE_RUNNING);
+	ConnectionManager::getInstance()->onDownloadStarted(*aSource);
 
 	fire(DownloadManagerListener::Starting(), d);
 

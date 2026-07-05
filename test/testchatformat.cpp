@@ -120,3 +120,22 @@ TEST_F(testchatformat, semantic_chat_styles_round_trip)
 	}
 	File::deleteFile(path);
 }
+
+TEST_F(testchatformat, mcn_connection_limits_round_trip)
+{
+	auto settings = SettingsManager::getInstance();
+	settings->set(SettingsManager::MAX_MCN_DOWNLOADS, 3);
+	settings->set(SettingsManager::MAX_MCN_UPLOADS, 4);
+
+	const auto path = Util::getTempPath() + "dcpp-test-mcn-settings.xml";
+	File::deleteFile(path);
+	settings->save(path);
+	SettingsManager::deleteInstance();
+	SettingsManager::newInstance();
+	settings = SettingsManager::getInstance();
+	settings->load(path);
+
+	EXPECT_EQ(3, settings->get(SettingsManager::MAX_MCN_DOWNLOADS));
+	EXPECT_EQ(4, settings->get(SettingsManager::MAX_MCN_UPLOADS));
+	File::deleteFile(path);
+}

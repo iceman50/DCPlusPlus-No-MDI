@@ -154,11 +154,12 @@ int TransferView::ItemInfo::compareItems(const ItemInfo* a, const ItemInfo* b, i
 	}
 }
 
-TransferView::ConnectionInfo::ConnectionInfo(const HintedUser& u, TransferInfo& parent) :
+TransferView::ConnectionInfo::ConnectionInfo(const HintedUser& u, const string& token_, TransferInfo& parent) :
 	ItemInfo(),
 	UserInfoBase(u),
 	transferFailed(false),
 	status(STATUS_WAITING),
+	token(token_),
 	parent(parent)
 {
 	columns[COLUMN_FILE] = parent.getText(COLUMN_FILE);
@@ -169,7 +170,7 @@ TransferView::ConnectionInfo::ConnectionInfo(const HintedUser& u, TransferInfo& 
 }
 
 bool TransferView::ConnectionInfo::operator==(const ConnectionInfo& other) const {
-	return other.parent.type == parent.type && other.getUser() == getUser();
+	return other.parent.type == parent.type && other.token == token;
 }
 
 int TransferView::ConnectionInfo::getImage(int col) const {
@@ -786,7 +787,7 @@ void TransferView::layout() {
 
 void TransferView::addConn(const UpdateInfo& ui) {
 	TransferInfo* transfer = nullptr;
-	auto conn = findConn(ui.user, ui.type);
+	auto conn = findConn(ui.token, ui.type);
 
 	if(ui.updateMask & UpdateInfo::MASK_PATH) {
 		// adding a connection we know the transfer of.
@@ -819,9 +820,9 @@ void TransferView::addConn(const UpdateInfo& ui) {
 	}
 
 	if(!conn) {
-		transfer->conns.emplace_back(ui.user, *transfer);
+		transfer->conns.emplace_back(ui.user, ui.token, *transfer);
 		conn = &transfer->conns.back();
-		connections[ui.type][ui.user.user] = conn;
+		connections[ui.type][ui.token] = conn;
 
 		// only show the child connection item when there are multiple children.
 		auto connCount = transfer->conns.size();
@@ -839,7 +840,7 @@ void TransferView::addConn(const UpdateInfo& ui) {
 }
 
 void TransferView::updateConn(const UpdateInfo& ui) {
-	auto conn = findConn(ui.user, ui.type);
+	auto conn = findConn(ui.token, ui.type);
 	if(conn) {
 		conn->update(ui);
 		conn->parent.update();
@@ -847,15 +848,15 @@ void TransferView::updateConn(const UpdateInfo& ui) {
 }
 
 void TransferView::removeConn(const UpdateInfo& ui) {
-	auto conn = findConn(ui.user, ui.type);
+	auto conn = findConn(ui.token, ui.type);
 	if(conn) {
 		removeConn(*conn);
 	}
 }
 
-TransferView::ConnectionInfo* TransferView::findConn(const HintedUser& user, ConnectionType type) {
-	if(!user || type < 0 || type >= CONNECTION_TYPE_LAST) { return nullptr; }
-	auto i = connections[type].find(user.user);
+TransferView::ConnectionInfo* TransferView::findConn(const string& token, ConnectionType type) {
+	if(token.empty() || type < 0 || type >= CONNECTION_TYPE_LAST) { return nullptr; }
+	auto i = connections[type].find(token);
 	return i != connections[type].end() ? i->second : nullptr;
 }
 
@@ -872,7 +873,7 @@ void TransferView::removeConn(ConnectionInfo& conn) {
 	auto& transfer = conn.parent;
 
 	transfers->eraseChild(reinterpret_cast<LPARAM>(&conn));
-	connections[transfer.type].erase(conn.getUser().user);
+	connections[transfer.type].erase(conn.token);
 
 	transfer.conns.remove(conn);
 
@@ -1004,7 +1005,7 @@ bool TransferView::needsResort(uint32_t updateMask) const {
 }
 
 void TransferView::on(ConnectionManagerListener::Added, ConnectionQueueItem* aCqi) noexcept {
-	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType());
+	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType(), aCqi->getToken());
 	ui->setStatus(STATUS_WAITING);
 	ui->setStatusString(aCqi->getType() == CONNECTION_TYPE_PM ? T_("Direct encrypted private message channel") :
 		T_("Connecting"));
@@ -1013,11 +1014,11 @@ void TransferView::on(ConnectionManagerListener::Added, ConnectionQueueItem* aCq
 }
 
 void TransferView::on(ConnectionManagerListener::Removed, ConnectionQueueItem* aCqi) noexcept {
-	removedConn(new UpdateInfo(aCqi->getUser(), aCqi->getType()));
+	removedConn(new UpdateInfo(aCqi->getUser(), aCqi->getType(), aCqi->getToken()));
 }
 
 void TransferView::on(ConnectionManagerListener::Failed, ConnectionQueueItem* aCqi, const string& aReason) noexcept {
-	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType());
+	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType(), aCqi->getToken());
 	ui->setStatusString(aCqi->getUser().user->isSet(User::OLD_CLIENT) ?
 		T_("Remote client does not fully support TTH - cannot download") :
 		Text::toT(aReason));
@@ -1026,7 +1027,7 @@ void TransferView::on(ConnectionManagerListener::Failed, ConnectionQueueItem* aC
 }
 
 void TransferView::on(ConnectionManagerListener::StatusChanged, ConnectionQueueItem* aCqi) noexcept {
-	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType());
+	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType(), aCqi->getToken());
 	ui->setStatusString((aCqi->getState() == ConnectionQueueItem::CONNECTING) ? T_("Connecting") : T_("Waiting to retry"));
 
 	updatedConn(ui);
@@ -1070,7 +1071,7 @@ void TransferView::on(DownloadManagerListener::Failed, Download* d, const string
 }
 
 void TransferView::on(DownloadManagerListener::Starting, Download* d) noexcept {
-	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD);
+	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD, d->getUserConnection().getToken());
 
 	tstring statusString = getTransferFlags(d);
 	statusString += str(TF_("Downloading %1%") % getFile(d));
@@ -1083,7 +1084,7 @@ void TransferView::on(DownloadManagerListener::Tick, const DownloadList& dl) noe
 	vector<UpdateInfo> updates;
 	updates.reserve(dl.size());
 	for(auto i: dl) {
-		updates.emplace_back(i->getHintedUser(), CONNECTION_TYPE_DOWNLOAD);
+		updates.emplace_back(i->getHintedUser(), CONNECTION_TYPE_DOWNLOAD, i->getUserConnection().getToken());
 		auto& ui = updates.back();
 		ui.setTransferred(i->getPos(), i->getActual(), i->getSize());
 		ui.setSpeed(i->getAverageSpeed());
@@ -1092,7 +1093,7 @@ void TransferView::on(DownloadManagerListener::Tick, const DownloadList& dl) noe
 }
 
 void TransferView::on(DownloadManagerListener::Requesting, Download* d) noexcept {
-	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD);
+	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD, d->getUserConnection().getToken());
 	starting(ui, d);
 	ui->setTempPath(d->getTempTarget());
 	ui->setStatusString(str(TF_("Requesting %1%") % getFile(d)));
@@ -1105,7 +1106,7 @@ void TransferView::on(UploadManagerListener::Complete, Upload* u) noexcept {
 }
 
 void TransferView::on(UploadManagerListener::Starting, Upload* u) noexcept {
-	auto ui = new UpdateInfo(u->getHintedUser(), CONNECTION_TYPE_UPLOAD);
+	auto ui = new UpdateInfo(u->getHintedUser(), CONNECTION_TYPE_UPLOAD, u->getUserConnection().getToken());
 	starting(ui, u);
 
 	tstring statusString = getTransferFlags(u);
@@ -1119,7 +1120,7 @@ void TransferView::on(UploadManagerListener::Tick, const UploadList& ul) noexcep
 	vector<UpdateInfo> updates;
 	updates.reserve(ul.size());
 	for(auto i: ul) {
-		updates.emplace_back(i->getHintedUser(), CONNECTION_TYPE_UPLOAD);
+		updates.emplace_back(i->getHintedUser(), CONNECTION_TYPE_UPLOAD, i->getUserConnection().getToken());
 		auto& ui = updates.back();
 		ui.setTransferred(i->getPos(), i->getActual(), i->getSize());
 		ui.setSpeed(i->getAverageSpeed());
@@ -1230,7 +1231,8 @@ void TransferView::starting(UpdateInfo* ui, Transfer* t) {
 }
 
 void TransferView::onTransferComplete(Transfer* t, bool download) {
-	auto ui = new UpdateInfo(t->getHintedUser(), download ? CONNECTION_TYPE_DOWNLOAD : CONNECTION_TYPE_UPLOAD);
+	auto ui = new UpdateInfo(t->getHintedUser(), download ? CONNECTION_TYPE_DOWNLOAD : CONNECTION_TYPE_UPLOAD,
+		t->getUserConnection().getToken());
 	ui->setFile(t->getPath());
 	ui->setStatus(STATUS_WAITING);
 	ui->setStatusString(T_("Idle"));
@@ -1240,7 +1242,8 @@ void TransferView::onTransferComplete(Transfer* t, bool download) {
 }
 
 void TransferView::onFailed(Download* d, const string& aReason) {
- 	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD, true);
+	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD,
+		d->getUserConnection().getToken(), true);
 	ui->setFile(d->getPath());
 	ui->setStatus(STATUS_WAITING);
 	ui->setStatusString(Text::toT(aReason));

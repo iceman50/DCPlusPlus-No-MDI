@@ -52,6 +52,7 @@ public:
 	static const string FEATURE_ADC_BZIP;
 	static const string FEATURE_ADC_TIGR;
 	static const string FEATURE_ADC_CPMI;
+	static const string FEATURE_ADC_MCN1;
 
 	static const string FILE_NOT_AVAILABLE;
 
@@ -84,7 +85,8 @@ public:
 		FLAG_SUPPORTS_ZLIB_GET = FLAG_SUPPORTS_ADCGET << 1,
 		FLAG_SUPPORTS_TTHL = FLAG_SUPPORTS_ZLIB_GET << 1,
 		FLAG_SUPPORTS_TTHF = FLAG_SUPPORTS_TTHL << 1,
-		FLAG_SUPPORTS_CPMI = FLAG_SUPPORTS_TTHF << 1
+		FLAG_SUPPORTS_CPMI = FLAG_SUPPORTS_TTHF << 1,
+		FLAG_SUPPORTS_MCN1 = FLAG_SUPPORTS_CPMI << 1
 	};
 
 	enum States {
@@ -145,7 +147,7 @@ public:
 
 	// ADC Stuff
 	void sup(const StringList& features);
-	void inf(bool withToken);
+	void inf(bool withToken, int mcnSlots = 0);
 	void get(const string& aType, const string& aName, const int64_t aStart, const int64_t aBytes);
 	void snd(const string& aType, const string& aName, const int64_t aStart, const int64_t aBytes);
 	void pm(const string& message, bool thirdPerson = false);
@@ -204,6 +206,7 @@ public:
 
 	bool supportsTrees() const { return isSet(FLAG_SUPPORTS_TTHL); }
 	bool supportsCPMI() const { return isSet(FLAG_SUPPORTS_CPMI); }
+	bool isMCN() const { return isSet(FLAG_SUPPORTS_MCN1); }
 
 	GETSET(string, hubUrl, HubUrl);
 	GETSET(string, token, Token);
@@ -212,6 +215,7 @@ public:
 	GETSET(States, state, State);
 	GETSET(uint64_t, lastActivity, LastActivity);
 	GETSET(double, speed, Speed);
+	GETSET(int, maxRemoteConnections, MaxRemoteConnections);
 
 	ConnectionData* getPluginObject() noexcept;
 private:
@@ -229,7 +233,7 @@ private:
 
 	// We only want ConnectionManager to create this...
 	UserConnection(bool secure_) noexcept : encoding(Text::systemCharset), state(STATE_UNCONNECTED),
-		lastActivity(0), speed(0), chunkSize(0), socket(0), secure(secure_), download(NULL) {
+		lastActivity(0), speed(0), maxRemoteConnections(1), chunkSize(0), socket(0), secure(secure_), download(NULL) {
 	}
 
 	virtual ~UserConnection() {

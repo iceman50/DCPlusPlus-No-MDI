@@ -48,7 +48,7 @@ public:
 		ACTIVE						// In one up/downmanager
 	};
 
-	ConnectionQueueItem(const HintedUser& user, ConnectionType type);
+	ConnectionQueueItem(const HintedUser& user, ConnectionType type, const string& token = Util::emptyString);
 
 	GETSET(string, token, Token);
 	GETSET(uint64_t, lastAttempt, LastAttempt);
@@ -117,6 +117,7 @@ public:
 	void adcConnect(const OnlineUser& aUser, const string& aPort, const string& localPort, BufferedSocket::NatRoles natRole, const string& aToken, bool secure);
 
 	void getDownloadConnection(const HintedUser& aUser);
+	void onDownloadStarted(const UserConnection& connection);
 	void force(const UserPtr& aUser);
 
 	void disconnect(const UserPtr& user); // disconnect all transfers for the user
@@ -193,7 +194,7 @@ private:
 	void addDownloadConnection(UserConnection* uc);
 	void addNewConnection(UserConnection* uc, ConnectionType type);
 
-	ConnectionQueueItem& getCQI(const HintedUser& user, ConnectionType type);
+	ConnectionQueueItem& getCQI(const HintedUser& user, ConnectionType type, const string& token = Util::emptyString);
 	void putCQI(ConnectionQueueItem& cqi);
 
 	void accept(const Socket& sock, bool secure) noexcept;

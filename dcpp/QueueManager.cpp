@@ -217,21 +217,33 @@ QueueItem* QueueManager::UserQueue::getNext(const UserPtr& aUser, QueueItem::Pri
 
 void QueueManager::UserQueue::addDownload(QueueItem* qi, Download* d) {
 	qi->getDownloads().push_back(d);
-
-	// Only one download per user...
-	dcassert(running.find(d->getUser()) == running.end());
-	running[d->getUser()] = qi;
+	running.emplace(d->getUser(), qi);
 }
 
-void QueueManager::UserQueue::removeDownload(QueueItem* qi, const UserPtr& user) {
-	running.erase(user);
-
-	for(auto i = qi->getDownloads().begin(); i != qi->getDownloads().end(); ++i) {
-		if((*i)->getUser() == user) {
-			qi->getDownloads().erase(i);
+void QueueManager::UserQueue::removeDownload(QueueItem* qi, Download* download) {
+	auto range = running.equal_range(download->getUser());
+	for(auto i = range.first; i != range.second; ++i) {
+		if(i->second == qi) {
+			running.erase(i);
 			break;
 		}
 	}
+
+	qi->getDownloads().erase(std::remove(qi->getDownloads().begin(), qi->getDownloads().end(), download), qi->getDownloads().end());
+}
+
+void QueueManager::UserQueue::removeDownload(QueueItem* qi, const UserPtr& user) {
+	auto range = running.equal_range(user);
+	for(auto i = range.first; i != range.second;) {
+		if(i->second == qi) {
+			i = running.erase(i);
+		} else {
+			++i;
+		}
+	}
+
+	qi->getDownloads().erase(remove_if(qi->getDownloads().begin(), qi->getDownloads().end(),
+		[&](const Download* download) { return download->getUser() == user; }), qi->getDownloads().end());
 }
 
 void QueueManager::UserQueue::setPriority(QueueItem* qi, QueueItem::Priority p) {
@@ -271,7 +283,7 @@ void QueueManager::UserQueue::remove(QueueItem* qi, bool removeRunning) {
 }
 
 void QueueManager::UserQueue::remove(QueueItem* qi, const UserPtr& aUser, bool removeRunning) {
-	if(removeRunning && qi == getRunning(aUser)) {
+	if(removeRunning) {
 		removeDownload(qi, aUser);
 	}
 
@@ -1018,7 +1030,7 @@ void QueueManager::putDownload(Download* aDownload, bool finished) noexcept {
 				q->getOnlineUsers(getConn);
 			}
 
-			userQueue.removeDownload(q, d->getUser());
+			userQueue.removeDownload(q, d.get());
 			fire(QueueManagerListener::StatusUpdated(), q);
 		} else { // Finished
 			if(d->getType() == Transfer::TYPE_PARTIAL_LIST) {
@@ -1035,7 +1047,7 @@ void QueueManager::putDownload(Download* aDownload, bool finished) noexcept {
 					q->getSource(d->getUser())->setFlag(QueueItem::Source::FLAG_NO_TREE);
 				}
 
-				userQueue.removeDownload(q, d->getUser());
+				userQueue.removeDownload(q, d.get());
 				fire(QueueManagerListener::StatusUpdated(), q);
 			} else if(d->getType() == Transfer::TYPE_FULL_LIST) {
 				if(d->isSet(Download::FLAG_XML_BZ_LIST)) {
@@ -1087,7 +1099,7 @@ void QueueManager::putDownload(Download* aDownload, bool finished) noexcept {
 						fileQueue.remove(q);
 					}
 				} else {
-					userQueue.removeDownload(q, d->getUser());
+					userQueue.removeDownload(q, d.get());
 					fire(QueueManagerListener::StatusUpdated(), q);
 				}
 			} else {
@@ -1210,7 +1222,8 @@ void QueueManager::removeSource(const string& aTarget, const UserPtr& aUser, int
 			}
 		}
 
-		if(q->isRunning() && userQueue.getRunning(aUser) == q) {
+		if(q->isRunning() && find_if(q->getDownloads().begin(), q->getDownloads().end(),
+			[&](const Download* download) { return download->getUser() == aUser; }) != q->getDownloads().end()) {
 			isRunning = true;
 			userQueue.removeDownload(q, aUser);
 			fire(QueueManagerListener::StatusUpdated(), q);
@@ -1256,10 +1269,10 @@ void QueueManager::removeSource(const UserPtr& aUser, int reason) noexcept {
 			}
 		}
 
-		qi = userQueue.getRunning(aUser);
-		if(qi) {
+		while((qi = userQueue.getRunning(aUser)) != NULL) {
 			if(qi->isSet(QueueItem::FLAG_USER_LIST)) {
 				removeRunning = qi->getTarget();
+				break;
 			} else {
 				userQueue.removeDownload(qi, aUser);
 				userQueue.remove(qi, aUser);

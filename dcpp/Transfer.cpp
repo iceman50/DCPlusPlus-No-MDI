@@ -93,6 +93,9 @@ void Transfer::getParams(const UserConnection& aSource, ParamMap& params) {
 }
 
 void Transfer::appendFlags(StringList& flags) const {
+	if(getUserConnection().isMCN()) {
+		flags.emplace_back("M");
+	}
 	if(getUserConnection().isSecure()) {
 		flags.emplace_back(getUserConnection().isTrusted() ? "S" : "U");
 	}

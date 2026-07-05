@@ -114,7 +114,7 @@ private:
 	};
 
 	struct ConnectionInfo : public ItemInfo, public UserInfoBase {
-		ConnectionInfo(const HintedUser& u, TransferInfo& parent);
+		ConnectionInfo(const HintedUser& u, const string& token, TransferInfo& parent);
 
 		bool operator==(const ConnectionInfo& other) const;
 
@@ -133,6 +133,7 @@ private:
 
 		bool transferFailed;
 		Status status;
+		string token;
 		TransferInfo& parent;
 	};
 
@@ -186,8 +187,8 @@ private:
 			MASK_HTTP = 1 << 8
 		};
 
-		UpdateInfo(const HintedUser& user, ConnectionType type, bool transferFailed = false) :
-			updateMask(0), user(user), type(type), transferFailed(transferFailed) { }
+		UpdateInfo(const HintedUser& user, ConnectionType type, const string& token = Util::emptyString, bool transferFailed = false) :
+			updateMask(0), user(user), type(type), transferFailed(transferFailed), token(token) { }
 		UpdateInfo(ConnectionType type) : updateMask(0), type(type), transferFailed(false) { }
 
 		uint32_t updateMask;
@@ -195,6 +196,7 @@ private:
 		HintedUser user;
 		ConnectionType type;
 		bool transferFailed;
+		string token;
 
 		TTHValue tth;
 		void setTTH(const TTHValue& tth) { this->tth = tth; }
@@ -235,7 +237,7 @@ private:
 	list<TransferInfo> transferItems; /* the LPARAM data of table entries are direct pointers to
 									  objects stored by this container, hence the std::list. */
 	list<HttpInfo> httpItems;
-	typedef unordered_map<UserPtr, ConnectionInfo*, User::Hash> ConnectionMap;
+	typedef unordered_map<string, ConnectionInfo*> ConnectionMap;
 	ConnectionMap connections[CONNECTION_TYPE_LAST];
 
 	TabViewPtr mdi;
@@ -269,7 +271,7 @@ private:
 	void updateConn(const UpdateInfo& ui);
 	void removeConn(const UpdateInfo& ui);
 
-	ConnectionInfo* findConn(const HintedUser& user, ConnectionType type);
+	ConnectionInfo* findConn(const string& token, ConnectionType type);
 	TransferInfo* findTransfer(const string& path, ConnectionType type);
 	void removeConn(ConnectionInfo& conn);
 	void removeTransfer(TransferInfo& transfer);

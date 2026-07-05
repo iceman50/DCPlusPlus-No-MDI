@@ -237,6 +237,7 @@ private:
 		QueueItem* getNext(const UserPtr& aUser, QueueItem::Priority minPrio = QueueItem::LOWEST, int64_t wantedSize = 0);
 		QueueItem* getRunning(const UserPtr& aUser);
 		void addDownload(QueueItem* qi, Download* d);
+		void removeDownload(QueueItem* qi, Download* d);
 		void removeDownload(QueueItem* qi, const UserPtr& d);
 		void remove(QueueItem* qi, bool removeRunning = true);
 		void remove(QueueItem* qi, const UserPtr& aUser, bool removeRunning = true);
@@ -252,7 +253,7 @@ private:
 		/** QueueItems by priority and user (this is where the download order is determined) */
 		unordered_map<UserPtr, QueueItemList, User::Hash> userQueue[QueueItem::LAST];
 		/** Currently running downloads, a QueueItem is always either here or in the userQueue */
-		unordered_map<UserPtr, QueueItemPtr, User::Hash> running;
+		unordered_multimap<UserPtr, QueueItemPtr, User::Hash> running;
 	};
 
 	friend class QueueLoader;
