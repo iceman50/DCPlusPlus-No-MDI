@@ -10,6 +10,7 @@
 * Add ADC TCP, HBRI, network address classification and locale-independent trimming tests
 * Add independent font, text color and background color customization for all chat styles
 * Fix opening the configured downloads directory from the main window
+* Restore full DWARF function prototypes and improve crash-log symbol resolution
 
 == 07-04-2026 - 0.8832 !!!Experimental!!! ==
 * Add semantic RichEdit chat coloring for timestamps, nicknames, message text, system messages and mentions

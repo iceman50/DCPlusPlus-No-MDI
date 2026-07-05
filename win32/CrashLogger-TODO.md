@@ -13,7 +13,7 @@ and bundled libdwarf 2.3.2 for MinGW-w64 Windows builds.
   - Clear or close state consistently if opening or writing the log fails.
   - Never return `EXCEPTION_CONTINUE_EXECUTION` for an unhandled crash.
 
-- [ ] Replace recursive DIE sibling traversal.
+- [x] Replace recursive DIE sibling traversal.
   - `browseDIE` currently consumes one C++ stack frame per sibling.
   - A tested DWARF 5 image contained a CU with 3,821 direct children.
   - Traverse siblings iteratively and reserve recursion only for child depth,
@@ -28,7 +28,7 @@ and bundled libdwarf 2.3.2 for MinGW-w64 Windows builds.
   - Leave the original context intact for later exception handlers and Windows
     Error Reporting.
 
-- [ ] Improve optimized and inline function resolution.
+- [x] Improve optimized and inline function resolution.
   - Search child DIEs before returning an enclosing `DW_TAG_subprogram`.
   - Select the most deeply nested matching `DW_TAG_inlined_subroutine`.
   - Follow `DW_AT_abstract_origin` as well as `DW_AT_specification`.
@@ -49,7 +49,7 @@ and bundled libdwarf 2.3.2 for MinGW-w64 Windows builds.
 
 ## Low Priority
 
-- [ ] Align the DbgHelp symbol buffer explicitly.
+- [x] Align the DbgHelp symbol buffer explicitly.
   - Add `alignas(IMAGEHLP_SYMBOL64)` to the backing byte buffer.
   - Prefer `SYMBOL_INFO` and `SymFromAddr` where supported.
 

@@ -41,14 +41,33 @@ parse it. */
 #define LIBDWARF_STATIC
 #include <libdwarf.h>
 
-bool isPortableExecutable(const string& path) {
-	std::ifstream file(path, std::ios::binary);
-	WORD signature = 0;
-	return file.read(reinterpret_cast<char*>(&signature), sizeof(signature)) &&
-		signature == IMAGE_DOS_SIGNATURE;
+namespace DwarfResolver {
+
+inline bool getName(Dwarf_Debug dbg, Dwarf_Die die, std::string& ret, Dwarf_Error& error) {
+	char* name = nullptr;
+	if(die && dwarf_diename(die, &name, &error) == DW_DLV_OK) {
+		ret = name;
+		dwarf_dealloc(dbg, name, DW_DLA_STRING);
+		return true;
+	}
+	return false;
 }
 
-bool dieContainsAddress(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Addr addr, Dwarf_Error& error) {
+inline Dwarf_Die followRef(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Half attribute, Dwarf_Error& error) {
+	Dwarf_Die ret = nullptr;
+	Dwarf_Attribute attr = nullptr;
+	if(die && dwarf_attr(die, attribute, &attr, &error) == DW_DLV_OK) {
+		Dwarf_Off offset = 0;
+		Dwarf_Bool isInfo = true;
+		if(dwarf_global_formref_b(attr, &offset, &isInfo, &error) == DW_DLV_OK) {
+			dwarf_offdie_b(dbg, offset, isInfo, &ret, &error);
+		}
+		dwarf_dealloc(dbg, attr, DW_DLA_ATTR);
+	}
+	return ret;
+}
+
+inline bool containsAddress(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Addr addr, Dwarf_Error& error) {
 	Dwarf_Addr lowpc = 0;
 	Dwarf_Addr highpc = 0;
 	Dwarf_Attribute highAttr = nullptr;
@@ -69,12 +88,13 @@ bool dieContainsAddress(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Addr addr, Dwarf_E
 					gotHigh = true;
 				}
 			}
+			dwarf_dealloc(dbg, highAttr, DW_DLA_ATTR);
 			if(gotHigh && addr >= lowpc && addr < highpc) {
-				dwarf_dealloc(dbg, highAttr, DW_DLA_ATTR);
 				return true;
 			}
+		} else {
+			dwarf_dealloc(dbg, highAttr, DW_DLA_ATTR);
 		}
-		dwarf_dealloc(dbg, highAttr, DW_DLA_ATTR);
 	}
 
 	Dwarf_Attribute rangesAttr = nullptr;
@@ -103,10 +123,8 @@ bool dieContainsAddress(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Addr addr, Dwarf_E
 					Dwarf_Unsigned rangeEnd = 0;
 					if(dwarf_get_rnglists_entry_fields_a(head, i, &entryLength, &entryType, nullptr, nullptr,
 						&addressUnavailable, &rangeStart, &rangeEnd, &error) == DW_DLV_OK &&
-						!addressUnavailable &&
-						entryType != DW_RLE_end_of_list &&
-						entryType != DW_RLE_base_address &&
-						entryType != DW_RLE_base_addressx)
+						!addressUnavailable && entryType != DW_RLE_end_of_list &&
+						entryType != DW_RLE_base_address && entryType != DW_RLE_base_addressx)
 					{
 						found = addr >= rangeStart && addr < rangeEnd;
 					}
@@ -141,103 +159,224 @@ bool dieContainsAddress(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Addr addr, Dwarf_E
 	return found;
 }
 
-/* this recursive function browses through the children and siblings of a DIE, looking for the one
-DIE that specifically describes the enclosing function of the given address. */
-Dwarf_Die browseDIE(Dwarf_Debug dbg, Dwarf_Addr addr, Dwarf_Die die, Dwarf_Error& error) {
+struct FunctionLocation {
+	Dwarf_Off offset = 0;
+	Dwarf_Bool isInfo = true;
+	unsigned depth = 0;
+	bool found = false;
+};
 
-	/* only care about DIEs that represent functions (section 3.3 of the DWARF 4 spec). */
-	Dwarf_Half tag;
-	if(dwarf_tag(die, &tag, &error) == DW_DLV_OK &&
-		(tag == DW_TAG_subprogram || tag == DW_TAG_inlined_subroutine) &&
-		dieContainsAddress(dbg, die, addr, error))
-	{
-		return die;
+inline void findFunctionInChildren(Dwarf_Debug dbg, Dwarf_Die parent, Dwarf_Addr addr,
+	unsigned depth, size_t& visited, FunctionLocation& best, Dwarf_Error& error)
+{
+	static const size_t maxEntries = 200000;
+	static const unsigned maxDepth = 128;
+	if(depth > maxDepth || visited >= maxEntries) {
+		return;
 	}
 
-	// flow to the next DIE. start with children then move to siblings.
-	Dwarf_Die next;
+	Dwarf_Die die = nullptr;
+	if(dwarf_child(parent, &die, &error) != DW_DLV_OK) {
+		return;
+	}
 
-	if(dwarf_child(die, &next, &error) == DW_DLV_OK) {
-		Dwarf_Die ret = browseDIE(dbg, addr, next, error);
-		if(ret) {
-			if(next != ret) {
-				dwarf_dealloc(dbg, next, DW_DLA_DIE);
+	while(die && visited++ < maxEntries) {
+		Dwarf_Half tag = 0;
+		if(dwarf_tag(die, &tag, &error) == DW_DLV_OK &&
+			(tag == DW_TAG_subprogram || tag == DW_TAG_inlined_subroutine) &&
+			containsAddress(dbg, die, addr, error) && (!best.found || depth >= best.depth))
+		{
+			Dwarf_Off globalOffset = 0;
+			Dwarf_Off localOffset = 0;
+			if(dwarf_die_offsets(die, &globalOffset, &localOffset, &error) == DW_DLV_OK) {
+				best.offset = globalOffset;
+				best.isInfo = dwarf_get_die_infotypes_flag(die);
+				best.depth = depth;
+				best.found = true;
 			}
-			return ret;
 		}
-		dwarf_dealloc(dbg, next, DW_DLA_DIE);
+
+		findFunctionInChildren(dbg, die, addr, depth + 1, visited, best, error);
+
+		Dwarf_Die next = nullptr;
+		const auto siblingResult = dwarf_siblingof_c(die, &next, &error);
+		dwarf_dealloc(dbg, die, DW_DLA_DIE);
+		die = siblingResult == DW_DLV_OK ? next : nullptr;
 	}
 
-	if(dwarf_siblingof_c(die, &next, &error) == DW_DLV_OK) {
-		Dwarf_Die ret = browseDIE(dbg, addr, next, error);
-		if(ret) {
-			if(next != ret) {
-				dwarf_dealloc(dbg, next, DW_DLA_DIE);
-			}
-			return ret;
-		}
-		dwarf_dealloc(dbg, next, DW_DLA_DIE);
+	if(die) {
+		dwarf_dealloc(dbg, die, DW_DLA_DIE);
 	}
-
-	return 0;
 }
 
-// utility function that retrieves the name of a DIE.
-bool getName(Dwarf_Debug dbg, Dwarf_Die die, string& ret, Dwarf_Error& error) {
-	char* name;
-	if(dwarf_diename(die, &name, &error) == DW_DLV_OK) {
-		ret = name;
-		dwarf_dealloc(dbg, name, DW_DLA_STRING);
-		return true;
-	}
-	return false;
-}
+inline Dwarf_Die findFunction(Dwarf_Debug dbg, Dwarf_Die cuDie, Dwarf_Addr addr, Dwarf_Error& error) {
+	FunctionLocation best;
+	size_t visited = 0;
+	findFunctionInChildren(dbg, cuDie, addr, 1, visited, best, error);
 
-// utility function that follows a reference-type attribute (one that points to another DIE).
-Dwarf_Die followRef(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Half attribute, Dwarf_Error& error) {
-	Dwarf_Die ret = 0;
-	Dwarf_Attribute attr;
-	if(dwarf_attr(die, attribute, &attr, &error) == DW_DLV_OK) {
-		Dwarf_Off offset = 0;
-		Dwarf_Bool isInfo = true;
-		if(dwarf_global_formref_b(attr, &offset, &isInfo, &error) == DW_DLV_OK) {
-			dwarf_offdie_b(dbg, offset, isInfo, &ret, &error);
-		}
-
-		dwarf_dealloc(dbg, attr, DW_DLA_ATTR);
+	Dwarf_Die ret = nullptr;
+	if(best.found) {
+		dwarf_offdie_b(dbg, best.offset, best.isInfo, &ret, &error);
 	}
 	return ret;
 }
 
-/* retrieve the name of the DIE pointed to by the "type" attribute of a DIE. for a function DIE,
-this is the return value of the function (section 3.3.2 of the DWARF 2 spec). for an object DIE,
-this is the type of that object (section 4.1.4 of the DWARF 2 spec). */
-string getType(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Error& error, bool recursing = false) {
-	string ret;
+inline std::string getType(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Error& error, unsigned depth = 0) {
+	if(!die || depth > 64) {
+		return "void/unknown";
+	}
 
-	// follow section 5 of the DWARF 2 spec. multiple type DIEs may be chained together.
-	if(recursing && getName(dbg, die, ret, error)) {
+	std::string ret;
+	if(depth && getName(dbg, die, ret, error)) {
 		return ret;
 	}
-	Dwarf_Die type_die = followRef(dbg, die, DW_AT_type, error);
-	if(type_die) {
-		ret = getType(dbg, type_die, error, true);
-		Dwarf_Half tag;
+
+	Dwarf_Die typeDie = followRef(dbg, die, DW_AT_type, error);
+	if(typeDie) {
+		ret = getType(dbg, typeDie, error, depth + 1);
+		Dwarf_Half tag = 0;
 		if(dwarf_tag(die, &tag, &error) == DW_DLV_OK) {
 			switch(tag) {
 			case DW_TAG_const_type: ret += " const"; break;
 			case DW_TAG_pointer_type: ret += '*'; break;
 			case DW_TAG_reference_type: ret += '&'; break;
+			case DW_TAG_rvalue_reference_type: ret += "&&"; break;
 			case DW_TAG_volatile_type: ret += " volatile"; break;
 			}
 		}
-		dwarf_dealloc(dbg, type_die, DW_DLA_DIE);
+		dwarf_dealloc(dbg, typeDie, DW_DLA_DIE);
 	}
 
-	if(ret.empty())
-		ret = "void/unknown";
+	return ret.empty() ? "void/unknown" : ret;
+}
 
+inline Dwarf_Die getDescription(Dwarf_Debug dbg, Dwarf_Die die,
+	std::vector<Dwarf_Die>& ownedRefs, Dwarf_Error& error)
+{
+	Dwarf_Die current = die;
+	for(unsigned depth = 0; depth < 16; ++depth) {
+		Dwarf_Die next = followRef(dbg, current, DW_AT_specification, error);
+		if(!next) {
+			next = followRef(dbg, current, DW_AT_abstract_origin, error);
+		}
+		if(!next) {
+			break;
+		}
+
+		Dwarf_Off nextOffset = 0;
+		Dwarf_Off localOffset = 0;
+		if(dwarf_die_offsets(next, &nextOffset, &localOffset, &error) != DW_DLV_OK) {
+			dwarf_dealloc(dbg, next, DW_DLA_DIE);
+			break;
+		}
+		const auto duplicate = std::find_if(ownedRefs.begin(), ownedRefs.end(), [&](Dwarf_Die previous) {
+			Dwarf_Off previousOffset = 0;
+			Dwarf_Off previousLocalOffset = 0;
+			return dwarf_die_offsets(previous, &previousOffset, &previousLocalOffset, &error) == DW_DLV_OK &&
+				previousOffset == nextOffset;
+		});
+		if(duplicate != ownedRefs.end()) {
+			dwarf_dealloc(dbg, next, DW_DLA_DIE);
+			break;
+		}
+
+		ownedRefs.push_back(next);
+		current = next;
+	}
+	return current;
+}
+
+inline void deallocRefs(Dwarf_Debug dbg, std::vector<Dwarf_Die>& refs) {
+	for(auto die: refs) {
+		dwarf_dealloc(dbg, die, DW_DLA_DIE);
+	}
+	refs.clear();
+}
+
+inline bool appendParameters(Dwarf_Debug dbg, Dwarf_Die die, std::string& function,
+	Dwarf_Error& error)
+{
+	Dwarf_Die child = nullptr;
+	if(dwarf_child(die, &child, &error) != DW_DLV_OK) {
+		return false;
+	}
+
+	bool appended = false;
+	while(child) {
+		Dwarf_Half tag = 0;
+		if(dwarf_tag(child, &tag, &error) == DW_DLV_OK) {
+			if(tag == DW_TAG_formal_parameter) {
+				std::vector<Dwarf_Die> refs;
+				auto description = getDescription(dbg, child, refs, error);
+				std::string name;
+				if(!getName(dbg, child, name, error)) {
+					getName(dbg, description, name, error);
+				}
+				auto type = getType(dbg, child, error);
+				if(type == "void/unknown" && description != child) {
+					type = getType(dbg, description, error);
+				}
+
+				if(appended) {
+					function += ", ";
+				}
+				function += type;
+				if(!name.empty()) {
+					function += ' ' + name;
+				}
+				appended = true;
+				deallocRefs(dbg, refs);
+			} else if(tag == DW_TAG_unspecified_parameters) {
+				if(appended) {
+					function += ", ";
+				}
+				function += "...";
+				appended = true;
+			}
+		}
+
+		Dwarf_Die next = nullptr;
+		const auto siblingResult = dwarf_siblingof_c(child, &next, &error);
+		dwarf_dealloc(dbg, child, DW_DLA_DIE);
+		child = siblingResult == DW_DLV_OK ? next : nullptr;
+	}
+	return appended;
+}
+
+inline std::string getFunctionPrototype(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Error& error) {
+	std::vector<Dwarf_Die> refs;
+	auto description = getDescription(dbg, die, refs, error);
+
+	std::string name;
+	if(!getName(dbg, description, name, error) && description != die) {
+		getName(dbg, die, name, error);
+	}
+	if(name.empty()) {
+		deallocRefs(dbg, refs);
+		return std::string();
+	}
+
+	auto returnType = getType(dbg, description, error);
+	if(returnType == "void/unknown" && description != die) {
+		returnType = getType(dbg, die, error);
+	}
+	std::string ret = returnType + ' ' + name + '(';
+	if(!appendParameters(dbg, die, ret, error) && description != die) {
+		appendParameters(dbg, description, ret, error);
+	}
+	ret += ')';
+
+	deallocRefs(dbg, refs);
 	return ret;
+}
+
+} // namespace DwarfResolver
+
+bool isPortableExecutable(const string& path) {
+	std::ifstream file(path, std::ios::binary);
+	WORD signature = 0;
+	return file.read(reinterpret_cast<char*>(&signature), sizeof(signature)) &&
+		signature == IMAGE_DOS_SIGNATURE;
 }
 
 void getDebugInfo(string path, DWORD_PTR addr, string& file, int& line, int& column, string& function) {
@@ -346,12 +485,17 @@ void getDebugInfo(string path, DWORD_PTR addr, string& file, int& line, int& col
 							/* could not get a precise statement within this CU; resort to showing
 							the global name of this CU's DIE which, according to section 3.1 of the
 							DWARF 2 spec, is almost what we want. */
-							getName(dbg, cu_die, file, error);
+							DwarfResolver::getName(dbg, cu_die, file, error);
 						}
 
-						// Function-level DIE traversal is intentionally skipped here. On some
-						// MinGW DWARF images this walk can fault inside the crash handler,
-						// preventing any stack trace output. File/line data is still reported.
+						/* Match DC++'s DWARF 4 behavior by resolving the enclosing function and
+						building its full prototype. The resolver uses iterative sibling traversal
+						and bounded child recursion so large DWARF 5 CUs cannot exhaust the stack. */
+						Dwarf_Die functionDie = DwarfResolver::findFunction(dbg, cu_die, addr, error);
+						if(functionDie) {
+							function = DwarfResolver::getFunctionPrototype(dbg, functionDie, error);
+							dwarf_dealloc(dbg, functionDie, DW_DLA_DIE);
+						}
 
 						dwarf_dealloc(dbg, cu_die, DW_DLA_DIE);
 					}
@@ -509,11 +653,7 @@ inline void writeBacktrace(LPCONTEXT context) {
 	HANDLE const thread = GetCurrentThread();
 	CONTEXT walkContext = *context;
 
-#if defined(__MINGW32__)
-	SymSetOptions(SYMOPT_DEFERRED_LOADS);
-#else
 	SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-#endif
 
 	if(!SymInitialize(process, 0, TRUE)) {
 		fprintf(f, "Failed to initialize the symbol handler (error: %lu)\n", GetLastError());
@@ -543,7 +683,7 @@ inline void writeBacktrace(LPCONTEXT context) {
 
 #endif
 
-	char symbolBuf[sizeof(IMAGEHLP_SYMBOL64) + 255];
+	alignas(IMAGEHLP_SYMBOL64) char symbolBuf[sizeof(IMAGEHLP_SYMBOL64) + 255];
 
 	for(uint8_t step = 0; step < 128; ++step) { // 128 steps max to avoid too long traces
 		const DWORD64 currentAddr = frame.AddrPC.Offset;
@@ -562,7 +702,7 @@ inline void writeBacktrace(LPCONTEXT context) {
 
 		IMAGEHLP_MODULE64 module = { sizeof(IMAGEHLP_MODULE64) };
 		const bool hasModule = SymGetModuleInfo64(process, currentAddr, &module) == TRUE;
-		fprintf(f, "%s: ", hasModule ? module.ModuleName : "?");
+		fprintf(f, "%s: ", hasModule ? module.ModuleName : "[unknown module]");
 
 #if defined(__MINGW32__)
 		// @todo add check for pdb file format, skip DWARF read if we have a MS format symbols file (made by e.g. cv2pdb)
@@ -593,20 +733,22 @@ inline void writeBacktrace(LPCONTEXT context) {
 		}
 #endif
 
-		/* this is the usual Windows PDB reading method. we try it on MinGW too if reading DWARF
-		data has failed, just in case Windows can extract some information. */
-		if(file.empty()) {
+		/* This is the usual Windows PDB reading method. Try each missing field independently:
+		DWARF may resolve a source line while leaving the function name unavailable. */
+		if(function.empty()) {
 			IMAGEHLP_SYMBOL64* symbol = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbolBuf);
+			memset(symbol, 0, sizeof(symbolBuf));
 			symbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
 			symbol->MaxNameLength = 254;
 			if(SymGetSymFromAddr64(process, currentAddr, 0, symbol)) {
-				file = symbol->Name;
+				function = symbol->Name;
 			}
+		}
 
+		if(file.empty()) {
 			IMAGEHLP_LINE64 info = { sizeof(IMAGEHLP_LINE64) };
 			DWORD col;
 			if(SymGetLineFromAddr64(process, currentAddr, &col, &info)) {
-				function = file;
 				file = info.FileName;
 				line = info.LineNumber;
 				column = col;
@@ -614,7 +756,11 @@ inline void writeBacktrace(LPCONTEXT context) {
 		}
 
 		// write the data collected about this frame to the file.
-		fprintf(f, "%s", file.empty() ? "?" : file.c_str());
+		if(file.empty()) {
+			fprintf(f, "0x%llx", static_cast<unsigned long long>(currentAddr));
+		} else {
+			fputs(file.c_str(), f);
+		}
 		if(line >= 0) {
 			fprintf(f, " (%d", line);
 			if(column >= 0) {
@@ -629,6 +775,12 @@ inline void writeBacktrace(LPCONTEXT context) {
 
 		if(!StackWalk64(WALK_ARCH, process, thread, &frame, &walkContext,
 			0, SymFunctionTableAccess64, SymGetModuleBase64, 0)) { break; }
+
+		// Some DbgHelp versions return the initialized faulting frame on the
+		// first walk. It was already written above, so advance once more.
+		if(step == 0 && frame.AddrPC.Offset == currentAddr &&
+			!StackWalk64(WALK_ARCH, process, thread, &frame, &walkContext,
+				0, SymFunctionTableAccess64, SymGetModuleBase64, 0)) { break; }
 	}
 
 	SymCleanup(process);
