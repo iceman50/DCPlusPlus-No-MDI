@@ -1809,7 +1809,17 @@ void MainWindow::handleAbout() {
 }
 
 void MainWindow::handleOpenDownloadsDir() {
-	WinUtil::openFile(Text::toT(SETTING(DOWNLOAD_DIRECTORY)));
+	auto directory = SETTING(DOWNLOAD_DIRECTORY);
+	if(directory.empty())
+		return;
+
+	// ensureDirectory expects a path containing a trailing separator in order
+	// to create the final directory component.
+	if(directory.back() != '/' && directory.back() != '\\')
+		directory += PATH_SEPARATOR;
+
+	File::ensureDirectory(directory);
+	WinUtil::openFile(Text::toT(directory));
 }
 
 LRESULT MainWindow::handleEndSession() {
