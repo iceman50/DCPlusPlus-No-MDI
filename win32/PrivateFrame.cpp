@@ -169,14 +169,13 @@ lastMessageTime(time(NULL))
 		sendSeenIfActive();
 	});
 	message->onKillFocus([this](dwt::Widget*) { updateTypingState(false); });
-	addCallback(dwt::Message(WM_MDIACTIVATE), [this](const MSG& msg, LRESULT&) -> bool {
-		if(reinterpret_cast<HWND>(msg.lParam) == handle()) {
+	onVisibilityChanged([this](bool visible) {
+		if(visible) {
 			sendSeenIfActive();
 			updateTypingState();
 		} else {
 			updateTypingState(false);
 		}
-		return false;
 	});
 
 	initStatus();

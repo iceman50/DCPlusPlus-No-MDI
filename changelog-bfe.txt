@@ -1,4 +1,6 @@
 == 07-04-2026 - 0.8833 !!!Experimental!!! ==
+* Advertise enabled IPv4 and IPv6 ADC connectivity independently of optional HBRI hub support
+* Update CPMI typing and message-seen state from tab visibility instead of obsolete MDI activation messages
 * Add asynchronous ADC HBRI validation for IPv4 and IPv6 connectivity through hubs on the other address family, based on the AirDC++ implementation
 * Drain surviving hub clients before buffered socket shutdown to prevent shutdown hangs
 * Add independent font, text color and background color customization for every chat style

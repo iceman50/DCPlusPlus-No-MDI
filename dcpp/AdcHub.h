@@ -55,6 +55,7 @@ public:
 
 	static const vector<StringList>& getSearchExts();
 	static StringList parseSearchExts(int flag);
+	static pair<bool, bool> getAdvertisedConnectivity(bool hubUsesIPv6, bool ipv4Enabled, bool ipv6Enabled) noexcept;
 
 	static const string CLIENT_PROTOCOL;
 	static const string SECURE_CLIENT_PROTOCOL;

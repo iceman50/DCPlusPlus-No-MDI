@@ -1,6 +1,7 @@
 #include "testbase.h"
 
 #include <dcpp/AdcCommand.h>
+#include <dcpp/AdcHub.h>
 #include <dcpp/Client.h>
 #include <dcpp/CryptoManager.h>
 #include <dcpp/HubEntry.h>
@@ -92,6 +93,23 @@ TEST(testadc, broadcast_inf_keeps_sid_out_of_parameters)
 	ASSERT_EQ(2U, command.getParameters().size());
 	EXPECT_EQ("ID" + cid, command.getParam(0));
 	EXPECT_EQ("NITest", command.getParam(1));
+}
+
+TEST(testadc, advertises_all_enabled_connectivity_families)
+{
+	// The family used for the hub connection must always be present, even when
+	// incoming peer connections for that family are disabled.
+	EXPECT_EQ(std::make_pair(true, false), AdcHub::getAdvertisedConnectivity(false, false, false));
+	EXPECT_EQ(std::make_pair(false, true), AdcHub::getAdvertisedConnectivity(true, false, false));
+
+	// An enabled secondary family must not depend on optional hub extensions.
+	EXPECT_EQ(std::make_pair(true, true), AdcHub::getAdvertisedConnectivity(false, false, true));
+	EXPECT_EQ(std::make_pair(true, true), AdcHub::getAdvertisedConnectivity(true, true, false));
+
+	EXPECT_EQ(std::make_pair(true, false), AdcHub::getAdvertisedConnectivity(false, true, false));
+	EXPECT_EQ(std::make_pair(false, true), AdcHub::getAdvertisedConnectivity(true, false, true));
+	EXPECT_EQ(std::make_pair(true, true), AdcHub::getAdvertisedConnectivity(false, true, true));
+	EXPECT_EQ(std::make_pair(true, true), AdcHub::getAdvertisedConnectivity(true, true, true));
 }
 
 TEST(testadc, validates_failover_urls)

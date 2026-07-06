@@ -1063,6 +1063,14 @@ static void addParam(StringMap& lastInfoMap, AdcCommand& c, const string& var, c
 	}
 }
 
+pair<bool, bool> AdcHub::getAdvertisedConnectivity(bool hubUsesIPv6, bool ipv4Enabled, bool ipv6Enabled) noexcept {
+	// The hub-facing address family is always included so that the hub can identify
+	// the connection endpoint. Enabled secondary families must also be advertised;
+	// HBRI may validate them, but support for HBRI is not a prerequisite for the
+	// standard ADC I4/I6 and TCP4/TCP6 fields.
+	return { !hubUsesIPv6 || ipv4Enabled, hubUsesIPv6 || ipv6Enabled };
+}
+
 void AdcHub::appendConnectivity(StringMap& lastInfoMap, AdcCommand& c, bool v4, bool v6) {
 	if (v4) {
 		if(CONNSETTING(NO_IP_OVERRIDE) && !getUserIp4().empty()) {
@@ -1158,10 +1166,11 @@ void AdcHub::infoImpl() {
 		su += "," + SUDP_FEATURE;
 	}
 
-	bool addV4 = !sock->isV6Valid() ||
-		(get(HubSettings::Connection) != SettingsManager::INCOMING_DISABLED && supportsHBRI);
-	bool addV6 = sock->isV6Valid() ||
-		(get(HubSettings::Connection6) != SettingsManager::INCOMING_DISABLED && supportsHBRI);
+	const auto connectivity = getAdvertisedConnectivity(sock->isV6Valid(),
+		get(HubSettings::Connection) != SettingsManager::INCOMING_DISABLED,
+		get(HubSettings::Connection6) != SettingsManager::INCOMING_DISABLED);
+	const auto addV4 = connectivity.first;
+	const auto addV6 = connectivity.second;
 	
 	
 	if(addV4 && isActiveV4()) {
