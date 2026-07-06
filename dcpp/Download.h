@@ -63,6 +63,12 @@ public:
 	/** Release the target output */
 	void close();
 
+	/**
+	 * Validate the inexpensive, fixed signature of a completed full file list.
+	 * This catches damaged transfers before they reach the BZip/XML parser.
+	 */
+	bool hasValidFileListSignature() const;
+
 	/** @internal */
 	TigerTree& getTigerTree() { return tt; }
 	const string& getPFS() const { return pfs; }

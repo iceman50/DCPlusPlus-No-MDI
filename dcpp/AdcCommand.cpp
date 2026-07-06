@@ -242,7 +242,7 @@ const string& AdcCommand::getParam(size_t n) const {
 
 bool AdcCommand::getParam(const char* name, size_t start, string& ret) const {
 	for(auto i = start; i < getParameters().size(); ++i) {
-		if(toCode(name) == toCode(getParameters()[i].c_str())) {
+		if(getParameters()[i].size() >= 2 && toCode(name) == toCode(getParameters()[i].c_str())) {
 			ret = getParameters()[i].substr(2);
 			return true;
 		}
@@ -252,7 +252,7 @@ bool AdcCommand::getParam(const char* name, size_t start, string& ret) const {
 
 bool AdcCommand::hasFlag(const char* name, size_t start) const {
 	for(auto i = start; i < getParameters().size(); ++i) {
-		if(toCode(name) == toCode(getParameters()[i].c_str()) &&
+		if(getParameters()[i].size() >= 2 && toCode(name) == toCode(getParameters()[i].c_str()) &&
 			getParameters()[i].size() == 3 &&
 			getParameters()[i][2] == '1')
 		{

@@ -440,6 +440,9 @@ void Socket::socksConnect(const string& aAddr, const string& aPort, uint32_t tim
 	connStr.push_back(0);			// Reserved
 
 	if(SETTING(SOCKS_RESOLVE)) {
+		if(aAddr.empty() || aAddr.size() > 255) {
+			throw SocketException(_("Invalid SOCKS destination name"));
+		}
 		connStr.push_back(3);		// Address type: domain name
 		connStr.push_back((uint8_t)aAddr.size());
 		connStr.insert(connStr.end(), aAddr.begin(), aAddr.end());
@@ -450,28 +453,53 @@ void Socket::socksConnect(const string& aAddr, const string& aPort, uint32_t tim
 		connStr.insert(connStr.end(), paddr, paddr+4);
 	}
 
-	uint16_t port = htons(static_cast<uint16_t>(Util::toInt(aPort)));
+	const auto numericPort = Util::toInt(aPort);
+	if(numericPort <= 0 || numericPort > 65535) {
+		throw SocketException(_("Invalid SOCKS destination port"));
+	}
+	uint16_t port = htons(static_cast<uint16_t>(numericPort));
 	uint8_t* pport = (uint8_t*)&port;
 	connStr.push_back(pport[0]);
 	connStr.push_back(pport[1]);
 
 	writeAll(&connStr[0], connStr.size(), timeLeft(start, timeout));
 
-	// We assume we'll get a ipv4 address back...therefore, 10 bytes...
-	/// @todo add support for ipv6
-	if(readAll(&connStr[0], 10, timeLeft(start, timeout)) != 10) {
+	uint8_t responseHeader[4] = {};
+	if(readAll(responseHeader, sizeof(responseHeader), timeLeft(start, timeout)) != sizeof(responseHeader)) {
 		throw SocketException(_("The socks server failed establish a connection"));
 	}
 
-	if(connStr[0] != 5 || connStr[1] != 0) {
+	if(responseHeader[0] != 5 || responseHeader[1] != 0 || responseHeader[2] != 0) {
 		throw SocketException(_("The socks server failed establish a connection"));
 	}
 
-	in_addr sock_addr;
+	size_t addressLength = 0;
+	if(responseHeader[3] == 1) {
+		addressLength = 4;
+	} else if(responseHeader[3] == 4) {
+		addressLength = 16;
+	} else if(responseHeader[3] == 3) {
+		uint8_t domainLength = 0;
+		if(readAll(&domainLength, 1, timeLeft(start, timeout)) != 1 || domainLength == 0) {
+			throw SocketException(_("The socks server returned an invalid address"));
+		}
+		addressLength = domainLength;
+	} else {
+		throw SocketException(_("The socks server returned an invalid address type"));
+	}
 
-	memset(&sock_addr, 0, sizeof(sock_addr));
-	sock_addr.s_addr = *((unsigned long*)&connStr[4]);
-	setIp(inet_ntoa(sock_addr));
+	vector<uint8_t> responseAddress(addressLength + 2);
+	if(readAll(responseAddress.data(), static_cast<int>(responseAddress.size()), timeLeft(start, timeout)) != static_cast<int>(responseAddress.size())) {
+		throw SocketException(_("The socks server failed establish a connection"));
+	}
+	char addressBuffer[INET6_ADDRSTRLEN] = {};
+	if(responseHeader[3] == 1 && ::inet_ntop(AF_INET, responseAddress.data(), addressBuffer, sizeof(addressBuffer))) {
+		setIp(addressBuffer);
+	} else if(responseHeader[3] == 4 && ::inet_ntop(AF_INET6, responseAddress.data(), addressBuffer, sizeof(addressBuffer))) {
+		setIp(addressBuffer);
+	} else if(responseHeader[3] == 3) {
+		setIp(string(reinterpret_cast<const char*>(responseAddress.data()), addressLength));
+	}
 }
 
 void Socket::socksAuth(uint32_t timeout) {
@@ -509,6 +537,9 @@ void Socket::socksAuth(uint32_t timeout) {
 			throw SocketException(_("The socks server doesn't support login / password authentication"));
 		}
 
+		if(SETTING(SOCKS_USER).size() > 255 || SETTING(SOCKS_PASSWORD).size() > 255) {
+			throw SocketException(_("SOCKS credentials are too long"));
+		}
 		connStr.clear();
 		// Now we send the username / pw...
 		connStr.push_back(1);
@@ -584,12 +615,21 @@ int Socket::read(void* aBuffer, int aBufLen, string &aIP) {
 int Socket::readAll(void* aBuffer, int aBufLen, uint32_t timeout) {
 	uint8_t* buf = (uint8_t*)aBuffer;
 	int i = 0;
+	const auto start = GET_TICK();
 	while(i < aBufLen) {
 		int j = read(buf + i, aBufLen - i);
 		if(j == 0) {
 			return i;
 		} else if(j == -1) {
-			if(!wait(timeout, true, false).first) {
+			uint32_t remaining = timeout;
+			if(timeout != 0) {
+				const auto elapsed = GET_TICK() - start;
+				if(elapsed >= timeout) {
+					return i;
+				}
+				remaining = static_cast<uint32_t>(timeout - elapsed);
+			}
+			if(!wait(remaining, true, false).first) {
 				return i;
 			}
 			continue;
@@ -603,13 +643,20 @@ int Socket::readAll(void* aBuffer, int aBufLen, uint32_t timeout) {
 void Socket::writeAll(const void* aBuffer, int aLen, uint32_t timeout) {
 	const uint8_t* buf = (const uint8_t*)aBuffer;
 	int pos = 0;
+	const auto start = GET_TICK();
 	// No use sending more than this at a time...
 	int sendSize = getSocketOptInt(SO_SNDBUF);
 
 	while(pos < aLen) {
 		int i = write(buf+pos, (int)std::min(aLen-pos, sendSize));
 		if(i == -1) {
-			wait(timeout, false, true);
+			uint32_t remaining = timeout;
+			if(timeout != 0) {
+				remaining = static_cast<uint32_t>(timeLeft(start, timeout));
+			}
+			if(!wait(remaining, false, true).second) {
+				throw SocketException(_("Connection timeout"));
+			}
 		} else {
 			pos+=i;
 			stats.totalUp += i;
@@ -888,8 +935,7 @@ void Socket::socksUpdated() {
 			connStr[1] = 3;			// UDP Associate
 			connStr[2] = 0;			// Reserved
 			connStr[3] = 1;			// Address type: IPv4;
-			*((long*)(&connStr[4])) = 0;		// No specific outgoing UDP address
-			*((uint16_t*)(&connStr[8])) = 0;	// No specific port...
+			memset(&connStr[4], 0, 6); // No specific outgoing address or port
 
 			s.writeAll(connStr, 10, SOCKS_TIMEOUT);
 
@@ -899,16 +945,16 @@ void Socket::socksUpdated() {
 				return;
 			}
 
-			if(connStr[0] != 5 || connStr[1] != 0) {
+			if(connStr[0] != 5 || connStr[1] != 0 || connStr[2] != 0 || connStr[3] != 1) {
 				return;
 			}
 
 			udpAddr.sa.sa_family = AF_INET;
-			udpAddr.sai.sin_port = *((uint16_t*)(&connStr[8]));
+			memcpy(&udpAddr.sai.sin_port, &connStr[8], sizeof(udpAddr.sai.sin_port));
 #ifdef _WIN32
-			udpAddr.sai.sin_addr.S_un.S_addr = *((long*)(&connStr[4]));
+			memcpy(&udpAddr.sai.sin_addr.S_un.S_addr, &connStr[4], sizeof(udpAddr.sai.sin_addr.S_un.S_addr));
 #else
-			udpAddr.sai.sin_addr.s_addr = *((long*)(&connStr[4]));
+			memcpy(&udpAddr.sai.sin_addr.s_addr, &connStr[4], sizeof(udpAddr.sai.sin_addr.s_addr));
 #endif
 			udpAddrLen = sizeof(udpAddr.sai);
 		} catch(const SocketException&) {

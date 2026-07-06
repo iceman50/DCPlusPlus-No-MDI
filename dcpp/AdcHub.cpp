@@ -24,6 +24,7 @@
 #include "ConnectionManager.h"
 #include "ConnectivityManager.h"
 #include "CryptoManager.h"
+#include "Encoder.h"
 #include "FavoriteManager.h"
 #include "format.h"
 #include "HBRIValidation.h"
@@ -149,6 +150,13 @@ void AdcHub::handle(AdcCommand::INF, AdcCommand& c) noexcept {
 
 	OnlineUser* u = 0;
 	if(c.getParam("ID", 0, cid)) {
+		// Routing SIDs are parsed into AdcCommand::from and are not part of the
+		// parameter list. Validate the actual ID field before constructing a CID;
+		// requiring parameter 0 to be four bytes drops every valid BINF and leaves
+		// authenticated hub sessions permanently stuck before STATE_NORMAL.
+		if(cid.size() != 39 || !Encoder::isBase32(cid)) {
+			return;
+		}
 		u = findUser(CID(cid));
 		if(u) {
 			if(u->getIdentity().getSID() != c.getFrom()) {
@@ -204,7 +212,10 @@ void AdcHub::handle(AdcCommand::INF, AdcCommand& c) noexcept {
 				StringTokenizer<string> st(fo, ',');
 				for(auto& url: st.getTokens()) {
 					Util::trim(url);
-					if(!url.empty())
+					// Hub-provided failovers must remain ADC and may not directly
+					// point at a private/local numeric endpoint. User-configured
+					// failovers are validated separately without that restriction.
+					if(Client::isValidFailoverUrl(url, true, true))
 						urls.push_back(url);
 				}
 				if(!urls.empty() && urls != fav->getFailoverServers()) {
@@ -271,7 +282,7 @@ void AdcHub::handle(AdcCommand::SID, AdcCommand& c) noexcept {
 		return;
 	}
 
-	if(c.getParameters().empty())
+	if(c.getParameters().empty() || c.getParam(0).size() != 4)
 		return;
 
 	sid = AdcCommand::toSID(c.getParam(0));
@@ -298,6 +309,9 @@ void AdcHub::handle(AdcCommand::MSG, AdcCommand& c) noexcept {
 		if(!to)
 			return;
 
+		if(temp.size() != 4) {
+			return;
+		}
 		replyTo = findUser(AdcCommand::toSID(temp));
 		if(!replyTo || PluginManager::getInstance()->runHook(HOOK_CHAT_PM_IN, replyTo, chatMessage))
 			return;
@@ -318,6 +332,9 @@ void AdcHub::handle(AdcCommand::GPA, AdcCommand& c) noexcept {
 }
 
 void AdcHub::handle(AdcCommand::QUI, AdcCommand& c) noexcept {
+	if(c.getParameters().empty() || c.getParam(0).size() != 4) {
+		return;
+	}
 	uint32_t s = AdcCommand::toSID(c.getParam(0));
 
 	OnlineUser* victim = findUser(s);
@@ -327,7 +344,7 @@ void AdcHub::handle(AdcCommand::QUI, AdcCommand& c) noexcept {
 		if(c.getParam("MS", 1, tmp)) {
 			OnlineUser* source = 0;
 			string tmp2;
-			if(c.getParam("ID", 1, tmp2)) {
+			if(c.getParam("ID", 1, tmp2) && tmp2.size() == 4) {
 				source = findUser(AdcCommand::toSID(tmp2));
 			}
 
@@ -475,6 +492,9 @@ void AdcHub::sendUDP(const AdcCommand& cmd) noexcept {
 		}
 		ip = CONNSTATE(INCOMING_CONNECTIONS6) ? ou.getIdentity().getIp() : ou.getIdentity().getIp4();
 		port = ou.getIdentity().getUdpPort();
+		if(!Util::isSafePeerEndpoint(ip, port, getIp())) {
+			return;
+		}
 		command = cmd.toString(ou.getUser()->getCID());
 	}
 	try {

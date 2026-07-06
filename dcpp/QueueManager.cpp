@@ -192,19 +192,23 @@ QueueItem* QueueManager::UserQueue::getNext(const UserPtr& aUser, QueueItem::Pri
 				if(qi->isWaiting()) {
 					return qi;
 				}
+				// Full and partial file lists must never be downloaded concurrently
+				// from the same queue item. They aren't segmented and may share a
+				// single output target.
+				if(qi->isSet(QueueItem::FLAG_USER_LIST)) {
+					continue;
+				}
 
 				// No segmented downloading when getting the tree
 				if(qi->getDownloads()[0]->getType() == Transfer::TYPE_TREE) {
 					continue;
 				}
-				if(!qi->isSet(QueueItem::FLAG_USER_LIST)) {
-					auto blockSize = HashManager::getInstance()->getBlockSize(qi->getTTH());
-					if(blockSize == 0)
-						blockSize = qi->getSize();
-					if(qi->getNextSegment(blockSize, wantedSize).getSize() == 0) {
-						dcdebug("No segment for %s in %s, block " I64_FMT "\n", aUser->getCID().toBase32().c_str(), qi->getTarget().c_str(), blockSize);
-						continue;
-					}
+				auto blockSize = HashManager::getInstance()->getBlockSize(qi->getTTH());
+				if(blockSize == 0)
+					blockSize = qi->getSize();
+				if(qi->getNextSegment(blockSize, wantedSize).getSize() == 0) {
+					dcdebug("No segment for %s in %s, block " I64_FMT "\n", aUser->getCID().toBase32().c_str(), qi->getTarget().c_str(), blockSize);
+					continue;
 				}
 				return qi;
 			}
@@ -622,7 +626,7 @@ void QueueManager::add(const string& aTarget, int64_t aSize, const TTHValue& roo
 
 connect:
 	if(wantConnection && aUser.user->isOnline())
-		ConnectionManager::getInstance()->getDownloadConnection(aUser);
+		ConnectionManager::getInstance()->getDownloadConnection(aUser, (aFlags & QueueItem::FLAG_USER_LIST) != 0);
 }
 
 void QueueManager::readd(const string& target, const HintedUser& aUser) {

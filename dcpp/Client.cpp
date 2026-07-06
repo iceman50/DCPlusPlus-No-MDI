@@ -36,8 +36,8 @@ uint32_t idCounter = 0;
 
 Client::Client(const string& hubURL, char separator_, bool secure_) :
 	myIdentity(ClientManager::getInstance()->getMe(), 0), uniqueId(++idCounter),
-	reconnDelay(120), lastActivity(GET_TICK()), registered(false), autoReconnect(false),
-	encoding(Text::systemCharset), state(STATE_DISCONNECTED), sock(0),
+	reconnDelay(120), registered(false), autoReconnect(false),
+	encoding(Text::systemCharset), state(STATE_DISCONNECTED), sock(0), lastActivity(GET_TICK()),
 	hubUrl(hubURL), separator(separator_),
 	secure(secure_), failoverIndex(0), usingFailover(false), countType(COUNT_UNCOUNTED)
 {
@@ -170,7 +170,48 @@ void Client::setFailoverUrls(const StringList& urls) {
 	}
 }
 
+bool Client::isValidFailoverUrl(const string& url, bool adcClient, bool requirePublicNumeric) {
+	string protocol, host, candidatePort, file, query, fragment;
+	Util::decodeUrl(url, protocol, host, candidatePort, file, query, fragment);
+	protocol = Text::toLower(protocol);
+
+	const bool validProtocol = adcClient ? (protocol == "adc" || protocol == "adcs") :
+		(protocol == "dchub" || protocol == "nmdcs");
+	if(!validProtocol || host.empty() || candidatePort.empty() || candidatePort.size() > 5) {
+		return false;
+	}
+
+	unsigned portValue = 0;
+	for(const auto ch: candidatePort) {
+		if(ch < '0' || ch > '9') {
+			return false;
+		}
+		portValue = portValue * 10 + static_cast<unsigned>(ch - '0');
+	}
+	if(portValue == 0 || portValue > 65535) {
+		return false;
+	}
+
+	if(requirePublicNumeric) {
+		in_addr address4 = {};
+		in6_addr address6 = {};
+		if(::inet_pton(AF_INET, host.c_str(), &address4) == 1 && !Util::isPublicIp(host, false)) {
+			return false;
+		}
+		if(::inet_pton(AF_INET6, host.c_str(), &address6) == 1 && !Util::isPublicIp(host, true)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool Client::setHubUrl(const string& hubURL) {
+	const bool adcClient = dynamic_cast<AdcHub*>(this) != nullptr;
+	if(!isValidFailoverUrl(hubURL, adcClient)) {
+		return false;
+	}
+
 	string proto, file, query, fragment;
 	string address_, port_;
 	Util::decodeUrl(hubURL, proto, address_, port_, file, query, fragment);
@@ -188,12 +229,7 @@ bool Client::setHubUrl(const string& hubURL) {
 		keyprint.clear();
 	}
 
-	if(!proto.empty()) {
-		if(Util::stricmp(proto, "adcs") == 0 || Util::stricmp(proto, "ADCS") == 0)
-			secure = true;
-		else if(Util::stricmp(proto, "adc") == 0)
-			secure = false;
-	}
+	secure = Util::stricmp(proto, adcClient ? "adcs" : "nmdcs") == 0;
 	return true;
 }
 

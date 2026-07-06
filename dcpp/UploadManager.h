@@ -67,14 +67,14 @@ public:
 	int64_t getRunningAverage();
 
 	/** @return Number of free slots. */
-	int getFreeSlots() { return max((SETTING(SLOTS) - running), 0); }
+	int getFreeSlots() const { Lock l(cs); return max((SETTING(SLOTS) - running), 0); }
 
 	/** @internal */
-	int getFreeExtraSlots() { return max(max(SETTING(MAX_EXTRA_SLOTS), 1) - getExtra(), 0); }
+	int getFreeExtraSlots() const { Lock l(cs); return max(max(SETTING(MAX_EXTRA_SLOTS), 1) - extra, 0); }
 
 	/** @param aUser Reserve an upload slot for this user and connect. */
 	void reserveSlot(const HintedUser& aUser);
-	bool isConnecting(const UserPtr& aUser) const { return connectingUsers.find(aUser) != connectingUsers.end(); }
+	bool isConnecting(const UserPtr& aUser) const { Lock l(cs); return connectingUsers.find(aUser) != connectingUsers.end(); }
 
 	typedef set<string> FileSet;
 	typedef unordered_map<UserPtr, FileSet, User::Hash> FilesMap;
@@ -86,13 +86,16 @@ public:
 	/** @internal */
 	void addConnection(UserConnectionPtr conn);
 
-	GETSET(int, running, Running);
-	GETSET(int, extra, Extra);
-	GETSET(uint64_t, lastGrant, LastGrant);
+	int getRunning() const { Lock l(cs); return running; }
+	int getExtra() const { Lock l(cs); return extra; }
+	uint64_t getLastGrant() const { Lock l(cs); return lastGrant; }
 	
 private:
 	UploadList uploads;
 	mutable CriticalSection cs;
+	int running;
+	int extra;
+	uint64_t lastGrant;
 
 	typedef unordered_set<UserPtr, User::Hash> SlotSet;
 	typedef SlotSet::iterator SlotIter;

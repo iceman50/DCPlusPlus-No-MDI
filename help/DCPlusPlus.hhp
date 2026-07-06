@@ -73,6 +73,7 @@ IDH_HISTORYPAGE=settings_history.html
 IDH_LOGPAGE=settings_logs.html
 IDH_ADVANCEDPAGE=settings_advanced.html
 IDH_EXPERTSPAGE=settings_expert.html
+IDH_EXPERIMENTALPAGE=settings_experimental.html
 IDH_UCPAGE=settings_user_commands.html
 IDH_CERTIFICATESPAGE=settings_certs.html
 IDH_SEARCHTYPESPAGE=settings_search_types.html
@@ -85,4 +86,3 @@ IDH_PLUGINPAGE=settings_plugins.html
 [TEXT POPUPS]
 
 [INFOTYPES]
-

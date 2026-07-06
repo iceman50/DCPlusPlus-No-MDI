@@ -149,7 +149,9 @@ size_t FileReader::readDirect(const string& file, const DataCallback& callback) 
 			return READ_FAILED;
 		}
 	}
-	over.Offset = hn;
+	uint64_t offset = hn;
+	over.Offset = static_cast<DWORD>(offset);
+	over.OffsetHigh = static_cast<DWORD>(offset >> 32);
 
 	bool go = true;
 	for (; hn == bufSize && go;) {
@@ -178,7 +180,9 @@ size_t FileReader::readDirect(const string& file, const DataCallback& callback) 
 			}
 		}
 
-		*((uint64_t*)&over.Offset) += rn;
+		offset += rn;
+		over.Offset = static_cast<DWORD>(offset);
+		over.OffsetHigh = static_cast<DWORD>(offset >> 32);
 
 		swap(rbuf, hbuf);
 		swap(rn, hn);
@@ -189,7 +193,7 @@ size_t FileReader::readDirect(const string& file, const DataCallback& callback) 
 		callback(hbuf, hn);
 	}
 
-	return *((uint64_t*)&over.Offset);
+	return static_cast<size_t>(offset);
 }
 
 #else

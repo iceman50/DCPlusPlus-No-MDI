@@ -18,6 +18,8 @@
 #ifndef DCPLUSPLUS_DCPP_USER_CONNECTION_H
 #define DCPLUSPLUS_DCPP_USER_CONNECTION_H
 
+#include <atomic>
+
 #include "forward.h"
 #include "TimerManager.h"
 #include "UserConnectionListener.h"
@@ -159,7 +161,8 @@ public:
 
 	void sendRaw(const string& raw) { send(raw); }
 	void connect(const string& aServer, const string& aPort, const string& localPort, const BufferedSocket::NatRoles natRole, UserPtr user = nullptr);
-	void accept(const Socket& aServer);
+	void accept(const Socket& aServer, bool deferHandshake = false);
+	void completeAccept() { dcassert(socket); socket->completeAccept(); }
 
 	template<typename F>
 	void callAsync(F f) { if(socket) socket->callAsync(f); }
@@ -212,13 +215,17 @@ public:
 	GETSET(string, token, Token);
 	GETSET(string, encoding, Encoding);
 	GETSET(string, port, Port);
-	GETSET(States, state, State);
-	GETSET(uint64_t, lastActivity, LastActivity);
+	States getState() const noexcept { return state.load(std::memory_order_relaxed); }
+	void setState(States value) noexcept { state.store(value, std::memory_order_relaxed); }
+	uint64_t getLastActivity() const noexcept { return lastActivity.load(std::memory_order_relaxed); }
+	void setLastActivity(uint64_t value) noexcept { lastActivity.store(value, std::memory_order_relaxed); }
 	GETSET(double, speed, Speed);
 	GETSET(int, maxRemoteConnections, MaxRemoteConnections);
 
 	ConnectionData* getPluginObject() noexcept;
 private:
+	std::atomic<uint64_t> lastActivity;
+	std::atomic<States> state;
 	int64_t chunkSize;
 	BufferedSocket* socket;
 	bool secure;
@@ -232,8 +239,8 @@ private:
 	};
 
 	// We only want ConnectionManager to create this...
-	UserConnection(bool secure_) noexcept : encoding(Text::systemCharset), state(STATE_UNCONNECTED),
-		lastActivity(0), speed(0), maxRemoteConnections(1), chunkSize(0), socket(0), secure(secure_), download(NULL) {
+	UserConnection(bool secure_) noexcept : encoding(Text::systemCharset), speed(0), maxRemoteConnections(1),
+		lastActivity(0), state(STATE_UNCONNECTED), chunkSize(0), socket(0), secure(secure_), download(NULL) {
 	}
 
 	virtual ~UserConnection() {

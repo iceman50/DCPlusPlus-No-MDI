@@ -158,14 +158,14 @@ void UserConnection::connect(const string& aServer, const string& aPort, const s
 	socket->connect(aServer, aPort, localPort, natRole, secure, true, true);
 }
 
-void UserConnection::accept(const Socket& aServer) {
+void UserConnection::accept(const Socket& aServer, bool deferHandshake) {
 	dcassert(!socket);
 	socket = BufferedSocket::getSocket(0);
 	socket->addListener(this);
 
 	// Technically only one side needs to verify KeyPrint, also since we most likely requested to be connected to (and we have insufficent info otherwise) deal with TLS options check post handshake
 	// -> SSLSocket::verifyKeyprint does full certificate verification after INF
-	setPort(std::to_string(socket->accept(aServer, secure, true)));
+	setPort(std::to_string(socket->accept(aServer, secure, true, Util::emptyString, deferHandshake)));
 }
 
 void UserConnection::inf(bool withToken, int mcnSlots) {
@@ -286,22 +286,22 @@ void UserConnection::handlePM(const AdcCommand& c, bool echo) noexcept {
 }
 
 void UserConnection::on(Connected) noexcept {
-	lastActivity = GET_TICK();
+	setLastActivity(GET_TICK());
 	fire(UserConnectionListener::Connected(), this);
 }
 
 void UserConnection::on(Data, uint8_t* data, size_t len) noexcept {
-	lastActivity = GET_TICK();
+	setLastActivity(GET_TICK());
 	fire(UserConnectionListener::Data(), this, data, len);
 }
 
 void UserConnection::on(BytesSent, size_t bytes, size_t actual) noexcept {
-	lastActivity = GET_TICK();
+	setLastActivity(GET_TICK());
 	fire(UserConnectionListener::BytesSent(), this, bytes, actual);
 }
 
 void UserConnection::on(ModeChange) noexcept {
-	lastActivity = GET_TICK();
+	setLastActivity(GET_TICK());
 	fire(UserConnectionListener::ModeChange(), this);
 }
 
@@ -371,7 +371,7 @@ void UserConnection::send(const string& aString) {
 	if(PluginManager::getInstance()->runHook(HOOK_NETWORK_CONN_OUT, this, aString))
 		return;
 
-	lastActivity = GET_TICK();
+	setLastActivity(GET_TICK());
 	socket->write(aString);
 }
 

@@ -1,19 +1,37 @@
 == 07-04-2026 - 0.8833 !!!Experimental!!! ==
-* Add ADC HBRI support for validating IPv4 and IPv6 connectivity through hubs connected over the other address family
-* HBRI support is based directly on and references the AirDC++ implementation
-* Run HBRI validation asynchronously with endpoint, response, timeout and shutdown handling
+* Add asynchronous ADC HBRI validation for IPv4 and IPv6 connectivity through hubs on the other address family, based on the AirDC++ implementation
 * Drain surviving hub clients before buffered socket shutdown to prevent shutdown hangs
-* Fix a TransferView user-command submenu crash and use the correct user command context
-* Correct IPv4 and IPv6 public, private and link-local address classification, including scoped IPv6 addresses
-* Disable automatically detected IPv6 connectivity when no public IPv6 address is available
+* Add independent font, text color and background color customization for every chat style
+* Add ADC MCN1 multi-connection transfers with per-user download and upload limits
+* Centralize transfer flags and display segmented downloads and uploads with the C flag
+* Add a documented Experimental settings page with visible defaults for protocol queues, peer connections, flood control, UDP/SUDP and generated partial-list limits
+* Bound queued protocol output, compressed command batches and incomplete commands to prevent excessive memory use
+* Make shared flags, connection activity, search timing and shutdown state thread-safe
+* Keep connection tokens unique and rework listener and connection-queue notifications to avoid callbacks under internal locks and wait safely for in-flight listeners
+* Enforce a global peer-connection cap and per-address incoming connection flood windows before starting TLS handshakes
+* Fix ADCS login stalls caused by waiting on the wrong TLS readiness event and rejecting valid post-authentication BINF commands
+* Validate ADC parameter lengths, SIDs, CIDs and connection identities before decoding or using them
+* Restrict hub-directed client, UDP, HBRI and failover endpoints to valid protocols, ports and safe public or private/local hub scopes
+* Improve SOCKS5 validation, support IPv4, IPv6 and domain reply addresses, and apply cumulative read and write timeouts
+* Rate-limit incoming UDP packets globally and per peer, cap tracked peers and verify search-result source addresses
+* Harden SUDP encryption and decryption against malformed packets, invalid keys, random-number or cipher failures and plaintext downgrade
+* Bound retained SUDP search keys and reject malformed ADC and NMDC search results, hashes, sizes and slot counts
+* Recognize plaintext NMDC and ADC UDP packets before attempting SUDP decryption
+* Prevent MCN1 from opening duplicate full or partial file-list transfers and remove stale pending or idle connections when a list starts
+* Prevent delayed connection events from leaving duplicate blank rows in TransferView when a download starts
+* Avoid redundant ZL1 wrapping for BZip2 file lists, validate completed list signatures and discard corrupt list downloads
+* Bound generated partial-list XML, reject invalid tree and partial-list ranges and validate ADC GET parameters
+* Handle recoverable ADC transfer errors without falling through into success handling
+* Synchronize upload slot accounting and prevent slot counters from becoming negative
+* Fix a TransferView user-command submenu crash and use the correct user-command context
+* Correct IPv4 and IPv6 public, private and link-local classification, including scoped IPv6 addresses, and disable unusable auto-detected IPv6 connectivity
 * Make string trimming independent of the installed system locale
-* Add ADC TCP, HBRI, network address classification and locale-independent trimming tests
-* Add independent font, text color and background color customization for all chat styles
 * Fix opening the configured downloads directory from the main window
 * Restore full DWARF function prototypes and improve crash-log symbol resolution
-* Centralize transfer flags and display segmented downloads and uploads with the C flag
-* Add ADC MCN1 multi-connection transfers with per-user download and upload limits
-* Harden shared NMDC, ADC and SUDP packet handling by recognizing plaintext UDP traffic before decryption and validating decrypted ADC frames
+* Fix dangling public-hub XML attribute references while loading hub lists
+* Fix strict-aliasing and offsets beyond 4 GiB in unbuffered Windows file reads
+* Generate context-help headers with correct CRLF line endings on Windows
+* Expand ADC, SUDP, HBRI and network endpoint validation tests
 
 == 07-04-2026 - 0.8832 !!!Experimental!!! ==
 * Add semantic RichEdit chat coloring for timestamps, nicknames, message text, system messages and mentions

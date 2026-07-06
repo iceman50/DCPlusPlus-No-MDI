@@ -169,6 +169,7 @@ private:
 	UserPtr me;
 
 	Socket udp;
+	CriticalSection udpCs;
 
 	CID pid;
 

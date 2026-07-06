@@ -688,6 +688,49 @@ bool Util::isPublicIp(const string& ip, bool v6) noexcept {
 	return !isLocalIp(ip, v6) && !isPrivateIp(ip, v6);
 }
 
+bool Util::isSafePeerEndpoint(const string& ip, const string& port, const string& hubIp) noexcept {
+	if(ip.empty() || port.empty() || port.size() > 5) {
+		return false;
+	}
+
+	unsigned portValue = 0;
+	for(const auto c: port) {
+		if(c < '0' || c > '9') {
+			return false;
+		}
+		portValue = portValue * 10 + static_cast<unsigned>(c - '0');
+	}
+	if(portValue == 0 || portValue > 65535) {
+		return false;
+	}
+
+	in_addr address4 = {};
+	in6_addr address6 = {};
+	const bool v6 = ::inet_pton(AF_INET6, ip.c_str(), &address6) == 1;
+	if(!v6 && ::inet_pton(AF_INET, ip.c_str(), &address4) != 1) {
+		return false;
+	}
+	if(isPublicIp(ip, v6)) {
+		return true;
+	}
+	const bool peerIsPrivate = isPrivateIp(ip, v6);
+	const bool peerIsLocal = isLocalIp(ip, v6);
+	if(!peerIsPrivate && !peerIsLocal) {
+		return false;
+	}
+
+	in_addr hub4 = {};
+	in6_addr hub6 = {};
+	const bool hubV6 = ::inet_pton(AF_INET6, hubIp.c_str(), &hub6) == 1;
+	if(!hubV6 && ::inet_pton(AF_INET, hubIp.c_str(), &hub4) != 1) {
+		return false;
+	}
+	if(hubV6 != v6) {
+		return false;
+	}
+	return peerIsLocal ? isLocalIp(hubIp, hubV6) : (isPrivateIp(hubIp, hubV6) || isLocalIp(hubIp, hubV6));
+}
+
 bool Util::isIpV4(const string& ip) noexcept {
 	return inet_addr(ip.c_str()) != INADDR_NONE;
 }

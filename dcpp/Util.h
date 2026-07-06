@@ -400,6 +400,8 @@ public:
 	static bool isPrivateIp(const string& ip, bool v6) noexcept;
 
 	static bool isPublicIp(const string& ip, bool v6) noexcept;
+	/** Accept public numeric peers, or private peers only when the hub itself is private. */
+	static bool isSafePeerEndpoint(const string& ip, const string& port, const string& hubIp) noexcept;
 
 	// Return whether the IP is a well formatted IPv4 address
 	static bool isIpV4(const string& ip) noexcept;

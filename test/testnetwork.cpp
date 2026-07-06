@@ -43,3 +43,17 @@ TEST(testnetwork, classifies_ipv6_addresses)
 
 	EXPECT_TRUE(Util::isPublicIp("2606:4700:4700::1111", true));
 }
+
+TEST(testnetwork, validates_peer_endpoints)
+{
+	EXPECT_TRUE(Util::isSafePeerEndpoint("203.0.113.10", "411", "198.51.100.20"));
+	EXPECT_TRUE(Util::isSafePeerEndpoint("192.168.1.10", "411", "192.168.1.1"));
+	EXPECT_TRUE(Util::isSafePeerEndpoint("fd00::10", "411", "fd00::1"));
+	EXPECT_TRUE(Util::isSafePeerEndpoint("127.0.0.1", "411", "127.0.0.1"));
+
+	EXPECT_FALSE(Util::isSafePeerEndpoint("127.0.0.1", "411", "198.51.100.20"));
+	EXPECT_FALSE(Util::isSafePeerEndpoint("192.168.1.10", "411", "198.51.100.20"));
+	EXPECT_FALSE(Util::isSafePeerEndpoint("192.168.1.10", "0", "192.168.1.1"));
+	EXPECT_FALSE(Util::isSafePeerEndpoint("192.168.1.10", "65536", "192.168.1.1"));
+	EXPECT_FALSE(Util::isSafePeerEndpoint("not-an-ip", "411", "192.168.1.1"));
+}

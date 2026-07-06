@@ -25,8 +25,14 @@ TEST(testhbri, validates_numeric_endpoints)
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(false, "2001:db8::1", "411")), Exception);
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(true, "203.0.113.1", "411")), Exception);
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(false, "0.0.0.0", "411")), Exception);
+	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(false, "127.0.0.1", "411")), Exception);
+	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(false, "10.0.0.1", "411")), Exception);
+	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(false, "169.254.1.1", "411")), Exception);
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(false, "239.1.2.3", "411")), Exception);
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(true, "::", "411")), Exception);
+	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(true, "::1", "411")), Exception);
+	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(true, "fe80::1", "411")), Exception);
+	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(true, "fc00::1", "411")), Exception);
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(true, "ff02::1", "411")), Exception);
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(true, "::ffff:203.0.113.1", "411")), Exception);
 	EXPECT_THROW(HBRIValidator::validateConnectInfo(connectInfo(false, "203.0.113.1", "0")), Exception);

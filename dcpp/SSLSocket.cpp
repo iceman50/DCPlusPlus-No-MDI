@@ -128,7 +128,9 @@ bool SSLSocket::waitWant(int ret, uint32_t millis) {
 	case SSL_ERROR_WANT_READ:
 		return wait(millis, true, false).first;
 	case SSL_ERROR_WANT_WRITE:
-		return wait(millis, true, false).second;
+		// A nonblocking TLS handshake may need the socket's write side. Waiting for
+		// readability here stalls ADCS logins whenever OpenSSL returns WANT_WRITE.
+		return wait(millis, false, true).second;
 	// Check if this is a fatal error...
 	default: checkSSL(ret);
 	}

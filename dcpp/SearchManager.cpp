@@ -68,7 +68,7 @@ bool SearchManager::isAdcUdpPacket(const string& data) noexcept {
 
 	const auto cidEnd = data.find(' ', 5);
 	const auto cidLength = (cidEnd == string::npos ? data.size() - 1 : cidEnd) - 5;
-	return cidLength > 0 && std::all_of(data.begin() + 5, data.begin() + 5 + cidLength, isBase32Char);
+	return cidLength == 39 && std::all_of(data.begin() + 5, data.begin() + 5 + cidLength, isBase32Char);
 }
 
 bool SearchManager::isPlaintextUdpPacket(const string& data) noexcept {
@@ -112,7 +112,7 @@ void SearchManager::search(const string& aName, int64_t aSize, TypeModes aTypeMo
 		string aKey;
 		genSUDPKey(aKey);
 		ClientManager::getInstance()->search(aSizeMode, aSize, aTypeMode, normalizeWhitespace(aName), aToken, aKey);
-		lastSearch = GET_TICK();
+		lastSearch.store(GET_TICK(), std::memory_order_relaxed);
 	}
 }
 
@@ -121,7 +121,7 @@ void SearchManager::search(StringList& who, const string& aName, int64_t aSize /
 		string aKey;
 		genSUDPKey(aKey);
 		ClientManager::getInstance()->search(who, aSizeMode, aSize, aTypeMode, normalizeWhitespace(aName), aToken, aExtList, aKey);
-		lastSearch = GET_TICK();
+		lastSearch.store(GET_TICK(), std::memory_order_relaxed);
 	}
 }
 
@@ -155,6 +155,43 @@ void SearchManager::disconnect() noexcept {
 }
 
 #define BUFSIZE 8192
+bool SearchManager::allowPacket(const string& remoteIp, uint64_t now) noexcept {
+	// UDP is connectionless, so apply both a process-wide ceiling and a per-address ceiling.
+	const auto globalWindow = static_cast<uint64_t>(std::max(1, SETTING(GLOBAL_WINDOW)));
+	const auto globalLimit = static_cast<size_t>(std::max(1, SETTING(GLOBAL_LIMIT)));
+	const auto peerWindow = static_cast<uint64_t>(std::max(1, SETTING(PEER_WINDOW)));
+	const auto peerLimit = static_cast<size_t>(std::max(1, SETTING(PEER_LIMIT)));
+	const auto maxTrackedPeers = static_cast<size_t>(std::max(1, SETTING(MAX_TRACKED_PEERS)));
+
+	if(globalPacketRate.windowStart == 0 || now - globalPacketRate.windowStart >= globalWindow) {
+		globalPacketRate = { now, 0 };
+	}
+	if(++globalPacketRate.count > globalLimit) {
+		return false;
+	}
+
+	auto i = packetRates.find(remoteIp);
+	if(i == packetRates.end()) {
+		if(packetRates.size() >= maxTrackedPeers) {
+			for(auto j = packetRates.begin(); j != packetRates.end();) {
+				if(now - j->second.windowStart >= peerWindow) {
+					j = packetRates.erase(j);
+				} else {
+					++j;
+				}
+			}
+			if(packetRates.size() >= maxTrackedPeers) {
+				return false;
+			}
+		}
+		i = packetRates.emplace(remoteIp, PacketRate { now, 0 }).first;
+	}
+	if(now - i->second.windowStart >= peerWindow) {
+		i->second = { now, 0 };
+	}
+	return ++i->second.count <= peerLimit;
+}
+
 int SearchManager::run() {
 	std::unique_ptr<uint8_t[]> buf(new uint8_t[BUFSIZE]);
 	int len;
@@ -167,10 +204,19 @@ int SearchManager::run() {
 			}
 
 			if((len = socket->read(&buf[0], BUFSIZE, remoteAddr)) > 0) {
+				if(!allowPacket(remoteAddr, GET_TICK())) {
+					continue;
+				}
 				string data(reinterpret_cast<char*>(&buf[0]), len);
 
-				if(SETTING(ENABLE_SUDP) && !isPlaintextUdpPacket(data) && len >= 32 && ((len & 15) == 0)) {
-					decryptPacket(data, len, buf.get());
+				if(!isPlaintextUdpPacket(data)) {
+					// AES-CBC SUDP packets include an IV and must contain whole cipher blocks.
+					const auto maxSudpPacket = std::max(32, SETTING(MAX_SUDP_PACKET));
+					if(!SETTING(ENABLE_SUDP) || len < 32 || len > maxSudpPacket || (len & 15) != 0 ||
+						!decryptPacket(data, len, buf.get()))
+					{
+						continue;
+					}
 				}
 
 				if(PluginManager::getInstance()->onUDP(false, remoteAddr, port, data))
@@ -248,12 +294,19 @@ void SearchManager::handle(AdcCommand::RES, AdcCommand& c, const string& remoteI
 		return;
 
 	string cid = c.getParam(0);
-	if (cid.size() != 39)
+	if (cid.size() != 39 || !Encoder::isBase32(cid))
 		return;
 
 	UserPtr user = ClientManager::getInstance()->findUser(CID(cid));
 	if (!user)
 		return;
+
+	const auto identities = ClientManager::getInstance()->getIdentities(user);
+	if(!remoteIp.empty() && std::none_of(identities.begin(), identities.end(), [&](const Identity& identity) {
+		return identity.getIp4() == remoteIp || identity.getIp6() == remoteIp;
+	})) {
+		return;
+	}
 
 	// This should be handled by AdcCommand really...
 	c.getParameters().erase(c.getParameters().begin());
@@ -347,6 +400,17 @@ void SearchManager::onSR(const string& x, const string& remoteIp) {
 		if (!user)
 			return;
 	}
+	if(!remoteIp.empty()) {
+		const auto identities = ClientManager::getInstance()->getIdentities(user.user);
+		const auto hasAdvertisedIp = std::any_of(identities.begin(), identities.end(), [](const Identity& identity) {
+			return !identity.getIp4().empty() || !identity.getIp6().empty();
+		});
+		if(hasAdvertisedIp && std::none_of(identities.begin(), identities.end(), [&](const Identity& identity) {
+			return identity.getIp4() == remoteIp || identity.getIp6() == remoteIp;
+		})) {
+			return;
+		}
+	}
 
 	Style style;
 	{
@@ -364,9 +428,10 @@ void SearchManager::onSR(const string& x, const string& remoteIp) {
 		hubName = names.empty() ? _("Offline") : Util::toString(names);
 	}
 
-	if (tth.empty() && type == SearchResult::TYPE_FILE) {
+	if (type == SearchResult::TYPE_FILE && (tth.size() != 39 || !Encoder::isBase32(tth) || size < 0)) {
 		return;
 	}
+	if(freeSlots < 0 || slots < 0) { return; }
 
 	fire(SearchManagerListener::SR(), SearchResultPtr(new SearchResult(user, type, slots,
 		freeSlots, size, file, hubName, remoteIp, TTHValue(tth), Util::emptyString, style)));
@@ -396,7 +461,7 @@ void SearchManager::onRES(const AdcCommand& cmd, const UserPtr& from, const stri
 	if(file.empty() || freeSlots == -1 || size == -1) { return; }
 
 	auto type = (*(file.end() - 1) == '\\' ? SearchResult::TYPE_DIRECTORY : SearchResult::TYPE_FILE);
-	if(type == SearchResult::TYPE_FILE && tth.empty()) { return; }
+	if(type == SearchResult::TYPE_FILE && (tth.size() != 39 || !Encoder::isBase32(tth) || size < 0)) { return; }
 
 	string hubUrl;
 	HintedUser hUser;
@@ -433,10 +498,13 @@ void SearchManager::genSUDPKey(string& aKey) {
 	string keyStr = Util::emptyString;
 	if(SETTING(ENABLE_SUDP)) {
 		auto key = std::make_unique<uint8_t[]>(16);
-		RAND_bytes(key.get(), 16);
-		keyStr = Encoder::toBase32(key.get(), 16);
-		{
+		if(RAND_bytes(key.get(), 16) == 1) {
+			keyStr = Encoder::toBase32(key.get(), 16);
 			Lock l(cs);
+			const auto maxSudpKeys = static_cast<size_t>(std::max(1, SETTING(MAX_SUDP_KEYS)));
+			if(searchKeys.size() >= maxSudpKeys) {
+				searchKeys.erase(searchKeys.begin(), searchKeys.begin() + (searchKeys.size() - maxSudpKeys + 1));
+			}
 			searchKeys.emplace_back(move(key), GET_TICK());
 		}
 	}
@@ -482,14 +550,9 @@ void SearchManager::respond(const AdcCommand& cmd, const OnlineUser& user) {
 
 void SearchManager::on(TimerManagerListener::Minute, uint64_t aTick) noexcept {
 	Lock l(cs);
-	for (auto i = searchKeys.begin(); i != searchKeys.end();) {
-		if (i->second + 1000 * 60 * 5 < aTick) {
-			searchKeys.erase(i);
-			i = searchKeys.begin();
-		} else {
-			++i;
-		}
-	}
+	searchKeys.erase(std::remove_if(searchKeys.begin(), searchKeys.end(), [aTick](const auto& key) {
+		return key.second + 1000 * 60 * 5 < aTick;
+	}), searchKeys.end());
 }
 
 } // namespace dcpp

@@ -18,6 +18,8 @@
 #ifndef DCPLUSPLUS_DCPP_FLAGS_H_
 #define DCPLUSPLUS_DCPP_FLAGS_H_
 
+#include <atomic>
+
 namespace dcpp {
 
 class Flags {
@@ -26,14 +28,16 @@ public:
 
 	Flags() : flags(0) { }
 	Flags(MaskType f) : flags(f) { }
-	bool isSet(MaskType aFlag) const { return (flags & aFlag) == aFlag; }
-	bool isAnySet(MaskType aFlag) const { return (flags & aFlag) != 0; }
-	void setFlag(MaskType aFlag) { flags |= aFlag; }
-	void unsetFlag(MaskType aFlag) { flags &= ~aFlag; }
-	MaskType getFlags() const { return flags; }
+	Flags(const Flags& rhs) noexcept : flags(rhs.getFlags()) { }
+	Flags& operator=(const Flags& rhs) noexcept { flags.store(rhs.getFlags(), std::memory_order_relaxed); return *this; }
+	bool isSet(MaskType aFlag) const { return (flags.load(std::memory_order_relaxed) & aFlag) == aFlag; }
+	bool isAnySet(MaskType aFlag) const { return (flags.load(std::memory_order_relaxed) & aFlag) != 0; }
+	void setFlag(MaskType aFlag) { flags.fetch_or(aFlag, std::memory_order_relaxed); }
+	void unsetFlag(MaskType aFlag) { flags.fetch_and(~aFlag, std::memory_order_relaxed); }
+	MaskType getFlags() const { return flags.load(std::memory_order_relaxed); }
 
 private:
-	MaskType flags;
+	std::atomic<MaskType> flags;
 };
 
 } // namespace dcpp

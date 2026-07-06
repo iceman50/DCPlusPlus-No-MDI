@@ -18,6 +18,9 @@
 #ifndef DCPLUSPLUS_DCPP_SEARCH_MANAGER_H
 #define DCPLUSPLUS_DCPP_SEARCH_MANAGER_H
 
+#include <atomic>
+#include <unordered_map>
+
 #include "SettingsManager.h"
 
 #include "AdcCommand.h"
@@ -86,7 +89,7 @@ public:
 	static bool isAdcUdpPacket(const string& data) noexcept;
 
 	int32_t timeToSearch() {
-		return 5 - (static_cast<int64_t>(GET_TICK() - lastSearch) / 1000);
+		return 5 - (static_cast<int64_t>(GET_TICK() - lastSearch.load(std::memory_order_relaxed)) / 1000);
 	}
 
 	bool okToSearch() {
@@ -106,18 +109,25 @@ private:
 
 	std::unique_ptr<Socket> socket;
 	string port;
-	bool stop;
-	uint64_t lastSearch;
+	std::atomic_bool stop;
+	std::atomic<uint64_t> lastSearch;
 	friend class Singleton<SearchManager>;
 
 	SearchManager();
 
 	static std::string normalizeWhitespace(const std::string& aString);
 	virtual int run();
+	bool allowPacket(const string& remoteIp, uint64_t now) noexcept;
 
 	virtual ~SearchManager();
 
 	vector<pair<std::unique_ptr<uint8_t[]>, uint64_t>> searchKeys;
+	struct PacketRate {
+		uint64_t windowStart = 0;
+		size_t count = 0;
+	};
+	std::unordered_map<string, PacketRate> packetRates;
+	PacketRate globalPacketRate;
 	
 	CriticalSection cs;
 

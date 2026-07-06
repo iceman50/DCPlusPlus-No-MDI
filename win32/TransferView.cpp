@@ -811,8 +811,10 @@ void TransferView::addConn(const UpdateInfo& ui) {
 	} else {
 		// this connection has just been created; we don't know what file it is for yet.
 		if(conn) {
-			removeConn(*conn);
-			conn = nullptr;
+			// Connection and transfer events are posted from different worker threads.
+			// Ignore a delayed duplicate Added event instead of replacing an already
+			// bound transfer with a new blank connection row.
+			return;
 		}
 		transferItems.emplace_back(TTHValue(), ui.type, ui.user.user->getCID().toBase32(), Util::emptyString);
 		transfer = &transferItems.back();
@@ -1072,12 +1074,15 @@ void TransferView::on(DownloadManagerListener::Failed, Download* d, const string
 
 void TransferView::on(DownloadManagerListener::Starting, Download* d) noexcept {
 	auto ui = new UpdateInfo(d->getHintedUser(), CONNECTION_TYPE_DOWNLOAD, d->getUserConnection().getToken());
+	starting(ui, d);
 
 	tstring statusString = getTransferFlags(d);
 	statusString += str(TF_("Downloading %1%") % getFile(d));
 	ui->setStatusString(move(statusString));
 
-	updatedConn(ui);
+	// Rebind the token to the concrete transfer even if Requesting and connection
+	// notifications reached the UI out of order.
+	addedConn(ui);
 }
 
 void TransferView::on(DownloadManagerListener::Tick, const DownloadList& dl) noexcept  {

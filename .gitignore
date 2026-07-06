@@ -104,3 +104,4 @@ Desktop.ini
 .hgtags
 **/.hgtags
 dcpp/version-rev-id.inc
+gdb-hang-snapshot.txt

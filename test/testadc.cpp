@@ -1,6 +1,8 @@
 #include "testbase.h"
 
 #include <dcpp/AdcCommand.h>
+#include <dcpp/Client.h>
+#include <dcpp/CryptoManager.h>
 #include <dcpp/SearchManager.h>
 
 using namespace dcpp;
@@ -39,6 +41,12 @@ TEST(testadc, test_adccommand)
 	ASSERT_TRUE(pmi == AdcCommand::CMD_PMI);
 	ASSERT_TRUE(pmi.hasFlag("SN", 0));
 
+	AdcCommand emptyParameter("CINF  IDABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE");
+	string parsedId;
+	EXPECT_TRUE(emptyParameter.getParam("ID", 0, parsedId));
+	EXPECT_EQ("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE", parsedId);
+	EXPECT_EQ(uint32_t(0), AdcCommand::toSID("ABC"));
+
 	TestCommandHandler handler;
 	handler.dispatch("CPMI TP1");
 	ASSERT_TRUE(handler.pmiHandled);
@@ -72,4 +80,58 @@ TEST(testadc, recognizes_plaintext_udp_before_sudp)
 	EXPECT_FALSE(SearchManager::isAdcUdpPacket("URES " + cid + " FN\xFF\n"));
 	EXPECT_FALSE(SearchManager::isPlaintextUdpPacket("$Search something"));
 	EXPECT_FALSE(SearchManager::isPlaintextUdpPacket(string(32, '\xA5')));
+}
+
+TEST(testadc, broadcast_inf_keeps_sid_out_of_parameters)
+{
+	const string cid = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE";
+	AdcCommand command("BINF ABCD ID" + cid + " NITest");
+
+	EXPECT_EQ(AdcCommand::toSID("ABCD"), command.getFrom());
+	ASSERT_EQ(2U, command.getParameters().size());
+	EXPECT_EQ("ID" + cid, command.getParam(0));
+	EXPECT_EQ("NITest", command.getParam(1));
+}
+
+TEST(testadc, validates_failover_urls)
+{
+	EXPECT_TRUE(Client::isValidFailoverUrl("adc://example.com:411", true));
+	EXPECT_TRUE(Client::isValidFailoverUrl("adcs://[2001:db8::1]:1511", true));
+	EXPECT_TRUE(Client::isValidFailoverUrl("dchub://example.com:411", false));
+	EXPECT_TRUE(Client::isValidFailoverUrl("nmdcs://example.com:1511", false));
+
+	EXPECT_FALSE(Client::isValidFailoverUrl("dchub://example.com:411", true));
+	EXPECT_FALSE(Client::isValidFailoverUrl("adc://example.com:411", false));
+	EXPECT_FALSE(Client::isValidFailoverUrl("https://example.com:443", true));
+	EXPECT_FALSE(Client::isValidFailoverUrl("adc://example.com", true));
+	EXPECT_FALSE(Client::isValidFailoverUrl("adc://example.com:0", true));
+	EXPECT_FALSE(Client::isValidFailoverUrl("adc://example.com:65536", true));
+	EXPECT_FALSE(Client::isValidFailoverUrl("adc://example.com:41x", true));
+	EXPECT_FALSE(Client::isValidFailoverUrl("adc://127.0.0.1:411", true, true));
+	EXPECT_FALSE(Client::isValidFailoverUrl("adcs://[::1]:411", true, true));
+	EXPECT_TRUE(Client::isValidFailoverUrl("adc://127.0.0.1:411", true, false));
+}
+
+TEST(testadc, sudp_crypto_rejects_malformed_packets)
+{
+	CryptoManager::newInstance();
+	auto crypto = CryptoManager::getInstance();
+	const uint8_t key[16] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+	const string command = "URES " + string(39, 'A') + " FNfile.txt SL1 SI1 TRTTH TOtoken\n";
+
+	auto encrypted = crypto->encryptSUDP(key, command);
+	ASSERT_FALSE(encrypted.empty());
+	ASSERT_EQ(size_t(0), encrypted.size() % 16);
+
+	string decrypted;
+	EXPECT_TRUE(crypto->decryptSUDP(key, reinterpret_cast<const uint8_t*>(encrypted.data()), encrypted.size(), decrypted));
+	EXPECT_EQ(command, decrypted);
+	EXPECT_FALSE(crypto->decryptSUDP(nullptr, reinterpret_cast<const uint8_t*>(encrypted.data()), encrypted.size(), decrypted));
+	EXPECT_FALSE(crypto->decryptSUDP(key, nullptr, encrypted.size(), decrypted));
+	EXPECT_FALSE(crypto->decryptSUDP(key, reinterpret_cast<const uint8_t*>(encrypted.data()), encrypted.size() - 1, decrypted));
+
+	encrypted[encrypted.size() - 17] ^= static_cast<char>(0xFF);
+	EXPECT_FALSE(crypto->decryptSUDP(key, reinterpret_cast<const uint8_t*>(encrypted.data()), encrypted.size(), decrypted));
+
+	CryptoManager::deleteInstance();
 }

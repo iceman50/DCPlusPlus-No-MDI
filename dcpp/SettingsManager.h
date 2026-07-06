@@ -131,6 +131,12 @@ public:
 		AUTO_SEARCH_INTERVAL, MAX_EXTRA_SLOTS, TESTING_STATUS,
 		MAX_MCN_DOWNLOADS, MAX_MCN_UPLOADS,
 
+		// Experimental resource and flood-control limits. Values are stored in bytes,
+		// milliseconds, packet/connection counts, or entry counts as documented by the UI.
+		MAX_QUEUED_PROTOCOL_DATA, MAX_CONCURRENT_CONNECTIONS, FLOOD_WINDOW,
+		GLOBAL_WINDOW, GLOBAL_LIMIT, PEER_LIMIT, PEER_WINDOW, MAX_TRACKED_PEERS,
+		MAX_SUDP_PACKET, MAX_SUDP_KEYS, MAX_PARTIAL_LIST_BYTES,
+
 		INT_LAST };
 
 	enum BoolSetting { BOOL_FIRST = INT_LAST + 1,

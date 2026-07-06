@@ -18,6 +18,8 @@
 #ifndef DCPLUSPLUS_DCPP_ADC_COMMAND_H
 #define DCPLUSPLUS_DCPP_ADC_COMMAND_H
 
+#include <cstring>
+
 #include <string>
 
 #include "forward.h"
@@ -118,7 +120,7 @@ public:
 
 	static const uint32_t HUB_SID = 0xffffffff;		// No client will have this sid
 
-	static uint32_t toFourCC(const char* x) { return *reinterpret_cast<const uint32_t*>(x); }
+	static uint32_t toFourCC(const char* x) { uint32_t value; memcpy(&value, x, sizeof(value)); return value; }
 	static std::string fromFourCC(uint32_t x) { return std::string(reinterpret_cast<const char*>(&x), sizeof(x)); }
 
 	explicit AdcCommand(uint32_t aCmd, char aType = TYPE_CLIENT);
@@ -154,7 +156,7 @@ public:
 	/** Return a named parameter where the name is a two-letter code */
 	bool getParam(const char* name, size_t start, string& ret) const;
 	bool hasFlag(const char* name, size_t start) const;
-	static uint16_t toCode(const char* x) { return *((uint16_t*)x); }
+	static uint16_t toCode(const char* x) { return static_cast<uint16_t>(static_cast<uint8_t>(x[0])) | (static_cast<uint16_t>(static_cast<uint8_t>(x[1])) << 8); }
 
 	bool operator==(uint32_t aCmd) { return cmdInt == aCmd; }
 
@@ -163,7 +165,7 @@ public:
 	AdcCommand& setTo(const uint32_t sid) { to = sid; return *this; }
 	uint32_t getFrom() const { return from; }
 
-	static uint32_t toSID(const string& aSID) { return *reinterpret_cast<const uint32_t*>(aSID.data()); }
+	static uint32_t toSID(const string& aSID) { uint32_t value = 0; if(aSID.size() == sizeof(value)) memcpy(&value, aSID.data(), sizeof(value)); return value; }
 	static string fromSID(const uint32_t aSID) { return string(reinterpret_cast<const char*>(&aSID), sizeof(aSID)); }
 private:
 	string getHeaderString(const CID& cid) const;

@@ -1,0 +1,39 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="https://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+  <link type="text/css" rel="stylesheet" href="office11.css"/>
+  <link type="text/css" rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<h1>Experimental</h1>
+<p>These limits protect DC++ from excessive memory, connection, and packet use. The defaults are
+recommended for normal use. Lower values can reject legitimate traffic; higher values increase
+resource usage and exposure to denial-of-service traffic. Changes apply to new operations without
+restarting DC++.</p>
+<dl style="margin-left: 40px;">
+  <dt>Queued protocol data limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_QUEUED_PROTOCOL_DATA">Maximum unsent protocol data retained for one socket. The socket is disconnected when another write would exceed the limit. Minimum: 1024 bytes. Default: 16777216 bytes.</dd>
+  <dt>Concurrent peer connection limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_CONCURRENT_CONNECTIONS">New incoming peer connections are rejected when this many incoming and outgoing transfer or private-message connections already exist. Hub connections are not included. Minimum: 1. Default: 512.</dd>
+  <dt>Incoming connection flood window</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_FLOOD_WINDOW">Time span used to count incoming peer connection attempts from each IP address. The allowed burst is derived from the multi-connection upload setting. Minimum: 1 millisecond. Default: 10000 milliseconds.</dd>
+  <dt>Global UDP rate window</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_GLOBAL_WINDOW">Time span used by the global incoming search-result UDP packet limiter. Minimum: 1 millisecond. Default: 1000 milliseconds.</dd>
+  <dt>Global UDP packet limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_GLOBAL_LIMIT">Maximum incoming search-result UDP packets processed during the global UDP rate window. Minimum: 1. Default: 2000.</dd>
+  <dt>Per-peer UDP packet limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_PEER_LIMIT">Maximum incoming search-result UDP packets processed from one IP address during the per-peer UDP rate window. Minimum: 1. Default: 500.</dd>
+  <dt>Per-peer UDP rate window</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_PEER_WINDOW">Time span used to count incoming search-result UDP packets separately for each IP address. Minimum: 1 millisecond. Default: 10000 milliseconds.</dd>
+  <dt>Tracked UDP peer limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_TRACKED_PEERS">Maximum number of IP addresses retained by the per-peer UDP limiter. New addresses are ignored while the table is full and no expired entries can be removed. Minimum: 1. Default: 4096.</dd>
+  <dt>Encrypted UDP packet limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_SUDP_PACKET">Maximum encrypted search-result UDP packet accepted for decryption. Valid packets must also be at least 32 bytes and aligned to a 16-byte AES block. Minimum: 32 bytes. Default: 4096 bytes.</dd>
+  <dt>Stored encrypted UDP key limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_SUDP_KEYS">Maximum recent search encryption keys retained for decrypting SUDP results. Oldest keys are discarded first. Minimum: 1. Default: 64.</dd>
+  <dt>Generated partial file list limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES">Maximum uncompressed XML size generated in response to a partial file-list request. Minimum: 1024 bytes. Default: 67108864 bytes.</dd>
+</dl>
+</body>
+</html>

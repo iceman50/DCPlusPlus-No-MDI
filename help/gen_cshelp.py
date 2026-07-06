@@ -99,7 +99,9 @@ def gen_cshelp(target, source):
     output.sort()
 
     # generate cshelp.h (target[0]) and - optionally - cshelp.rtf (target[1])
-    f_h = open(str(target[0]), "w")
+    # Entries below use explicit CRLF endings. Disable platform newline
+    # translation so Windows does not turn them into CRCRLF.
+    f_h = open(str(target[0]), "w", newline="")
     f_h.write(
         """// this file contains help ids for field-level help tooltips
 

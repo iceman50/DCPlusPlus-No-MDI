@@ -1219,13 +1219,19 @@ MemoryInputStream* ShareManager::generateFileList(const string& hubUrl, bool com
 }
 
 MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool recurse) const {
-	if(dir[0] != '/' || dir[dir.size()-1] != '/')
+	if(dir.empty() || dir[0] != '/' || dir[dir.size()-1] != '/')
 		return 0;
 
 	string xml = SimpleXML::utf8Header;
 	string tmp;
 	xml += "<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() + "\" Base=\"" + SimpleXML::escape(dir, tmp, true) + "\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n";
-	StringRefOutputStream sos(xml);
+	// Limit generated XML before compression to keep partial-list requests memory-bounded.
+	const auto maxPartialListBytes = static_cast<uint64_t>(std::max(1024, SETTING(MAX_PARTIAL_LIST_BYTES)));
+	if(xml.size() >= maxPartialListBytes) {
+		return 0;
+	}
+	StringRefOutputStream stringOutput(xml);
+	LimitedOutputStream<false> sos(&stringOutput, maxPartialListBytes - xml.size());
 	string indent = "\t";
 
 	Lock l(cs);
@@ -1286,7 +1292,13 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 	string tmp;
 	xml += "<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() +
 		"\" Base=\"" + SimpleXML::escape(dir, tmp, true) + "\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n";
-	StringRefOutputStream output(xml);
+	// Apply the same uncompressed bound to TTH-based partial-list generation.
+	const auto maxPartialListBytes = static_cast<uint64_t>(std::max(1024, SETTING(MAX_PARTIAL_LIST_BYTES)));
+	if(xml.size() >= maxPartialListBytes) {
+		return 0;
+	}
+	StringRefOutputStream stringOutput(xml);
+	LimitedOutputStream<false> output(&stringOutput, maxPartialListBytes - xml.size());
 	string indent = "\t";
 
 	Lock l(cs);

@@ -21,6 +21,7 @@
 #include "ConnectionManager.h"
 #include "QueueManager.h"
 #include "Download.h"
+#include "File.h"
 #include "LogManager.h"
 #include "User.h"
 #include "UserConnection.h"
@@ -102,12 +103,14 @@ void DownloadManager::on(TimerManagerListener::Second, uint64_t aTick) noexcept 
 	}
 }
 
-void DownloadManager::checkIdle(const UserPtr& user) {
+void DownloadManager::checkIdle(const UserPtr& user, bool singleConnection) {
 	Lock l(cs);
 	for(auto uc: idlers) {
 		if(uc->getUser() == user) {
 			uc->callAsync([this, uc] { revive(uc); });
-			if(!uc->isMCN()) {
+			// File lists are indivisible transfers. Reusing more than one idle MCN
+			// connection merely creates redundant peer connections for the same list.
+			if(singleConnection || !uc->isMCN()) {
 				return;
 			}
 		}
@@ -245,7 +248,14 @@ void DownloadManager::startData(UserConnection* aSource, int64_t start, int64_t 
 	d->setStart(GET_TICK());
 	d->tick();
 	aSource->setState(UserConnection::STATE_RUNNING);
-	ConnectionManager::getInstance()->onDownloadStarted(*aSource);
+	// MCN segmentation is only meaningful for regular files. Starting another
+	// connection for a full/partial list makes both transfers target the same
+	// queue item (and full lists truncate the same file).
+	if(d->getType() == Transfer::TYPE_FILE) {
+		ConnectionManager::getInstance()->onDownloadStarted(*aSource);
+	} else if(d->getType() == Transfer::TYPE_FULL_LIST || d->getType() == Transfer::TYPE_PARTIAL_LIST) {
+		ConnectionManager::getInstance()->onFileListDownloadStarted(*aSource);
+	}
 
 	fire(DownloadManagerListener::Starting(), d);
 
@@ -314,6 +324,17 @@ void DownloadManager::endData(UserConnection* aSource) {
 			d->resetPos();
 			failDownload(aSource, e.getError());
 			return;
+		}
+
+		if(d->getType() == Transfer::TYPE_FULL_LIST) {
+			// Close the writer before reopening the list for its signature check.
+			d->close();
+			if(!d->hasValidFileListSignature()) {
+				File::deleteFile(d->getTempTarget());
+				d->resetPos();
+				failDownload(aSource, _("Invalid or damaged file list received"));
+				return;
+			}
 		}
 
 		aSource->setSpeed(d->getAverageSpeed());
@@ -441,6 +462,7 @@ void DownloadManager::on(AdcCommand::STA, UserConnection* aSource, const AdcComm
 			noSlots(aSource, cmd.getParam("QP", 0, param) ? param : Util::emptyString);
 			return;
 		}
+		break;
 	case AdcCommand::SEV_SUCCESS:
 		// We don't know any messages that would give us these...
 		dcdebug("Unknown success message %s %s", err.c_str(), cmd.getParam(1).c_str());

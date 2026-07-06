@@ -479,7 +479,12 @@ void ClientManager::sendUDP(AdcCommand& cmd, const OnlineUser& user, const strin
 		const_cast<Client&>(user.getClient()).send(cmd);
 	} else {
 		auto state = CONNSTATE(INCOMING_CONNECTIONS6);
-		sendUDP(state ? user.getIdentity().getIp() : user.getIdentity().getIp4(), state ? user.getIdentity().getUdpPort() : user.getIdentity().getUdp4Port(), cmd.toString(getMe()->getCID()), aKey);
+		const auto ip = state ? user.getIdentity().getIp() : user.getIdentity().getIp4();
+		const auto port = state ? user.getIdentity().getUdpPort() : user.getIdentity().getUdp4Port();
+		if(!Util::isSafePeerEndpoint(ip, port, user.getClient().getIp())) {
+			return;
+		}
+		sendUDP(ip, port, cmd.toString(getMe()->getCID()), aKey);
 	}
 }
 
@@ -489,13 +494,20 @@ void ClientManager::sendUDP(const string& ip, const string& port, const string& 
 
 	string encryptedData;
 
-	if(SETTING(ENABLE_SUDP) && !aKey.empty() && Encoder::isBase32(aKey.c_str())) {
+	const bool encrypt = SETTING(ENABLE_SUDP) && !aKey.empty();
+	if(encrypt && aKey.size() == 26 && Encoder::isBase32(aKey)) {
 		uint8_t keyChar[16];
 		Encoder::fromBase32(aKey.c_str(), keyChar, 16);
 		encryptedData = CryptoManager::getInstance()->encryptSUDP(keyChar, data);
 	}
+	// A supplied key is an explicit request for encryption. Never silently
+	// downgrade the response to plaintext when the key or cipher operation fails.
+	if(encrypt && encryptedData.empty()) {
+		return;
+	}
 
 	try {
+		Lock l(udpCs);
 		udp.writeTo(ip, port, encryptedData.empty() ? data : encryptedData);
 	} catch(const SocketException&) {
 		dcdebug("Socket exception when sending UDP data to %s:%s\n", ip.c_str(), port.c_str());
@@ -550,6 +562,9 @@ void ClientManager::on(NmdcSearch, Client* aClient, const string& aSeeker, int a
 			if(port.empty())
 				port = "412";
 
+			if(!Util::isSafePeerEndpoint(ip, port, aClient->getIp())) {
+				return;
+			}
 			for(const auto& sr: l) {
 				sendUDP(ip, port, sr->toSR(*aClient));
 			}

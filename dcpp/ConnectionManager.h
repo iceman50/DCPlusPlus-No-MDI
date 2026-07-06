@@ -18,6 +18,7 @@
 #ifndef DCPLUSPLUS_DCPP_CONNECTION_MANAGER_H
 #define DCPLUSPLUS_DCPP_CONNECTION_MANAGER_H
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -116,8 +117,9 @@ public:
 	void adcConnect(const OnlineUser& aUser, const string& aPort, const string& aToken, bool secure);
 	void adcConnect(const OnlineUser& aUser, const string& aPort, const string& localPort, BufferedSocket::NatRoles natRole, const string& aToken, bool secure);
 
-	void getDownloadConnection(const HintedUser& aUser);
+	void getDownloadConnection(const HintedUser& aUser, bool singleConnection = false);
 	void onDownloadStarted(const UserConnection& connection);
+	void onFileListDownloadStarted(const UserConnection& connection);
 	void force(const UserPtr& aUser);
 
 	void disconnect(const UserPtr& user); // disconnect all transfers for the user
@@ -149,7 +151,7 @@ private:
 		Socket sock;
 		string port;
 		bool secure;
-		bool die;
+		std::atomic_bool die;
 	};
 
 	friend class Server;
@@ -175,13 +177,17 @@ private:
 
 	ExpectedMap expectedConnections;
 
-	uint32_t floodCounter;
+	struct IncomingFloodState {
+		uint64_t windowStart = 0;
+		size_t attempts = 0;
+	};
+	unordered_map<string, IncomingFloodState> incomingFlood;
 	unordered_set<string> hubsBlockingCC;
 
 	unique_ptr<Server> server;
 	unique_ptr<Server> secureServer;
 
-	bool shuttingDown;
+	std::atomic_bool shuttingDown;
 
 	friend class Singleton<ConnectionManager>;
 	ConnectionManager();
@@ -198,6 +204,7 @@ private:
 	void putCQI(ConnectionQueueItem& cqi);
 
 	void accept(const Socket& sock, bool secure) noexcept;
+	bool allowIncomingConnection(const string& remoteIp, uint64_t now);
 
 	bool checkKeyprint(UserConnection* aSource);
 	pair<bool, ConnectionType> checkToken(UserConnection* uc);

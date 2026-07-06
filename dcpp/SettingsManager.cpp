@@ -95,6 +95,9 @@ const string SettingsManager::settingTags[] =
 	"MinUploadSpeed", "PMLastLogLines", "SearchHistory", "SetMinislotSize",
 	"SettingsSaveInterval", "Slots", "TabStyle", "TabWidth", "ToolbarSize", "AutoSearchInterval",
 	"MaxExtraSlots", "TestingStatus", "MaxMCNDownloads", "MaxMCNUploads",
+	"MaxQueuedProtocolData", "MaxConcurrentConnections", "FloodWindow",
+	"GlobalWindow", "GlobalLimit", "PeerLimit", "PeerWindow", "MaxTrackedPeers",
+	"MaxSUDPPacket", "MaxSUDPKeys", "MaxPartialListBytes",
 	"SENTRY",
 	// Bools
 	"AddFinishedInstantly", "AdlsBreakOnFirst",
@@ -213,6 +216,19 @@ SettingsManager::SettingsManager() {
 	setDefault(DOWNLOAD_SLOTS, 6);
 	setDefault(MAX_MCN_DOWNLOADS, 2);
 	setDefault(MAX_MCN_UPLOADS, 2);
+	// Preserve the original compile-time limits as runtime defaults. These settings are
+	// intentionally advanced: increasing them may raise memory or CPU/network exposure.
+	setDefault(MAX_QUEUED_PROTOCOL_DATA, 16 * 1024 * 1024);
+	setDefault(MAX_CONCURRENT_CONNECTIONS, 512);
+	setDefault(FLOOD_WINDOW, 10 * 1000);
+	setDefault(GLOBAL_WINDOW, 1000);
+	setDefault(GLOBAL_LIMIT, 2000);
+	setDefault(PEER_LIMIT, 500);
+	setDefault(PEER_WINDOW, 10 * 1000);
+	setDefault(MAX_TRACKED_PEERS, 4096);
+	setDefault(MAX_SUDP_PACKET, 4096);
+	setDefault(MAX_SUDP_KEYS, 64);
+	setDefault(MAX_PARTIAL_LIST_BYTES, 64 * 1024 * 1024);
 	setDefault(MAX_DOWNLOAD_SPEED, 0);
 	setDefault(LOG_DIRECTORY, Util::getPath(Util::PATH_USER_LOCAL) + "Logs" PATH_SEPARATOR_STR);
 	setDefault(LOG_UPLOADS, false);

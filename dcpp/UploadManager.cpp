@@ -19,6 +19,7 @@
 #include "UploadManager.h"
 
 #include <cmath>
+#include <limits>
 
 #include "ConnectionManager.h"
 #include "LogManager.h"
@@ -95,6 +96,10 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 			}
 
 		} else if(aType == Transfer::names[Transfer::TYPE_TREE]) {
+			if(aStartPos != 0 || aBytes != -1) {
+				aSource.fileNotAvail("Invalid tree range");
+				return false;
+			}
 			sourceFile = ShareManager::getInstance()->toReal(aFile, aSource.getHubUrl());
 			type = Transfer::TYPE_TREE;
 			miniSlot = true;
@@ -102,6 +107,10 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 		} else if(aType == Transfer::names[Transfer::TYPE_PARTIAL_LIST]) {
 			if(aSource.getHubUrl().empty()) {
 				throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+			}
+			if(aStartPos != 0 || aBytes != -1) {
+				aSource.fileNotAvail("Invalid partial list range");
+				return false;
 			}
 			sourceFile = _("Partial file list");
 			type = Transfer::TYPE_PARTIAL_LIST;
@@ -142,8 +151,10 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 					}
 				}
 
+				const auto endPos = aBytes < 0 ? aStartPos :
+					(aBytes > std::numeric_limits<int64_t>::max() - aStartPos ? std::numeric_limits<int64_t>::max() : aStartPos + aBytes);
 				aSource.maxedOut(addFailedUpload(aSource, tFile +
-					" (" +  Util::formatBytes(aStartPos) + " - " + Util::formatBytes(aStartPos + aBytes) + ")"));
+					" (" + Util::formatBytes(aStartPos) + " - " + Util::formatBytes(endPos) + ")"));
 				aSource.disconnect();
 				return false;
 			}
@@ -288,7 +299,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	/* the upload is all set. update slot counts if the user just gained a slot. */
 
 	if(!aSource.isSet(UserConnection::FLAG_HASSLOT)) {
-		setLastGrant(GET_TICK());
+		lastGrant = GET_TICK();
 
 		if(extraSlot) {
 			if(!aSource.isSet(UserConnection::FLAG_HASEXTRASLOT)) {
@@ -403,6 +414,11 @@ void UploadManager::on(UserConnectionListener::Send, UserConnection* aSource) no
 void UploadManager::on(AdcCommand::GET, UserConnection* aSource, const AdcCommand& c) noexcept {
 	if(aSource->getState() != UserConnection::STATE_GET) {
 		dcdebug("UM::onGET Bad state, ignoring\n");
+		return;
+	}
+
+	if(c.getParameters().size() < 4) {
+		aSource->send(AdcCommand(AdcCommand::SEV_RECOVERABLE, AdcCommand::ERROR_PROTOCOL_GENERIC, "Missing parameters"));
 		return;
 	}
 
@@ -533,12 +549,13 @@ void UploadManager::addConnection(UserConnectionPtr conn) {
 void UploadManager::removeConnection(UserConnection* aSource) {
 	dcassert(aSource->getUpload() == NULL);
 	aSource->removeListener(this);
+	Lock l(cs);
 	if(aSource->isSet(UserConnection::FLAG_HASSLOT)) {
-		running--;
+		running = std::max(running - 1, 0);
 		aSource->unsetFlag(UserConnection::FLAG_HASSLOT);
 	}
 	if(aSource->isSet(UserConnection::FLAG_HASEXTRASLOT)) {
-		extra--;
+		extra = std::max(extra - 1, 0);
 		aSource->unsetFlag(UserConnection::FLAG_HASEXTRASLOT);
 	}
 }

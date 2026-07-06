@@ -19,6 +19,7 @@
 #include "BufferedSocket.h"
 
 #include <algorithm>
+#include <limits>
 
 #include "ConnectivityManager.h"
 #include "SettingsManager.h"
@@ -88,7 +89,7 @@ void BufferedSocket::setOptions() {
 		sock->setSocketOpt(SO_SNDBUF, SETTING(SOCKET_OUT_BUFFER));
 }
 
-uint16_t BufferedSocket::accept(const Socket& srv, bool secure, bool allowUntrusted, const string& expKP) {
+uint16_t BufferedSocket::accept(const Socket& srv, bool secure, bool allowUntrusted, const string& expKP, bool deferHandshake) {
 	dcdebug("BufferedSocket::accept() %p\n", (void*)this);
 
 	unique_ptr<Socket> s(secure ? new SSLSocket(CryptoManager::SSL_SERVER, allowUntrusted, expKP, Util::emptyString) : new Socket(Socket::TYPE_TCP));
@@ -98,10 +99,18 @@ uint16_t BufferedSocket::accept(const Socket& srv, bool secure, bool allowUntrus
 	setSocket(move(s));
 	setOptions();
 
-	Lock l(cs);
-	addTask(ACCEPTED, 0);
+	if(!deferHandshake) {
+		completeAccept();
+	}
 
 	return ret;
+}
+
+void BufferedSocket::completeAccept() {
+	Lock l(cs);
+	if(state == STARTING && !disconnecting) {
+		addTask(ACCEPTED, 0);
+	}
 }
 
 void BufferedSocket::connect(const string& aAddress, const string& aPort, bool secure, bool allowUntrusted, bool proxy, const string& expKP) {
@@ -204,6 +213,8 @@ void BufferedSocket::threadRead() {
 	// always uncompressed data
 	string l;
 	int bufpos = 0, total = left;
+	const auto maxCommand = static_cast<size_t>(std::max(1024, SETTING(MAX_COMMAND_LENGTH)));
+	const auto maxInflatedBatch = maxCommand > (std::numeric_limits<size_t>::max() / 2) ? maxCommand : maxCommand * 2;
 
 	while (left > 0) {
 		switch (mode) {
@@ -219,6 +230,9 @@ void BufferedSocket::threadRead() {
 						size_t used = left;
 						bool ret = (*filterIn) (&inbuf[0] + total - left, used, &buffer[0], in);
 						left -= used;
+						if(in > maxInflatedBatch - std::min(l.size(), maxInflatedBatch)) {
+							throw SocketException(_("Maximum compressed command batch exceeded"));
+						}
 						l.append (&buffer[0], in);
 						// if the stream ends before the data runs out, keep remainder of data in inbuf
 						if (!ret) {
@@ -289,7 +303,7 @@ void BufferedSocket::threadRead() {
 		}
 	}
 
-	if(mode == MODE_LINE && line.size() > static_cast<size_t>(SETTING(MAX_COMMAND_LENGTH))) {
+	if((mode == MODE_LINE || mode == MODE_ZPIPE) && line.size() > maxCommand) {
 		throw SocketException(_("Maximum command length exceeded"));
 	}
 }
@@ -393,6 +407,14 @@ void BufferedSocket::write(const char* aBuf, size_t aLen) noexcept {
 	if(!sock.get())
 		return;
 	Lock l(cs);
+	// Bound unsent protocol data so a slow or stalled peer cannot grow the queue indefinitely.
+	const auto maxQueuedProtocolData = static_cast<size_t>(std::max(1024, SETTING(MAX_QUEUED_PROTOCOL_DATA)));
+	if(aLen > maxQueuedProtocolData - std::min(writeBuf.size(), maxQueuedProtocolData)) {
+		if(!disconnecting.exchange(true)) {
+			addTask(DISCONNECT, 0);
+		}
+		return;
+	}
 	if(writeBuf.empty())
 		addTask(SEND_DATA, 0);
 
@@ -442,14 +464,14 @@ bool BufferedSocket::checkEvents() {
 			Lock l(cs);
 			dcassert(!tasks.empty());
 			p = move(tasks.front());
-			tasks.erase(tasks.begin());
+			tasks.pop_front();
 		}
 
 		if(p.first == SHUTDOWN) {
 			return false;
 
 		} else if(p.first == ASYNC_CALL) {
-			if(!disconnecting) { Lock l(cs); static_cast<CallData*>(p.second.get())->f(); }
+			if(!disconnecting) { static_cast<CallData*>(p.second.get())->f(); }
 			continue;
 		}
 

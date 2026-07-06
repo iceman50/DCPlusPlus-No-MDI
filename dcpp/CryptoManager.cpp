@@ -557,11 +557,17 @@ void CryptoManager::decodeBZ2(const uint8_t* is, size_t sz, string& os) {
 }
 
 string CryptoManager::encryptSUDP(const uint8_t* aKey, const string& aCmd) {
+	if(!aKey || aCmd.size() > static_cast<size_t>(INT_MAX - 32)) {
+		return Util::emptyString;
+	}
+
 	string inData = aCmd;
 	uint8_t ivd[16] = { };
 
 	// prepend 16 random bytes to message
-	RAND_bytes(ivd, 16);
+	if(RAND_bytes(ivd, 16) != 1) {
+		return Util::emptyString;
+	}
 	inData.insert(0, (char*)ivd, 16);
 
 	// use PKCS#5 padding to align the message length to the cipher block size (16)
@@ -573,19 +579,20 @@ string CryptoManager::encryptSUDP(const uint8_t* aKey, const string& aCmd) {
 	memset(ivd, 0, 16);
 	auto commandLength = inData.length();
 
-#define CHECK(n) if(!(n)) { dcassert(0); }
-
-	int len, tmpLen;
+	int len = 0;
+	int tmpLen = 0;
 	auto ctx = EVP_CIPHER_CTX_new();
-	CHECK(EVP_CipherInit_ex(ctx, EVP_aes_128_cbc(), NULL, aKey, ivd, 1));
-	CHECK(EVP_CIPHER_CTX_set_padding(ctx, 0));
-	CHECK(EVP_EncryptUpdate(ctx, out.get(), &len, (unsigned char*)inData.c_str(), inData.length()));
-	CHECK(EVP_EncryptFinal_ex(ctx, out.get() + len, &tmpLen));
+	if(!ctx) {
+		return Util::emptyString;
+	}
+	const bool success = EVP_CipherInit_ex(ctx, EVP_aes_128_cbc(), NULL, aKey, ivd, 1) == 1 &&
+		EVP_CIPHER_CTX_set_padding(ctx, 0) == 1 &&
+		EVP_EncryptUpdate(ctx, out.get(), &len, reinterpret_cast<const unsigned char*>(inData.data()), static_cast<int>(inData.size())) == 1 &&
+		EVP_EncryptFinal_ex(ctx, out.get() + len, &tmpLen) == 1;
 	EVP_CIPHER_CTX_free(ctx);
-
-	dcassert((commandLength & 15) == 0);
-
-#undef CHECK
+	if(!success || static_cast<size_t>(len + tmpLen) != commandLength) {
+		return Util::emptyString;
+	}
 
 	inData.clear();
 	inData.insert(0, (char*)out.get(), commandLength);
@@ -593,22 +600,29 @@ string CryptoManager::encryptSUDP(const uint8_t* aKey, const string& aCmd) {
 }
 
 bool CryptoManager::decryptSUDP(const uint8_t* aKey, const uint8_t* aData, size_t aDataLen, string& result_) {
+	if(!aKey || !aData || aDataLen < 32 || (aDataLen & 15) != 0 || aDataLen > static_cast<size_t>(INT_MAX)) {
+		return false;
+	}
+
 	std::unique_ptr<uint8_t[]> out(new uint8_t[aDataLen]);
 
 	uint8_t ivd[16] = { };
 
 	auto ctx = EVP_CIPHER_CTX_new();
 
-#define CHECK(n) if(!(n)) { dcassert(0); }
-
-	int len;
-	CHECK(EVP_CipherInit_ex(ctx, EVP_aes_128_cbc(), NULL, aKey, ivd, 0));
-	CHECK(EVP_CIPHER_CTX_set_padding(ctx, 0));
-	CHECK(EVP_DecryptUpdate(ctx, out.get(), &len, aData, aDataLen));
-	CHECK(EVP_DecryptFinal_ex(ctx, out.get() + len, &len));
+	if(!ctx) {
+		return false;
+	}
+	int len = 0;
+	int finalLen = 0;
+	const bool success = EVP_CipherInit_ex(ctx, EVP_aes_128_cbc(), NULL, aKey, ivd, 0) == 1 &&
+		EVP_CIPHER_CTX_set_padding(ctx, 0) == 1 &&
+		EVP_DecryptUpdate(ctx, out.get(), &len, aData, static_cast<int>(aDataLen)) == 1 &&
+		EVP_DecryptFinal_ex(ctx, out.get() + len, &finalLen) == 1;
 	EVP_CIPHER_CTX_free(ctx);
-
-#undef CHECK
+	if(!success || static_cast<size_t>(len + finalLen) != aDataLen) {
+		return false;
+	}
 
 	// Validate padding and replace with 0-bytes.
 	int padlen = out[aDataLen - 1];
@@ -627,7 +641,8 @@ bool CryptoManager::decryptSUDP(const uint8_t* aKey, const uint8_t* aData, size_
 	}
 
 	if (valid) {
-		result_ = (char*)&out[0] + 16;
+		const auto resultLength = aDataLen - 16 - static_cast<size_t>(padlen);
+		result_.assign(reinterpret_cast<const char*>(out.get() + 16), resultLength);
 		return true;
 	}
 

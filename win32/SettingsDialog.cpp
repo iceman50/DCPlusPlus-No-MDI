@@ -57,6 +57,7 @@
 
 #include "AdvancedPage.h"
 #include "ExpertsPage.h"
+#include "ExperimentalPage.h"
 #include "UCPage.h"
 #include "CertificatesPage.h"
 #include "SearchTypesPage.h"
@@ -69,7 +70,7 @@ using dwt::GridInfo;
 
 using dwt::ToolTip;
 
-const int SettingsDialog::pluginPagePos = 24; // remember to change when adding pages...
+const int SettingsDialog::pluginPagePos = 25; // remember to change when adding pages...
 
 SettingsDialog::SettingsDialog(dwt::Widget* parent) :
 dwt::ModalDialog(parent),
@@ -190,6 +191,7 @@ bool SettingsDialog::initDialog() {
 		{
 			HTREEITEM item = addPage(T_("Advanced"), typeid(AdvancedPage), [container] { return new AdvancedPage(container); }, IDI_ADVANCED, TVI_ROOT);
 			addPage(T_("Experts only"), typeid(ExpertsPage), [container] { return new ExpertsPage(container); }, IDI_EXPERT, item);
+			addPage(T_("Experimental"), typeid(ExperimentalPage), [container] { return new ExperimentalPage(container); }, IDI_EXPERT, item);
 			addPage(T_("User commands"), typeid(UCPage), [container] { return new UCPage(container); }, IDI_USER_OP, item);
 			addPage(T_("Security & certificates"), typeid(CertificatesPage), [container] { return new CertificatesPage(container); }, IDI_SECURE, item);
 			addPage(T_("Search types"), typeid(SearchTypesPage), [container] { return new SearchTypesPage(container); }, IDI_SEARCH, item);

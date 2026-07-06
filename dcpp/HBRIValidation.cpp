@@ -47,7 +47,8 @@ namespace {
 			in6_addr address = {};
 			return ::inet_pton(AF_INET6, ip.c_str(), &address) == 1 &&
 				!IN6_IS_ADDR_UNSPECIFIED(&address) && !IN6_IS_ADDR_MULTICAST(&address) &&
-				!IN6_IS_ADDR_V4MAPPED(&address) && !IN6_IS_ADDR_V4COMPAT(&address);
+				!IN6_IS_ADDR_V4MAPPED(&address) && !IN6_IS_ADDR_V4COMPAT(&address) &&
+				Util::isPublicIp(ip, true);
 		}
 
 		in_addr address = {};
@@ -56,7 +57,8 @@ namespace {
 		}
 
 		const auto hostAddress = ntohl(address.s_addr);
-		return hostAddress != INADDR_ANY && hostAddress != INADDR_BROADCAST && !IN_MULTICAST(hostAddress);
+		return hostAddress != INADDR_ANY && hostAddress != INADDR_BROADCAST && !IN_MULTICAST(hostAddress) &&
+			Util::isPublicIp(ip, false);
 	}
 
 	bool validPort(const string& port) noexcept {

@@ -102,6 +102,8 @@ public:
 
 	const string& getHubUrl() const { return hubUrl; }
 	bool isUsingFailover() const { return usingFailover; }
+	/** Validate a failover URL without changing client state. */
+	static bool isValidFailoverUrl(const string& url, bool adcClient, bool requirePublicNumeric = false);
 
 	GETSET(Identity, hubIdentity, HubIdentity);
 	Identity& getHubIdentity() { return hubIdentity; }
@@ -119,7 +121,8 @@ public:
 	GETSET(uint32_t, uniqueId, UniqueId);
 	GETSET(string, defpassword, Password);
 	GETSET(uint32_t, reconnDelay, ReconnDelay);
-	GETSET(uint64_t, lastActivity, LastActivity);
+	uint64_t getLastActivity() const noexcept { return lastActivity.load(std::memory_order_relaxed); }
+	void setLastActivity(uint64_t value) noexcept { lastActivity.store(value, std::memory_order_relaxed); }
 	GETSET(bool, registered, Registered);
 	GETSET(bool, autoReconnect, AutoReconnect);
 	GETSET(string, encoding, Encoding);
@@ -152,7 +155,7 @@ protected:
 
 	/** Update hub counts. Thread-safe. */
 	void updateCounts(bool aRemove);
-	void updateActivity() { lastActivity = GET_TICK(); }
+	void updateActivity() noexcept { setLastActivity(GET_TICK()); }
 
 	void updated(OnlineUser& user);
 	void updated(OnlineUserList& users);
@@ -177,6 +180,7 @@ protected:
 	virtual bool v4only() const = 0;
 
 private:
+	std::atomic<uint64_t> lastActivity;
 	bool setHubUrl(const string& hubURL);
 	void setFailoverUrls(const StringList& urls);
 	bool advanceFailoverUrl();
