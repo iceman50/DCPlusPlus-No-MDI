@@ -1195,6 +1195,9 @@ string ShareManager::generateFileListData(const string& hubUrl, bool compressed)
 		string indent;
 		string tmp;
 		Lock l(cs);
+		// An explicit favorite-hub profile with no selected directories is not
+		// unrestricted: the loop intentionally writes no directory entries and
+		// returns a valid root-only file list.
 		for(const auto& item: directories) {
 			if(isVirtualAllowed(item.first, access)) {
 				item.second->toXml(output, indent, tmp, -1);

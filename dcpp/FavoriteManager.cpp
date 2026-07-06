@@ -645,7 +645,9 @@ FavoriteHubEntryPtr FavoriteManager::getFavoriteHubEntry(const string& aServer) 
 bool FavoriteManager::getHubShareDirectories(const string& aServer, std::set<string>& directories) const {
 	Lock l(cs);
 	for(auto hub: favoriteHubs) {
-		if(Util::stricmp(hub->getServer(), aServer) == 0 && hub->hasShareProfile()) {
+		// The active URL may be one of the favorite's failover servers. It must
+		// retain the same share profile, including an explicitly empty profile.
+		if(hub->hasServer(aServer) && hub->hasShareProfile()) {
 			directories = hub->getShareDirectories();
 			return true;
 		}

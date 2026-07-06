@@ -3,6 +3,7 @@
 #include <dcpp/AdcCommand.h>
 #include <dcpp/Client.h>
 #include <dcpp/CryptoManager.h>
+#include <dcpp/HubEntry.h>
 #include <dcpp/SearchManager.h>
 
 using namespace dcpp;
@@ -110,6 +111,20 @@ TEST(testadc, validates_failover_urls)
 	EXPECT_FALSE(Client::isValidFailoverUrl("adc://127.0.0.1:411", true, true));
 	EXPECT_FALSE(Client::isValidFailoverUrl("adcs://[::1]:411", true, true));
 	EXPECT_TRUE(Client::isValidFailoverUrl("adc://127.0.0.1:411", true, false));
+}
+
+TEST(testadc, favorite_hub_preserves_an_explicit_empty_share_profile)
+{
+	FavoriteHubEntry hub;
+	hub.setServer("adc://primary.example:411");
+	hub.setFailoverServers(StringList { "adcs://failover.example:1511" });
+
+	EXPECT_FALSE(hub.hasShareProfile());
+	hub.setShareDirectories({});
+	EXPECT_TRUE(hub.hasShareProfile());
+	EXPECT_TRUE(hub.getShareDirectories().empty());
+	EXPECT_TRUE(hub.hasServer("adc://primary.example:411"));
+	EXPECT_TRUE(hub.hasServer("adcs://failover.example:1511"));
 }
 
 TEST(testadc, sudp_crypto_rejects_malformed_packets)

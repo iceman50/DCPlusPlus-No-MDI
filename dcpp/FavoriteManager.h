@@ -91,6 +91,10 @@ public:
 	void removeFavorite(FavoriteHubEntry* entry);
 	bool isFavoriteHub(const std::string& aUrl);
 	FavoriteHubEntryPtr getFavoriteHubEntry(const string& aServer) const;
+	/**
+	 * Return true when the favorite has an explicit share profile. An empty
+	 * returned set is meaningful and represents a valid, empty file list.
+	 */
 	bool getHubShareDirectories(const string& aServer, std::set<string>& directories) const;
 
 	void mergeHubSettings(const FavoriteHubEntry& entry, HubSettings& settings) const;
