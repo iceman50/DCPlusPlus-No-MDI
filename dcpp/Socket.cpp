@@ -248,9 +248,8 @@ socket_t Socket::getSock() const {
 				return sock4;
 			}
 
-			dcdebug("Both v4 & v6 sockets valid and unconnected, returning v6...\n");
-			// TODO Neither connected - but this will become a race if the IPv4 socket connects while
-			// we're still using the IPv6 one...
+			dcdebug("Both v4 & v6 sockets valid and unconnected, closing v4 and returning v6...\n");
+			sock4.reset();
 		}
 
 		return sock6;
