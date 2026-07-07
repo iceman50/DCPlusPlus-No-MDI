@@ -34,6 +34,7 @@
 * Return a valid empty file list for favorite hubs with an explicit empty share profile, including failover connections
 * Fix strict-aliasing and offsets beyond 4 GiB in unbuffered Windows file reads
 * Generate context-help headers with correct CRLF line endings on Windows
+* Fix toolbar reconnect causing hubs to enter an immediate reconnect loop
 * Expand ADC, SUDP, HBRI and network endpoint validation tests
 
 == 07-04-2026 - 0.8832 !!!Experimental!!! ==

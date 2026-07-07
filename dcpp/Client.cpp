@@ -58,9 +58,7 @@ Client::~Client() {
 }
 
 void Client::reconnect() {
-	disconnect(true);
-	setAutoReconnect(true);
-	setReconnDelay(0);
+	connect();
 }
 
 void Client::shutdown() {

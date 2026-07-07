@@ -248,8 +248,7 @@ socket_t Socket::getSock() const {
 				return sock4;
 			}
 
-			dcdebug("Both v4 & v6 sockets valid and unconnected, closing v4 and returning v6...\n");
-			sock4.reset();
+			dcdebug("Both v4 & v6 sockets valid and unconnected, returning v6...\n");
 		}
 
 		return sock6;

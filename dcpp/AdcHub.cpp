@@ -369,7 +369,8 @@ void AdcHub::handle(AdcCommand::QUI, AdcCommand& c) noexcept {
 				setAutoReconnect(false);
 			} else {
 				setAutoReconnect(true);
-				setReconnDelay(Util::toUInt32(tmp));
+				auto delay = Util::toUInt32(tmp);
+				setReconnDelay(delay ? delay : 120);
 			}
 		}
 		if(!victim && c.getParam("MS", 1, tmp)) {
