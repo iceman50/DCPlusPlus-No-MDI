@@ -1,3 +1,5 @@
+== 07-07-2026 - 0.8834 !!!Experimental!!! ==
+
 == 07-04-2026 - 0.8833 !!!Experimental!!! ==
 * Advertise enabled IPv4 and IPv6 ADC connectivity independently of optional HBRI hub support
 * Update CPMI typing and message-seen state from tab visibility instead of obsolete MDI activation messages
