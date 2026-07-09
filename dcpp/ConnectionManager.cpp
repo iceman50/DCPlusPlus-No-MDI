@@ -152,6 +152,7 @@ void ConnectionManager::getDownloadConnection(const HintedUser& aUser, bool sing
 
 				for(auto uc: userConnections) {
 					if(uc->getToken() == i->getToken()) {
+						uc->unsetFlag(UserConnection::FLAG_ASSOCIATED);
 						uc->disconnect(true);
 					}
 				}
