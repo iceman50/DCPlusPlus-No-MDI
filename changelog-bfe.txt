@@ -1,5 +1,6 @@
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
 * Clear stale download connection association state before removing redundant queue items to prevent ConnectionManager failure assertions
+* Harden QueueManager large-queue handling and index queued files by TTH to avoid invalid iterators and full scans with massive queues
 
 == 07-04-2026 - 0.8833 !!!Experimental!!! ==
 * Advertise enabled IPv4 and IPv6 ADC connectivity independently of optional HBRI hub support

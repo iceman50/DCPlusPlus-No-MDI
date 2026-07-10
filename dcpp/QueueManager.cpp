@@ -83,17 +83,28 @@ QueueItem* QueueManager::FileQueue::add(const string& aTarget, int64_t aSize,
 }
 
 void QueueManager::FileQueue::add(QueueItem* qi) {
-	if(lastInsert == queue.end())
-		lastInsert = queue.emplace(const_cast<string*>(&qi->getTarget()), qi).first;
-	else
-		lastInsert = queue.insert(lastInsert, make_pair(const_cast<string*>(&qi->getTarget()), qi));
+	addTarget(qi);
+	tthIndex.emplace(qi->getTTH(), qi);
+}
+
+void QueueManager::FileQueue::addTarget(QueueItem* qi) {
+	queue.emplace(const_cast<string*>(&qi->getTarget()), qi);
 }
 
 void QueueManager::FileQueue::remove(QueueItem* qi) {
-	if(lastInsert != queue.end() && Util::stricmp(*lastInsert->first, qi->getTarget()) == 0)
-		++lastInsert;
+	removeTTH(qi);
 	queue.erase(const_cast<string*>(&qi->getTarget()));
 	delete qi;
+}
+
+void QueueManager::FileQueue::removeTTH(QueueItem* qi) {
+	auto range = tthIndex.equal_range(qi->getTTH());
+	for(auto i = range.first; i != range.second; ++i) {
+		if(i->second == qi) {
+			tthIndex.erase(i);
+			break;
+		}
+	}
 }
 
 QueueItem* QueueManager::FileQueue::find(const string& target) {
@@ -103,11 +114,9 @@ QueueItem* QueueManager::FileQueue::find(const string& target) {
 
 QueueManager::QueueItemList QueueManager::FileQueue::find(const TTHValue& tth) {
 	QueueItemList ql;
-	for(auto& i: queue) {
-		auto qi = i.second;
-		if(qi->getTTH() == tth) {
-			ql.push_back(qi);
-		}
+	auto range = tthIndex.equal_range(tth);
+	for(auto i = range.first; i != range.second; ++i) {
+		ql.push_back(i->second);
 	}
 	return ql;
 }
@@ -158,11 +167,9 @@ QueueItem* QueueManager::FileQueue::findAutoSearch(StringList& recent) {
 }
 
 void QueueManager::FileQueue::move(QueueItem* qi, const string& aTarget) {
-	if(lastInsert != queue.end() && Util::stricmp(*lastInsert->first, qi->getTarget()) == 0)
-		lastInsert = queue.end();
 	queue.erase(const_cast<string*>(&qi->getTarget()));
 	qi->setTarget(aTarget);
-	add(qi);
+	addTarget(qi);
 }
 
 void QueueManager::UserQueue::add(QueueItem* qi) {

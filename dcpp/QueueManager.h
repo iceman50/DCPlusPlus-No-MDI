@@ -209,7 +209,7 @@ private:
 	/** All queue items by target */
 	class FileQueue {
 	public:
-		FileQueue() : lastInsert(queue.end()) { }
+		FileQueue() { }
 		~FileQueue();
 		void add(QueueItem* qi);
 		QueueItem* add(const string& aTarget, int64_t aSize, int aFlags, QueueItem::Priority p,
@@ -224,9 +224,13 @@ private:
 		void move(QueueItem* qi, const string& aTarget);
 		void remove(QueueItem* qi);
 	private:
+		void addTarget(QueueItem* qi);
+		void removeTTH(QueueItem* qi);
+
+		typedef unordered_multimap<TTHValue, QueueItemPtr> TTHIndex;
+
 		QueueItem::StringMap queue;
-		/** A hint where to insert an item... */
-		QueueItem::StringMap::iterator lastInsert;
+		TTHIndex tthIndex;
 	};
 
 	/** All queue items indexed by user (this is a cache for the FileQueue really...) */
