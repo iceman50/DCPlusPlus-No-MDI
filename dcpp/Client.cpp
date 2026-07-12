@@ -122,6 +122,16 @@ bool Client::isActiveV6() const {
 }
 
 void Client::connect() {
+	connectImpl(true);
+}
+
+void Client::connectImpl(bool resetAttemptedHubUrls) {
+	if(resetAttemptedHubUrls) {
+		attemptedHubUrls.clear();
+	}
+	markHubUrlAttempted(hubUrl);
+	updateActivity();
+
 	if(sock) {
 		BufferedSocket::putSocket(sock);
 		sock = 0;
@@ -144,7 +154,6 @@ void Client::connect() {
 		state = STATE_DISCONNECTED;
 		fire(ClientListener::Failed(), this, e.getError());
 	}
-	updateActivity();
 }
 
 void Client::setFailoverUrls(const StringList& urls) {
@@ -234,12 +243,23 @@ bool Client::setHubUrl(const string& hubURL) {
 bool Client::advanceFailoverUrl() {
 	while(failoverIndex < failoverUrls.size()) {
 		const string url = failoverUrls[failoverIndex++];
+		if(hasAttemptedHubUrl(url)) {
+			continue;
+		}
 		if(setHubUrl(url)) {
 			usingFailover = true;
 			return true;
 		}
 	}
 	return false;
+}
+
+void Client::markHubUrlAttempted(const string& hubURL) {
+	attemptedHubUrls.insert(Text::toLower(hubURL));
+}
+
+bool Client::hasAttemptedHubUrl(const string& hubURL) const {
+	return attemptedHubUrls.find(Text::toLower(hubURL)) != attemptedHubUrls.end();
 }
 
 void Client::info(Holder h) {
@@ -285,9 +305,10 @@ void Client::on(Connected) noexcept {
 
 void Client::on(Failed, const string& aLine) noexcept {
 	state = STATE_DISCONNECTED;
+	updateActivity();
 	FavoriteManager::getInstance()->removeUserCommand(getHubUrl());
 	if(getAutoReconnect() && advanceFailoverUrl()) {
-		connect();
+		connectImpl(false);
 		return;
 	}
 	fire(ClientListener::Failed(), this, aLine);

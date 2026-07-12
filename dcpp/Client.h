@@ -184,6 +184,9 @@ private:
 	bool setHubUrl(const string& hubURL);
 	void setFailoverUrls(const StringList& urls);
 	bool advanceFailoverUrl();
+	void connectImpl(bool resetAttemptedHubUrls);
+	void markHubUrlAttempted(const string& hubURL);
+	bool hasAttemptedHubUrl(const string& hubURL) const;
 
 	virtual OnlineUserList getUsers() const = 0;
 	virtual void infoImpl() = 0;
@@ -196,6 +199,7 @@ private:
 	char separator;
 	bool secure;
 	StringList failoverUrls;
+	StringSet attemptedHubUrls;
 	size_t failoverIndex;
 	bool usingFailover;
 	CountType countType;

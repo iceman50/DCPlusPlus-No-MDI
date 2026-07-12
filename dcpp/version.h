@@ -17,7 +17,8 @@
 
 #include <string>
 
-#define APPNAME "DC++ Experimental"
+#define APPNAME "DC++"
+#define FULL_APPNAME "DC++ Experimental"
 
 // don't forget to update the .rc file as well!
 #define VERSIONSTRING "0.8834"

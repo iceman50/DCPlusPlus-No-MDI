@@ -288,7 +288,7 @@ void MainWindow::initWindow() {
 	// Create main window
 	dcdebug("initWindow\n");
 
-	Seed cs(_T(APPNAME) _T(" ") _T(VERSIONSTRING));
+	Seed cs(_T(FULL_APPNAME) _T(" ") _T(VERSIONSTRING));
 
 	cs.style &= ~WS_VISIBLE;
 	cs.exStyle |= WS_EX_APPWINDOW;
@@ -796,7 +796,7 @@ void MainWindow::TrayPM() {
 }
 
 void MainWindow::handleTabsTitleChanged(const tstring& title) {
-	setText(title.empty() ? _T(APPNAME) _T(" ") _T(VERSIONSTRING) : _T(APPNAME) _T(" ") _T(VERSIONSTRING) _T(" - [") + title + _T("]"));
+	setText(title.empty() ? _T(FULL_APPNAME) _T(" ") _T(VERSIONSTRING) : _T(APPNAME) _T(" ") _T(VERSIONSTRING) _T(" - [") + title + _T("]"));
 }
 
 static void multiConnect(const string& group, TabViewPtr parent) {
