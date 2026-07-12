@@ -129,6 +129,10 @@
 	<dd>DC++ found a corrupt or inconsistent tree entry in HashStore.sqlite3 and ignored it. The affected file can be rehashed if it is still shared or queued.</dd>
 	<dt>Error removing stale hash database entry for [path]: [error message]</dt>
 	<dd>DC++ could not remove an outdated hash entry after detecting that a file changed or disappeared.</dd>
+	<dt>Hash database integrity check failed: [error message]</dt>
+	<dd>SQLite reported hash database corruption or inconsistency during a quick or full integrity check. DC++ will rehash affected files as needed.</dd>
+	<dt>Hash database optimized / Hash database compacted</dt>
+	<dd>The requested hash database maintenance action completed successfully.</dd>
 	<dt>[path] not shared; calculated CRC32 does not match the one found in SFV file.</dt>
 	<dd>Before sharing files DC++ will automatically check them against an .SFV file (if one exists in the same directory) to make sure that no corrupted files will be shared. If you get this error then either your file(s) are corrupted or the control data in the corresponding .SFV file is outdated or damaged.</dd>
 	<dt>Unable to move [path1] to [path2] ([error message]); renamed to [path3]</dt>

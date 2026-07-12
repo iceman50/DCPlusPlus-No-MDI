@@ -97,7 +97,7 @@ const string SettingsManager::settingTags[] =
 	"MaxExtraSlots", "TestingStatus", "MaxMCNDownloads", "MaxMCNUploads",
 	"MaxQueuedProtocolData", "MaxConcurrentConnections", "FloodWindow",
 	"GlobalWindow", "GlobalLimit", "PeerLimit", "PeerWindow", "MaxTrackedPeers",
-	"MaxSUDPPacket", "MaxSUDPKeys", "MaxPartialListBytes",
+	"MaxSUDPPacket", "MaxSUDPKeys", "MaxPartialListBytes", "HashDbWriteBatchSize",
 	"SENTRY",
 	// Bools
 	"AddFinishedInstantly", "AdlsBreakOnFirst",
@@ -125,7 +125,7 @@ const string SettingsManager::settingTags[] =
 	"ToggleActiveTab", "UrlHandler", "UseCTRLForLineHistory", "UseSystemIcons",
 	"UsersFilterFavorite", "UsersFilterOnline", "UsersFilterQueue", "UsersFilterWaiting",
 	"RegisterSystemStartup", "DontLogCCPMChat", "AboutCfgDisclaimer", "EnableTaskbarPreview",
-	"EnableSUDP", "BroadDetection", "BroadDetection6",
+	"EnableSUDP", "BroadDetection", "BroadDetection6", "HashDbVerifyStartup", "HashDbCompactOnRebuild",
 	"SENTRY",
 	// Int64
 	"TotalUpload", "TotalDownload", "SharingSkiplistMinSize", "SharingSkiplistMaxSize",
@@ -229,7 +229,10 @@ SettingsManager::SettingsManager() {
 	setDefault(MAX_SUDP_PACKET, 4096);
 	setDefault(MAX_SUDP_KEYS, 64);
 	setDefault(MAX_PARTIAL_LIST_BYTES, 64 * 1024 * 1024);
+	setDefault(HASH_DB_WRITE_BATCH_SIZE, 256);
 	setDefault(MAX_DOWNLOAD_SPEED, 0);
+	setDefault(HASH_DB_VERIFY_STARTUP, false);
+	setDefault(HASH_DB_COMPACT_ON_REBUILD, false);
 	setDefault(LOG_DIRECTORY, Util::getPath(Util::PATH_USER_LOCAL) + "Logs" PATH_SEPARATOR_STR);
 	setDefault(LOG_UPLOADS, false);
 	setDefault(LOG_DOWNLOADS, false);

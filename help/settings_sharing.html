@@ -34,6 +34,17 @@ the file list.</dd>
   <dt>Remove</dt>
   <dd cshelp="IDH_SETTINGS_UPLOAD_REMOVE">Remove the selected folder(s).</dd>
 </dl>
+<h2>Hash database</h2>
+<dl style="margin-left: 40px;">
+  <dt>Write batch size</dt>
+  <dd>Controls how many hash database row changes are grouped into one SQLite transaction while files are being hashed. Larger values can improve hashing throughput on large shares; smaller values commit newly hashed files sooner.</dd>
+  <dt>Verify hash database on startup</dt>
+  <dd>Runs a quick SQLite integrity check when the hash database is opened.</dd>
+  <dt>Compact hash database after rebuild</dt>
+  <dd>Runs SQLite compaction after the hash database is rebuilt with the <a href="chat_commands.html">/rebuild</a> command.</dd>
+  <dt>Verify / Full check / Optimize / Compact</dt>
+  <dd>Run hash database maintenance actions immediately. Verify uses SQLite quick_check, Full check uses SQLite integrity_check, Optimize updates SQLite query planning hints, and Compact checkpoints the WAL file and rewrites the database to reclaim unused space.</dd>
+</dl>
 <dl>
   <dt id="slots">Upload slots</dt>
   <dd cshelp="IDH_SETTINGS_UPLOAD_SLOTS">Configure the number of slots

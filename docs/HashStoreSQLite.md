@@ -13,6 +13,8 @@ The database contains two `WITHOUT ROWID` tables:
 
 Single-leaf trees store a NULL leaf blob because the root is enough to recreate the tree.
 
+Schema version 2 adds a foreign-key relationship from `files.root` to `trees.root`. When an older version 1 SQLite hash database is opened, DC++ copies only valid file rows into the version 2 table and drops orphaned rows whose tree is missing.
+
 ## Migration
 
 On startup, DC++ opens `HashStore.sqlite3` and creates the schema if needed. If the SQLite database is empty, it loads the legacy `HashIndex.xml` and `HashData.dat` files, verifies each tree, drops orphaned file records and writes the valid entries into SQLite inside one transaction.
@@ -23,6 +25,13 @@ The legacy files are not deleted by migration. Keeping them makes downgrade or m
 
 The `/rebuild` command prunes file records that no longer match the filesystem and rewrites the valid tree/file rows into SQLite inside one transaction. The command preserves the existing public behavior: it can still take time with large shares and it still runs synchronously from the command path.
 
+The Sharing settings page exposes hash database maintenance controls:
+
+* Write batch size controls how many SQLite row changes are grouped into one transaction while files are being hashed. Larger values reduce write overhead but leave more recently hashed files to be rehashed if the process exits before the batch is committed.
+* Verify hash database on startup runs SQLite `quick_check` when the database is opened.
+* Compact hash database after rebuild runs the compact action after `/rebuild` finishes.
+* Verify, Full check, Optimize and Compact buttons run the corresponding maintenance action immediately.
+
 ## Hardening
 
 The SQLite wrapper applies conservative defaults when opening the database:
@@ -31,6 +40,8 @@ The SQLite wrapper applies conservative defaults when opening the database:
 * `trusted_schema` is disabled when supported by the bundled SQLite version.
 * Journaling uses WAL with normal sync for a balance of integrity and write cost.
 * SQLite limits are reduced for SQL length, expression depth, compound selects, attached databases and other features the hash store does not need.
+* Hash writes use cached prepared statements and bounded transactions.
+* `PRAGMA optimize` is run during periodic saves and manual optimization.
 
 The bundled SQLite amalgamation is built from the `sqlite/` folder and is linked into both the core library and the Windows client.
 
@@ -43,5 +54,6 @@ HashStore writes warnings and errors to the system log when it cannot safely use
 * Invalid file records and file rows whose root has no matching tree.
 * Legacy migration entries that are skipped because the old data cannot be verified.
 * Failures while removing stale hash database entries after a file changed.
+* Failed integrity checks and failed maintenance actions.
 
 When a record is skipped, DC++ leaves sharing/search behavior intact by treating the affected hash as unavailable. If the file is still shared or queued, it can be hashed again normally.

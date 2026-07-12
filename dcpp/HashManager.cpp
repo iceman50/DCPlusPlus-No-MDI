@@ -85,6 +85,21 @@ void HashManager::hashDone(const string& aFileName, uint32_t aTimeStamp, const T
 	}
 }
 
+bool HashManager::verifyHashStore(bool fullCheck) {
+	Lock l(cs);
+	return store.verify(fullCheck);
+}
+
+void HashManager::optimizeHashStore() {
+	Lock l(cs);
+	store.optimize();
+}
+
+void HashManager::compactHashStore() {
+	Lock l(cs);
+	store.compact();
+}
+
 void HashManager::HashStore::addFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth, bool aUsed) {
 	if(!addTree(tth)) {
 		throw HashException(_("Unable to save hash data"));
@@ -154,11 +169,44 @@ void HashManager::HashStore::createSchema() {
 		"path TEXT PRIMARY KEY NOT NULL,"
 		"size INTEGER NOT NULL CHECK(size >= 0),"
 		"timestamp INTEGER NOT NULL CHECK(timestamp > 0),"
-		"root BLOB NOT NULL CHECK(length(root) = 24)"
+		"root BLOB NOT NULL CHECK(length(root) = 24),"
+		"FOREIGN KEY(root) REFERENCES trees(root) ON UPDATE CASCADE ON DELETE CASCADE"
 		") WITHOUT ROWID;"
 		"CREATE INDEX IF NOT EXISTS idx_hash_files_root ON files(root);"
-		"PRAGMA user_version = 1;"
 	);
+
+	migrateSchema(getSchemaVersion());
+}
+
+int HashManager::HashStore::getSchemaVersion() {
+	auto stmt = db.prepare("PRAGMA user_version");
+	return stmt.step() ? stmt.columnInt(0) : 0;
+}
+
+void HashManager::HashStore::migrateSchema(int version) {
+	if(version < 2) {
+		SQLiteTransaction transaction(db);
+		db.execute(
+			"CREATE TABLE IF NOT EXISTS files_v2 ("
+			"path TEXT PRIMARY KEY NOT NULL,"
+			"size INTEGER NOT NULL CHECK(size >= 0),"
+			"timestamp INTEGER NOT NULL CHECK(timestamp > 0),"
+			"root BLOB NOT NULL CHECK(length(root) = 24),"
+			"FOREIGN KEY(root) REFERENCES trees(root) ON UPDATE CASCADE ON DELETE CASCADE"
+			") WITHOUT ROWID;"
+			"INSERT OR REPLACE INTO files_v2(path, size, timestamp, root) "
+			"SELECT f.path, f.size, f.timestamp, f.root FROM files f "
+			"WHERE f.path <> '' AND f.size >= 0 AND f.timestamp > 0 AND length(f.root) = 24 "
+			"AND EXISTS(SELECT 1 FROM trees t WHERE t.root = f.root);"
+			"DROP TABLE files;"
+			"ALTER TABLE files_v2 RENAME TO files;"
+			"CREATE INDEX IF NOT EXISTS idx_hash_files_root ON files(root);"
+			"PRAGMA user_version = 2;"
+		);
+		transaction.commit();
+	} else {
+		db.execute("CREATE INDEX IF NOT EXISTS idx_hash_files_root ON files(root);");
+	}
 }
 
 bool HashManager::HashStore::hasDbData() {
@@ -170,51 +218,74 @@ bool HashManager::HashStore::hasDbData() {
 	return stmt.step() && stmt.columnInt(0) != 0;
 }
 
-bool HashManager::HashStore::saveTree(const TigerTree& tt) {
+void HashManager::HashStore::ensureDbOpen() {
 	if(!db.isOpen()) {
 		openDb();
 	}
-	auto stmt = db.prepare(
-		"INSERT INTO trees(root, size, block_size, leaves) VALUES(?1, ?2, ?3, ?4) "
-		"ON CONFLICT(root) DO UPDATE SET "
-		"size=excluded.size, block_size=excluded.block_size, leaves=excluded.leaves"
-	);
-	stmt.bind(1, tt.getRoot().data, TTHValue::BYTES);
-	stmt.bind(2, tt.getFileSize());
-	stmt.bind(3, tt.getBlockSize());
-	if(tt.getLeaves().size() == 1) {
-		stmt.bindNull(4);
-	} else {
-		stmt.bind(4, tt.getLeaves()[0].data, tt.getLeaves().size() * TTHValue::BYTES);
-	}
-	stmt.stepDone();
+}
+
+bool HashManager::HashStore::saveTree(const TigerTree& tt) {
+	beginWrite();
+	writeTreeRow(tt);
+	recordWrite();
 	return true;
 }
 
 void HashManager::HashStore::saveFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth) {
-	if(!db.isOpen()) {
-		openDb();
+	beginWrite();
+	writeFileRow(aFileName, aTimeStamp, tth);
+	recordWrite();
+}
+
+void HashManager::HashStore::writeTreeRow(const TigerTree& tt) {
+	if(!saveTreeStmt.isOpen()) {
+		saveTreeStmt = db.prepare(
+			"INSERT INTO trees(root, size, block_size, leaves) VALUES(?1, ?2, ?3, ?4) "
+			"ON CONFLICT(root) DO UPDATE SET "
+			"size=excluded.size, block_size=excluded.block_size, leaves=excluded.leaves"
+		);
 	}
-	auto stmt = db.prepare(
-		"INSERT INTO files(path, size, timestamp, root) VALUES(?1, ?2, ?3, ?4) "
-		"ON CONFLICT(path) DO UPDATE SET "
-		"size=excluded.size, timestamp=excluded.timestamp, root=excluded.root"
-	);
-	stmt.bind(1, aFileName);
-	stmt.bind(2, tth.getFileSize());
-	stmt.bind(3, static_cast<int64_t>(aTimeStamp));
-	stmt.bind(4, tth.getRoot().data, TTHValue::BYTES);
-	stmt.stepDone();
+	saveTreeStmt.bind(1, tt.getRoot().data, TTHValue::BYTES);
+	saveTreeStmt.bind(2, tt.getFileSize());
+	saveTreeStmt.bind(3, tt.getBlockSize());
+	if(tt.getLeaves().size() == 1) {
+		saveTreeStmt.bindNull(4);
+	} else {
+		saveTreeStmt.bind(4, tt.getLeaves()[0].data, tt.getLeaves().size() * TTHValue::BYTES);
+	}
+	saveTreeStmt.stepDone();
+	saveTreeStmt.reset();
+	saveTreeStmt.clearBindings();
+}
+
+void HashManager::HashStore::writeFileRow(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth) {
+	if(!saveFileStmt.isOpen()) {
+		saveFileStmt = db.prepare(
+			"INSERT INTO files(path, size, timestamp, root) VALUES(?1, ?2, ?3, ?4) "
+			"ON CONFLICT(path) DO UPDATE SET "
+			"size=excluded.size, timestamp=excluded.timestamp, root=excluded.root"
+		);
+	}
+	saveFileStmt.bind(1, aFileName);
+	saveFileStmt.bind(2, tth.getFileSize());
+	saveFileStmt.bind(3, static_cast<int64_t>(aTimeStamp));
+	saveFileStmt.bind(4, tth.getRoot().data, TTHValue::BYTES);
+	saveFileStmt.stepDone();
+	saveFileStmt.reset();
+	saveFileStmt.clearBindings();
 }
 
 void HashManager::HashStore::removeFile(const string& aFileName) noexcept {
 	try {
-		if(!db.isOpen()) {
-			openDb();
+		beginWrite();
+		if(!removeFileStmt.isOpen()) {
+			removeFileStmt = db.prepare("DELETE FROM files WHERE path=?1");
 		}
-		auto stmt = db.prepare("DELETE FROM files WHERE path=?1");
-		stmt.bind(1, aFileName);
-		stmt.stepDone();
+		removeFileStmt.bind(1, aFileName);
+		removeFileStmt.stepDone();
+		removeFileStmt.reset();
+		removeFileStmt.clearBindings();
+		recordWrite();
 	} catch (const SQLiteException& e) {
 		logHashStoreWarning(str(F_("Error removing stale hash database entry for %1%: %2%") % Util::addBrackets(aFileName) % e.getError()));
 	}
@@ -222,37 +293,47 @@ void HashManager::HashStore::removeFile(const string& aFileName) noexcept {
 
 bool HashManager::HashStore::loadTree(const TTHValue& root, TigerTree& tt) {
 	try {
-		if(!db.isOpen()) {
-			openDb();
+		ensureDbOpen();
+		if(!loadTreeStmt.isOpen()) {
+			loadTreeStmt = db.prepare("SELECT size, block_size, leaves FROM trees WHERE root=?1");
 		}
-		auto stmt = db.prepare("SELECT size, block_size, leaves FROM trees WHERE root=?1");
-		stmt.bind(1, root.data, TTHValue::BYTES);
-		if(!stmt.step()) {
+		loadTreeStmt.bind(1, root.data, TTHValue::BYTES);
+		if(!loadTreeStmt.step()) {
+			loadTreeStmt.reset();
+			loadTreeStmt.clearBindings();
 			return false;
 		}
 
-		const auto size = stmt.columnInt64(0);
-		const auto blockSize = stmt.columnInt64(1);
+		const auto size = loadTreeStmt.columnInt64(0);
+		const auto blockSize = loadTreeStmt.columnInt64(1);
 		if(size < 0 || blockSize < 1024) {
 			logHashStoreWarning(str(F_("Invalid hash tree metadata for %1% in hash database") % root.toBase32()));
+			loadTreeStmt.reset();
+			loadTreeStmt.clearBindings();
 			return false;
 		}
 
 		const auto expectedLeaves = TigerTree::calcBlocks(size, blockSize);
 		const auto expectedBytes = expectedLeaves * TTHValue::BYTES;
-		if(stmt.columnIsNull(2)) {
+		if(loadTreeStmt.columnIsNull(2)) {
 			if(expectedLeaves != 1) {
 				logHashStoreWarning(str(F_("Missing hash tree leaf data for %1% in hash database") % root.toBase32()));
+				loadTreeStmt.reset();
+				loadTreeStmt.clearBindings();
 				return false;
 			}
 			tt = TigerTree(size, blockSize, root);
+			loadTreeStmt.reset();
+			loadTreeStmt.clearBindings();
 			return true;
 		}
 
-		const auto bytes = stmt.columnBytes(2);
-		const auto blob = static_cast<const uint8_t*>(stmt.columnBlob(2));
+		const auto bytes = loadTreeStmt.columnBytes(2);
+		const auto blob = static_cast<const uint8_t*>(loadTreeStmt.columnBlob(2));
 		if(!blob || bytes != expectedBytes || bytes == 0 || (bytes % TTHValue::BYTES) != 0) {
 			logHashStoreWarning(str(F_("Invalid hash tree leaf data for %1% in hash database") % root.toBase32()));
+			loadTreeStmt.reset();
+			loadTreeStmt.clearBindings();
 			return false;
 		}
 
@@ -261,10 +342,18 @@ bool HashManager::HashStore::loadTree(const TTHValue& root, TigerTree& tt) {
 		tt = TigerTree(size, blockSize, &buf[0]);
 		if(tt.getRoot() != root) {
 			logHashStoreWarning(str(F_("Hash tree root mismatch for %1% in hash database") % root.toBase32()));
+			loadTreeStmt.reset();
+			loadTreeStmt.clearBindings();
 			return false;
 		}
+		loadTreeStmt.reset();
+		loadTreeStmt.clearBindings();
 		return true;
 	} catch (const Exception& e) {
+		if(loadTreeStmt.isOpen()) {
+			loadTreeStmt.reset();
+			loadTreeStmt.clearBindings();
+		}
 		logHashStoreWarning(str(F_("Error loading hash tree %1%: %2%") % root.toBase32() % e.getError()));
 		return false;
 	}
@@ -307,6 +396,7 @@ optional<TTHValue> HashManager::HashStore::getTTH(const string& aFileName, int64
 
 void HashManager::HashStore::rebuild() {
 	try {
+		flushWrites();
 		decltype(fileIndex) newFileIndex;
 		decltype(treeIndex) newTreeIndex;
 		unordered_map<TTHValue, TigerTree> newTrees;
@@ -355,18 +445,21 @@ void HashManager::HashStore::rebuild() {
 			db.execute("DELETE FROM files");
 			db.execute("DELETE FROM trees");
 			for (auto& i: newTrees) {
-				saveTree(i.second);
+				writeTreeRow(i.second);
 			}
 			for (auto& i: fileIndex) {
 				const string& dir = i.first;
 				for (auto& fi: i.second) {
 					auto tree = newTrees.find(fi.getRoot());
 					if(tree != newTrees.end()) {
-						saveFile(dir + fi.getFileName(), fi.getTimeStamp(), tree->second);
+						writeFileRow(dir + fi.getFileName(), fi.getTimeStamp(), tree->second);
 					}
 				}
 			}
 			transaction.commit();
+		}
+		if(SETTING(HASH_DB_COMPACT_ON_REBUILD)) {
+			compact();
 		}
 	} catch (const Exception& e) {
 		LogManager::getInstance()->message(str(F_("Hash data rebuilding failed: %1%") % e.getError()));
@@ -376,11 +469,100 @@ void HashManager::HashStore::rebuild() {
 void HashManager::HashStore::save() {
 	if (db.isOpen()) {
 		try {
+			flushWrites();
+			db.execute("PRAGMA optimize");
 			db.execute("PRAGMA wal_checkpoint(PASSIVE)");
 		} catch (const SQLiteException& e) {
 			LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()));
 		}
 	}
+}
+
+bool HashManager::HashStore::verify(bool fullCheck) {
+	ensureDbOpen();
+	flushWrites();
+
+	const char* sql = fullCheck ? "PRAGMA integrity_check" : "PRAGMA quick_check";
+	auto stmt = db.prepare(sql);
+	bool ok = true;
+	StringList errors;
+	while(stmt.step()) {
+		const auto result = stmt.columnText(0);
+		if(result != "ok") {
+			ok = false;
+			errors.push_back(result);
+		}
+	}
+
+	if(ok) {
+		LogManager::getInstance()->message(fullCheck ? _("Hash database integrity check passed") : _("Hash database quick check passed"));
+	} else {
+		LogManager::getInstance()->message(str(F_("Hash database integrity check failed: %1%") % Util::toString(errors)));
+	}
+	return ok;
+}
+
+void HashManager::HashStore::optimize() {
+	ensureDbOpen();
+	flushWrites();
+	db.execute("PRAGMA optimize");
+	db.execute("PRAGMA wal_checkpoint(PASSIVE)");
+	LogManager::getInstance()->message(_("Hash database optimized"));
+}
+
+void HashManager::HashStore::compact() {
+	ensureDbOpen();
+	flushWrites();
+	resetStatements();
+	db.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+	const auto oldAttachedLimit = db.setLimit(SQLITE_LIMIT_ATTACHED, 1);
+	ScopedFunctor restoreAttachedLimit([this, oldAttachedLimit] {
+		db.setLimit(SQLITE_LIMIT_ATTACHED, oldAttachedLimit);
+	});
+	db.execute("VACUUM");
+	db.execute("PRAGMA optimize");
+	LogManager::getInstance()->message(_("Hash database compacted"));
+}
+
+void HashManager::HashStore::beginWrite() {
+	ensureDbOpen();
+	if(!writeTransaction) {
+		writeTransaction.reset(new SQLiteTransaction(db));
+		writeTransactionStatements = 0;
+	}
+}
+
+void HashManager::HashStore::recordWrite() {
+	dirty = true;
+	writeTransactionStatements++;
+	const auto batchSize = max(1, SETTING(HASH_DB_WRITE_BATCH_SIZE));
+	if(static_cast<int>(writeTransactionStatements) >= batchSize) {
+		flushWrites();
+	}
+}
+
+void HashManager::HashStore::flushWrites() {
+	if(writeTransaction) {
+		writeTransaction->commit();
+		writeTransaction.reset();
+		writeTransactionStatements = 0;
+		dirty = false;
+	}
+}
+
+void HashManager::HashStore::flushWritesNoexcept() noexcept {
+	try {
+		flushWrites();
+	} catch (const Exception& e) {
+		LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()));
+	}
+}
+
+void HashManager::HashStore::resetStatements() noexcept {
+	saveTreeStmt = SQLiteStatement();
+	saveFileStmt = SQLiteStatement();
+	removeFileStmt = SQLiteStatement();
+	loadTreeStmt = SQLiteStatement();
 }
 
 string HashManager::HashStore::getIndexFile() { return Util::getPath(Util::PATH_USER_CONFIG) + "HashIndex.xml"; }
@@ -492,6 +674,7 @@ void HashManager::HashStore::migrateLegacy() {
 	}
 
 	try {
+		flushWrites();
 		unordered_map<TTHValue, TigerTree> validTrees;
 		File dataFile(getDataFile(), File::READ, File::OPEN);
 
@@ -531,14 +714,14 @@ void HashManager::HashStore::migrateLegacy() {
 		db.execute("DELETE FROM files");
 		db.execute("DELETE FROM trees");
 		for(auto& i: validTrees) {
-			saveTree(i.second);
+			writeTreeRow(i.second);
 		}
 		for(auto& i: fileIndex) {
 			const string& dir = i.first;
 			for(auto& fi: i.second) {
 				auto tree = validTrees.find(fi.getRoot());
 				if(tree != validTrees.end()) {
-					saveFile(dir + fi.getFileName(), fi.getTimeStamp(), tree->second);
+					writeFileRow(dir + fi.getFileName(), fi.getTimeStamp(), tree->second);
 				}
 			}
 		}
@@ -557,6 +740,9 @@ void HashManager::HashStore::migrateLegacy() {
 void HashManager::HashStore::load(function<void (float)> progressF) {
 	try {
 		openDb();
+		if(SETTING(HASH_DB_VERIFY_STARTUP) && !verify(false)) {
+			LogManager::getInstance()->message(_("Hash database verification failed during startup; DC++ will rehash files as needed"));
+		}
 		if(hasDbData()) {
 			loadDb(progressF);
 		} else {
@@ -691,7 +877,12 @@ void HashLoader::startTag(const string& name, StringPairList& attribs, bool simp
 }
 
 HashManager::HashStore::HashStore() :
-	dirty(false) {
+	dirty(false),
+	writeTransactionStatements(0) {
+}
+
+HashManager::HashStore::~HashStore() {
+	flushWritesNoexcept();
 }
 
 void HashManager::Hasher::hashFile(const string& fileName, int64_t size) noexcept {

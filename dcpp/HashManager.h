@@ -20,6 +20,7 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 
 #include <optional>
 
@@ -81,6 +82,9 @@ public:
 	 * Rebuild hash data file
 	 */
 	void rebuild() { hasher.scheduleRebuild(); }
+	bool verifyHashStore(bool fullCheck = false);
+	void optimizeHashStore();
+	void compactHashStore();
 
 	void startup(function<void (float)> progressF) { hasher.start(); store.load(progressF); }
 
@@ -146,12 +150,16 @@ private:
 	class HashStore {
 	public:
 		HashStore();
+		~HashStore();
 		void addFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth, bool aUsed);
 
 		void load(function<void (float)> progressF);
 		void save();
 
 		void rebuild();
+		bool verify(bool fullCheck);
+		void optimize();
+		void compact();
 
 		optional<TTHValue> getTTH(const string& aFileName, int64_t aSize, uint32_t aTimeStamp) noexcept;
 
@@ -191,10 +199,20 @@ private:
 
 		SQLiteDB db;
 		bool dirty;
+		std::unique_ptr<SQLiteTransaction> writeTransaction;
+		uint32_t writeTransactionStatements;
+
+		SQLiteStatement saveTreeStmt;
+		SQLiteStatement saveFileStmt;
+		SQLiteStatement removeFileStmt;
+		SQLiteStatement loadTreeStmt;
 
 		void openDb();
 		void createSchema();
+		int getSchemaVersion();
+		void migrateSchema(int version);
 		bool hasDbData();
+		void ensureDbOpen();
 
 		void loadDb(function<void (float)> progressF);
 		void loadLegacy(function<void (float)> progressF);
@@ -203,9 +221,16 @@ private:
 		void saveFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth);
 		void removeFile(const string& aFileName) noexcept;
 		bool saveTree(const TigerTree& tt);
+		void writeFileRow(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth);
+		void writeTreeRow(const TigerTree& tt);
 		bool loadTree(const TTHValue& root, TigerTree& tt);
 
 		bool loadLegacyTree(File& dataFile, const TreeInfo& ti, const TTHValue& root, TigerTree& tt);
+		void beginWrite();
+		void recordWrite();
+		void flushWrites();
+		void flushWritesNoexcept() noexcept;
+		void resetStatements() noexcept;
 
 		static string getIndexFile();
 		static string getDataFile();

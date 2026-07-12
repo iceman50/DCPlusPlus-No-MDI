@@ -105,8 +105,8 @@ void SQLiteDB::configure() {
 	);
 }
 
-void SQLiteDB::setLimit(int id, int value) noexcept {
-	sqlite3_limit(db, id, value);
+int SQLiteDB::setLimit(int id, int value) noexcept {
+	return sqlite3_limit(db, id, value);
 }
 
 void SQLiteDB::execute(const char* sql) {

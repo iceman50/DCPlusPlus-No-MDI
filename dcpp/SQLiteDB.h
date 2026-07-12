@@ -55,6 +55,7 @@ public:
 
 	sqlite3* getHandle() const noexcept { return db; }
 	string getError() const;
+	int setLimit(int id, int value) noexcept;
 
 	static string getLibraryVersion();
 
@@ -62,7 +63,6 @@ private:
 	sqlite3* db = nullptr;
 
 	void configure();
-	void setLimit(int id, int value) noexcept;
 	[[noreturn]] void throwLastError(const string& context) const;
 };
 
@@ -82,6 +82,7 @@ public:
 	void stepDone();
 	void reset();
 	void clearBindings() noexcept;
+	bool isOpen() const noexcept { return stmt != nullptr; }
 
 	void bind(int index, const string& value);
 	void bind(int index, const void* data, size_t size);
