@@ -31,6 +31,7 @@
 #include "TimerManager.h"
 #include "HashManagerListener.h"
 #include "GetSet.h"
+#include "SQLiteDB.h"
 
 namespace dcpp {
 
@@ -188,15 +189,27 @@ private:
 		unordered_map<string, vector<FileInfo>> fileIndex;
 		unordered_map<TTHValue, TreeInfo> treeIndex;
 
+		SQLiteDB db;
 		bool dirty;
 
-		void createDataFile(const string& name);
+		void openDb();
+		void createSchema();
+		bool hasDbData();
 
-		bool loadTree(File& dataFile, const TreeInfo& ti, const TTHValue& root, TigerTree& tt);
-		int64_t saveTree(File& dataFile, const TigerTree& tt);
+		void loadDb(function<void (float)> progressF);
+		void loadLegacy(function<void (float)> progressF);
+		void migrateLegacy();
+
+		void saveFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth);
+		void removeFile(const string& aFileName) noexcept;
+		bool saveTree(const TigerTree& tt);
+		bool loadTree(const TTHValue& root, TigerTree& tt);
+
+		bool loadLegacyTree(File& dataFile, const TreeInfo& ti, const TTHValue& root, TigerTree& tt);
 
 		static string getIndexFile();
 		static string getDataFile();
+		static string getDbFile();
 	};
 
 	friend class HashLoader;

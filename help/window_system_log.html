@@ -110,13 +110,25 @@
 	<dt>File list refresh failed: [error message]</dt>
 	<dd>The background process for refreshing file list is failed to start.</dd>
 	<dt>Hashing failed / Hash data rebuilding failed: [error message]</dt>
-	<dd>Error occured during indexing or share rebuilding.</dd>
+	<dd>Error occurred during file indexing or hash database rebuilding.</dd>
 	<dt>Error hashing [path]: [error message]</dt>
 	<dd>Error when hashing the file specified in [path].</dd>
 	<dt>Error saving hash data: [error message]</dt>
-	<dd>Error when creating or updating hash database files (HashIndex.xml, HashData.dat). This message appearing repeatedly may indicate hash database corruption or issues accessing the <a href="faq_settings_files.html">settings folder or files</a>.</dd>
-	<dt>Error creating hash data file: [error message]</dt>
-	<dd>Error when creating hash data file (HashData.dat). This message may indicate issues accessing the <a href="faq_settings_files.html">settings folder or files</a>.</dd>
+	<dd>Error when creating, updating or checkpointing the SQLite hash database (HashStore.sqlite3 and its sidecar files). This message appearing repeatedly may indicate hash database corruption or issues accessing the <a href="faq_settings_files.html">settings folder or files</a>.</dd>
+	<dt>Error loading hash data: [error message]</dt>
+	<dd>Error when opening or reading the SQLite hash database. DC++ will clear the in-memory hash index and rehash files as needed.</dd>
+	<dt>Hash database migration failed: [error message]</dt>
+	<dd>Error while migrating the legacy HashIndex.xml and HashData.dat files into HashStore.sqlite3. DC++ will clear the in-memory hash index and rehash files as needed.</dd>
+	<dt>Error loading legacy hash database [path]: [error message]</dt>
+	<dd>Error while reading the old HashIndex.xml file during first-run migration to the SQLite hash database.</dd>
+	<dt>Hash database loaded with [x] invalid tree records, [y] invalid file records and [z] file records without matching trees</dt>
+	<dd>DC++ skipped invalid or incomplete rows while loading HashStore.sqlite3. This usually means the database was partially corrupted or interrupted during a previous update.</dd>
+	<dt>Legacy hash database migration skipped [x] invalid trees and [y] file records without matching trees</dt>
+	<dd>DC++ migrated the valid parts of the old hash database and skipped entries that could not be safely verified.</dd>
+	<dt>Invalid hash tree metadata / Missing hash tree leaf data / Invalid hash tree leaf data / Hash tree root mismatch</dt>
+	<dd>DC++ found a corrupt or inconsistent tree entry in HashStore.sqlite3 and ignored it. The affected file can be rehashed if it is still shared or queued.</dd>
+	<dt>Error removing stale hash database entry for [path]: [error message]</dt>
+	<dd>DC++ could not remove an outdated hash entry after detecting that a file changed or disappeared.</dd>
 	<dt>[path] not shared; calculated CRC32 does not match the one found in SFV file.</dt>
 	<dd>Before sharing files DC++ will automatically check them against an .SFV file (if one exists in the same directory) to make sure that no corrupted files will be shared. If you get this error then either your file(s) are corrupted or the control data in the corresponding .SFV file is outdated or damaged.</dd>
 	<dt>Unable to move [path1] to [path2] ([error message]); renamed to [path3]</dt>

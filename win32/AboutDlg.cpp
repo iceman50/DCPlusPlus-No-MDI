@@ -23,6 +23,7 @@
 #include <dcpp/HttpManager.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/SimpleXML.h>
+#include <dcpp/SQLiteDB.h>
 #include <dcpp/Streams.h>
 #include <dcpp/version.h>
 #include <GeoIP.h>
@@ -192,6 +193,7 @@ string getAboutInfo() {
 
 	info += "Libraries\r\n";
 	addInfoLine(info, "OpenSSL", getOpenSSLVersion());
+	addInfoLine(info, "SQLite", SQLiteDB::getLibraryVersion());
 	addInfoLine(info, "zlib", string(zlibVersion()) + " (headers: " ZLIB_VERSION ")");
 	addInfoLine(info, "bzip2", BZ2_bzlibVersion());
 	addInfoLine(info, "DWT", DWT_VERSION_STRING);

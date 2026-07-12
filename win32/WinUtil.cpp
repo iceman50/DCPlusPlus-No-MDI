@@ -576,7 +576,7 @@ static const map<tstring, tstring> cmdMap = {
 	{_T("/d <search string>"),						  T_("Launches your default web browser to the DuckDuckGo search engine with the specified search.")},
 	{_T("/g <search string>"),						  T_("Launches your default web browser to the Google search engine with the specified search.")},
 	{_T("/imdb <imdb query>"),						  T_("Launches your default web browser to the Internet Movie Database (imdb) with the specified query.")},
-	{_T("/rebuild"),								  T_("Rebuilds the HashIndex.xml and HashData.dat files, removing entries to files that are no longer shared, or old hashes for files that have since changed. This runs in the main DC++ thread, so the interface will freeze until the rebuild is finished.")},
+	{_T("/rebuild"),								  T_("Rebuilds the hash database (HashStore.sqlite3), removing entries for files that are no longer shared, or old hashes for files that have since changed. This runs in the main DC++ thread, so the interface will freeze until the rebuild is finished.")},
 	{_T("/log <status, system, downloads, uploads>"), T_("If no parameter is specified, it launches the log for the hub or private chat with the associated application in Windows. If one of the parameters is specified it opens that log file. The status log is available only in the hub frame.")},
 	{_T("/help"),									  T_("Displays available commands. (The ones listed on this page.) Optionally, you can specify \"brief\" to have a brief listing.")},
 	{_T("/u <url>"),								  T_("Launches your default web browser with the given URL.")},

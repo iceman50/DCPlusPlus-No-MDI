@@ -306,6 +306,7 @@ class Dev:
                 self.client,
                 self.dwarf,
                 self.zlib,
+                self.sqlite,
                 self.bzip2,
                 self.geoip,
                 self.miniupnpc,
@@ -355,7 +356,7 @@ class Dev:
     def add_dcpp(self, env):
         if self.is_win32():
             env.Append(CPPPATH=["#/bzip2"])
-        env.Append(CPPPATH=["#/geoip", "#/zlib"])
+        env.Append(CPPPATH=["#/geoip", "#/sqlite", "#/zlib"])
 
         if self.is_win32():
             env.Append(LIBS=["gdi32", "iphlpapi", "ole32", "ws2_32"])

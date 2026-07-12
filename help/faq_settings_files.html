@@ -19,10 +19,11 @@
 	<dd>This file stores your favorite hubs and favorite users with all of their properties including login information and passwords.</dd>
 	<dt><untranslated>Queue.xml</untranslated></dt>
 	<dd>Your download queue items and their properties saved into this setting file. This file also contains information about what pieces (chunks) of the queued files have already been downloaded.</dd>
-	<dt><untranslated>HashIndex.xml</untranslated></dt>
-	<dt><untranslated>HashData.dat</untranslated></dt>
-	<dd>These files contain hashes for your shared and queued files. You can read more about them in <a href="https://dcpp.wordpress.com/2006/03/09/what-do-hashindexxml-and-hashdatadat-do" target="_blank" class="external">this article</a>.</dd>
-	<dd></dd>
+	<dt><untranslated>HashStore.sqlite3</untranslated></dt>
+	<dt><untranslated>HashStore.sqlite3-wal</untranslated></dt>
+	<dt><untranslated>HashStore.sqlite3-shm</untranslated></dt>
+	<dd>These files contain the TTH hash database for your shared and queued files. The -wal and -shm files are normal SQLite sidecar files and may exist while DC++ is running or after a recent close.</dd>
+	<dd>Older installations used <untranslated>HashIndex.xml</untranslated> and <untranslated>HashData.dat</untranslated>. DC++ migrates those legacy files into <untranslated>HashStore.sqlite3</untranslated> automatically when the new database is empty.</dd>
 	<dt><untranslated>ADLSearch.xml</untranslated></dt>
 	<dd>This file stores your defined ADLSearch queries.</dd>
 	<dt><untranslated>Users.xml</untranslated></dt>

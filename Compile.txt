@@ -30,6 +30,12 @@
 
 		Make sure that SCons is in your PATH environment variable. 
 
+		* SQLite
+
+		SQLite is bundled as an amalgamation in the sqlite/ folder and does not require an external package.
+		When updating the bundled copy, use the official sqlite-amalgamation archive from
+		<https://www.sqlite.org/download.html> and verify the archive hash published by SQLite.
+
 		* Perl - 5.12.0.1 or later (from MSYS, Cygwin or ActivePerl; only needed to build help files)
 		<https://www.perl.org/get.html>
 

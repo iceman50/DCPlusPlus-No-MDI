@@ -115,8 +115,8 @@ with the specified search.</dd>
   <dd>Launches your default web browser to the Internet Movie Database
 (imdb) with the specified query.</dd>
   <dt><untranslated>/rebuild</untranslated></dt>
-  <dd>Rebuilds the hash storage files (HashIndex.xml and HashData.dat) by removing
-entries to files that are no longer shared and old hashes for files that have changed
+  <dd>Rebuilds the hash database (HashStore.sqlite3) by removing
+entries for files that are no longer shared and old hashes for files that have changed
 or removed since. This can notably improve the startup time of DC++ when large number
 of files are shared. Note that rebuilding is most effective when shares have not changed
 a lot in the current DC++ session so it is recommended to restart DC++ before 

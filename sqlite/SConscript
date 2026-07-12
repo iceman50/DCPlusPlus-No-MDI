@@ -1,0 +1,35 @@
+Import("dev source_path")
+
+env, target, sources = dev.prepare_build(
+    source_path, "sqlite", source_glob="sqlite3.c", in_bin=False
+)
+
+env.Append(
+    CPPDEFINES=[
+        "SQLITE_DQS=0",
+        "SQLITE_DEFAULT_FOREIGN_KEYS=1",
+        "SQLITE_DEFAULT_MEMSTATUS=0",
+        "SQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+        "SQLITE_ENABLE_API_ARMOR=1",
+        "SQLITE_LIKE_DOESNT_MATCH_BLOBS=1",
+        "SQLITE_MAX_ALLOCATION_SIZE=67108864",
+        "SQLITE_OMIT_DEPRECATED=1",
+        "SQLITE_OMIT_LOAD_EXTENSION=1",
+        "SQLITE_OMIT_SHARED_CACHE=1",
+        "SQLITE_PRINTF_PRECISION_LIMIT=100000",
+        "SQLITE_THREADSAFE=1",
+        "SQLITE_TRUSTED_SCHEMA=0",
+        "SQLITE_USE_URI=0",
+    ]
+)
+
+if "gcc" in env["TOOLS"]:
+    env.Append(CCFLAGS=[
+        "-Wno-cast-function-type",
+        "-Wno-implicit-fallthrough",
+        "-Wno-unused-function",
+        "-Wno-unused-variable",
+    ])
+
+ret = dev.build_lib(env, target, sources, dev.c_lib)
+Return("ret")

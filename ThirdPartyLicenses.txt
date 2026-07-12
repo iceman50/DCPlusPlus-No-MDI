@@ -2,6 +2,7 @@ Licenses contained in this file:
 - GeoIP license
 - MiniUPnPc and libnatpmp license
 - OpenSSL license
+- SQLite public domain notice
 - zlib license
 
 --- GeoIP license ---
@@ -234,6 +235,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       of your accepting any such warranty or additional liability.
 
    END OF TERMS AND CONDITIONS  
+
+--- SQLite public domain notice ---
+
+SQLite is in the public domain.
+
+All of the code and documentation in SQLite has been dedicated to the
+public domain by the authors. Anyone is free to copy, modify, publish,
+use, compile, sell, or distribute the original SQLite code, either in
+source code form or as a compiled binary, for any purpose, commercial or
+non-commercial, and by any means.
 
 --- zlib license ---
 
