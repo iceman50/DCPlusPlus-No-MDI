@@ -51,6 +51,7 @@ public:
 
 	bool handleMessage(const MSG& msg, LRESULT& retVal);
 
+	using BaseType::getMenu;
 	MenuPtr getMenu(const tstring& searchText);
 
 	tstring findTextPopup(const tstring& searchText = Util::emptyStringT);
