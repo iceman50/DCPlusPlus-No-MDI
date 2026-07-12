@@ -1,4 +1,6 @@
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
+* Replace the About dialog contributor thanks block with build, runtime, OS, memory, compiler and bundled-library diagnostics
+* Fix an About dialog crash in optimized builds when the bundled GeoIP library reports no version string
 * Clear stale download connection association state before removing redundant queue items to prevent ConnectionManager failure assertions
 * Harden QueueManager large-queue handling and index queued files by TTH to avoid invalid iterators and full scans with massive queues
 

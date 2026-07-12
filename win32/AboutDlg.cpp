@@ -25,11 +25,24 @@
 #include <dcpp/SimpleXML.h>
 #include <dcpp/Streams.h>
 #include <dcpp/version.h>
+#include <GeoIP.h>
+#include <bzlib.h>
+#include <zlib.h>
+#include <dwt/Version.h>
+#include <miniupnpc/miniupnpc.h>
+#include <natpmp/natpmp.h>
+#include <openssl/crypto.h>
 #include <openssl/opensslv.h>
+
+#include <cstring>
 
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/Label.h>
 #include <dwt/widgets/Link.h>
+
+#if defined(__GNUC__)
+#include <libdwarf.h>
+#endif
 
 #include "resource.h"
 #include "WinUtil.h"
@@ -39,30 +52,168 @@ using dwt::GridInfo;
 using dwt::Label;
 using dwt::Link;
 
-static const char thanks[] = "Big thanks to all donators and people who have contributed with ideas "
-"and code! Thanks go out to sourceforge.net for hosting the project. "
-"This product uses bzip2 <www.bzip.org>, thanks to Julian Seward and team for providing it. "
-"This product uses zlib <www.zlib.net>, thanks to Jean-loup Gailly and Mark Adler for providing it. "
-"This product includes parts of the geoip-api-c library created by MaxMind, Inc., available from <https://github.com/maxmind/geoip-api-c>. "
-"This product includes free updated GeoIP legacy databases provided by mailfud.org, available from <https://mailfud.org/geoip-legacy/>. "
-"This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit <https://www.openssl.org/>. "
-"This product uses the MiniUPnP client library <https://miniupnp.tuxfamily.org> and libnatpmp by Thomas Bernard. "
-"This product uses libdwarf <https://www.prevanders.net/dwarf.html> by SGI & David Anderson. "
-"The following people have contributed code to DC++ (I hope I haven't missed someone, they're "
-"roughly in chronological order...=):\r\n"
-"geoff, carxor, luca rota, dan kline, mike, anton, zc, sarf, farcry, kyrre aalerud, opera, "
-"patbateman, xeroc, fusbar, vladimir marko, kenneth skovhede, ondrea, who, "
-"sedulus, sandos, henrik engstr\303\266m, dwomac, robert777, saurod, atomicjo, bzbetty, orkblutt, "
-"distiller, citruz, dan fulger, cologic, christer palm, twink, ilkka sepp\303\244l\303\244, johnny, ciber, "
-"theparanoidone, gadget, naga, tremor, joakim tosteberg, pofis, psf8500, lauris ievins, "
-"defr, ullner, fleetcommand, liny, xan, olle svensson, mark gillespie, jeremy huddleston, "
-"bsod, sulan, jonathan stone, tim burton, izzzo, guitarm, paka, nils maier, jens oknelid, yoji, "
-"krzysztof tyszecki, poison, mikejj, pur, bigmuscle, martin, jove, bart vullings, "
-"steven sheehy, tobias nygren, dorian, stephan hohe, mafa_45, mikael eman, james ross, "
-"stanislav maslovski, david grundberg, pavel andreev, yakov suraev, kulmegil, smir, emtee, individ, "
-"pseudonym, crise, ben, ximin luo, razzloss, andrew browne, darkklor, vasily.n, netcelli, "
-"gennady proskurin, iceman50, flow84, alexander sashnov, yorhel, irainman, maksis, "
-"pavel pimenov, konstantin, night, klondike, rolex. Keep it coming!";
+namespace {
+
+string getCompilerVersion() {
+#ifdef __MINGW64_VERSION_MAJOR
+	return string("MinGW-w64 GCC ") + __VERSION__;
+#elif defined(__GNUC__)
+	return string("GCC ") + __VERSION__;
+#elif defined(_MSC_VER)
+	return string("MSVC ") + Util::toString(_MSC_VER) + " (" + Util::toString(_MSC_FULL_VER) + ")";
+#else
+	return "Unknown";
+#endif
+}
+
+string getBuildArchitecture() {
+#ifdef _WIN64
+	return "x64";
+#elif defined(_WIN32)
+	return "x86";
+#else
+	return "Unknown";
+#endif
+}
+
+string getNativeArchitecture() {
+	SYSTEM_INFO si = {};
+	::GetNativeSystemInfo(&si);
+
+	switch(si.wProcessorArchitecture) {
+	case PROCESSOR_ARCHITECTURE_AMD64: return "x64";
+	case PROCESSOR_ARCHITECTURE_ARM64: return "ARM64";
+	case PROCESSOR_ARCHITECTURE_INTEL: return "x86";
+	case PROCESSOR_ARCHITECTURE_ARM: return "ARM";
+	default: return "Unknown";
+	}
+}
+
+string getWindowsVersion() {
+	OSVERSIONINFOEXW info = {};
+	info.dwOSVersionInfoSize = sizeof(info);
+
+	typedef LONG (WINAPI *RtlGetVersionFunc)(PRTL_OSVERSIONINFOW);
+	RtlGetVersionFunc rtlGetVersion = nullptr;
+	auto ntdll = ::GetModuleHandle(_T("ntdll.dll"));
+	auto proc = ntdll ? ::GetProcAddress(ntdll, "RtlGetVersion") : nullptr;
+	if(proc) {
+		static_assert(sizeof(rtlGetVersion) == sizeof(proc), "Unexpected function pointer size");
+		std::memcpy(&rtlGetVersion, &proc, sizeof(rtlGetVersion));
+	}
+
+	if(!rtlGetVersion || rtlGetVersion(reinterpret_cast<PRTL_OSVERSIONINFOW>(&info)) != 0) {
+		return "Unknown";
+	}
+
+	const bool workstation = info.wProductType == VER_NT_WORKSTATION;
+	string name;
+	if(info.dwMajorVersion == 10 && info.dwMinorVersion == 0) {
+		name = workstation ? (info.dwBuildNumber >= 22000 ? "Windows 11" : "Windows 10") : "Windows Server";
+	} else if(info.dwMajorVersion == 6 && info.dwMinorVersion == 3) {
+		name = workstation ? "Windows 8.1" : "Windows Server 2012 R2";
+	} else if(info.dwMajorVersion == 6 && info.dwMinorVersion == 2) {
+		name = workstation ? "Windows 8" : "Windows Server 2012";
+	} else if(info.dwMajorVersion == 6 && info.dwMinorVersion == 1) {
+		name = workstation ? "Windows 7" : "Windows Server 2008 R2";
+	} else {
+		name = workstation ? "Windows" : "Windows Server";
+	}
+
+	return str(F_("%1% %2%.%3%.%4%") % name % info.dwMajorVersion % info.dwMinorVersion % info.dwBuildNumber);
+}
+
+string getMemoryInfo() {
+	MEMORYSTATUSEX memory = {};
+	memory.dwLength = sizeof(memory);
+	if(!::GlobalMemoryStatusEx(&memory)) {
+		return "Unknown";
+	}
+
+	return str(F_("%1% total, %2% available") %
+		Util::formatBytes(static_cast<int64_t>(memory.ullTotalPhys)) %
+		Util::formatBytes(static_cast<int64_t>(memory.ullAvailPhys)));
+}
+
+string getCppStandard() {
+	return Util::toString(static_cast<long long>(__cplusplus));
+}
+
+string getLibintlVersion() {
+	return str(F_("%1%.%2%.%3%") %
+		((LIBINTL_VERSION >> 16) & 0xff) %
+		((LIBINTL_VERSION >> 8) & 0xff) %
+		(LIBINTL_VERSION & 0xff));
+}
+
+string getVersionString(const char* version) {
+	return (version && *version) ? version : "Bundled";
+}
+
+string getOpenSSLVersion() {
+	const auto runtime = getVersionString(OpenSSL_version(OPENSSL_VERSION));
+	if(runtime == OPENSSL_VERSION_TEXT) {
+		return runtime;
+	}
+	return runtime + " (headers: " OPENSSL_VERSION_TEXT ")";
+}
+
+void addInfoLine(string& info, const string& name, const string& value) {
+	info += name + ": " + value + "\r\n";
+}
+
+string getAboutInfo() {
+	string info;
+
+	info += "Application\r\n";
+	addInfoLine(info, "Full name", FULL_APPNAME);
+	addInfoLine(info, "Core identity", APPNAME);
+	addInfoLine(info, "Version", VERSIONSTRING);
+	addInfoLine(info, "Build type",
+#ifdef _DEBUG
+		"Debug"
+#else
+		"Release"
+#endif
+	);
+	addInfoLine(info, "Build architecture", getBuildArchitecture());
+	info += "\r\n";
+
+	info += "System\r\n";
+	addInfoLine(info, "Windows", getWindowsVersion());
+	addInfoLine(info, "Native architecture", getNativeArchitecture());
+	addInfoLine(info, "Physical memory", getMemoryInfo());
+	info += "\r\n";
+
+	info += "Toolchain\r\n";
+	addInfoLine(info, "Compiler", getCompilerVersion());
+	addInfoLine(info, "C++ standard", getCppStandard());
+	info += "\r\n";
+
+	info += "Libraries\r\n";
+	addInfoLine(info, "OpenSSL", getOpenSSLVersion());
+	addInfoLine(info, "zlib", string(zlibVersion()) + " (headers: " ZLIB_VERSION ")");
+	addInfoLine(info, "bzip2", BZ2_bzlibVersion());
+	addInfoLine(info, "DWT", DWT_VERSION_STRING);
+	addInfoLine(info, "MiniUPnPc", string(MINIUPNPC_VERSION) + " (API " + Util::toString(MINIUPNPC_API_VERSION) + ")");
+	addInfoLine(info, "libnatpmp", "Bundled");
+	addInfoLine(info, "GeoIP C API", getVersionString(GeoIP_lib_version()));
+#if defined(__GNUC__)
+	addInfoLine(info, "libdwarf", DW_LIBDWARF_VERSION);
+#else
+	addInfoLine(info, "DbgHelp", "Windows");
+#endif
+	addInfoLine(info, "GNU gettext/libintl", getLibintlVersion());
+#ifdef HAVE_HTMLHELP_H
+	addInfoLine(info, "HTML Help", "Enabled");
+#else
+	addInfoLine(info, "HTML Help", "Disabled");
+#endif
+
+	return info;
+}
+
+} // namespace
 
 AboutDlg::AboutDlg(dwt::Widget* parent) :
 dwt::ModalDialog(parent),
@@ -95,13 +246,13 @@ bool AboutDlg::handleInitDialog() {
 	ls.style |= SS_CENTER;
 
 	{
-		auto cur = grid->addChild(gs)->addChild(Grid::Seed(6, 1));
+		auto cur = grid->addChild(gs)->addChild(Grid::Seed(4, 1));
 		cur->column(0).mode = GridInfo::FILL;
 		cur->column(0).align = GridInfo::CENTER;
 
 		cur->addChild(Label::Seed(WinUtil::createIcon(IDI_DCPP, 48)));
 
-		ls.caption = Text::toT(dcpp::fullVersionString) + _T("\n(c) Copyright 2001-2025 Jacek Sieka\n");
+		ls.caption = _T(FULL_APPNAME) _T(" v") _T(VERSIONSTRING) _T("\n(c) Copyright 2001-2025 Jacek Sieka\n");
 		ls.caption += T_("Ex-main project contributors: Todd Pederzani, poy\nEx-codeveloper: Per Lind\303\251n\nOriginal DC++ logo design: Martin Skogevall\nGraphics: Radox and various GPL and CC authors\n\nDC++ is licenced under GPL.");
 		cur->addChild(ls);
 
@@ -114,35 +265,14 @@ bool AboutDlg::handleInitDialog() {
 		gs.caption = T_("TTH");
 		ts.caption = WinUtil::tth;
 		cur->addChild(gs)->addChild(ts);
-
-		gs.caption = T_("Compiler");
-		// see also CrashLogger.cpp for similar tests.
-#ifdef __MINGW64_VERSION_MAJOR
-		ts.caption = Text::toT("MinGW-w64's GCC " __VERSION__);
-#elif defined(_MSC_VER)
-		ts.caption = Text::toT("MS Visual Studio " + Util::toString(_MSC_VER));
-#else
-		ts.caption = _T("Unknown");
-#endif
-#ifdef _DEBUG
-		ts.caption += _T(" (debug)");
-#endif
-#ifdef _WIN64
-		ts.caption += _T(" (x64)");
-#endif
-		cur->addChild(gs)->addChild(ts);
-
-		gs.caption = T_("OpenSSL version");
-		ts.caption = Text::toT(OPENSSL_VERSION_TEXT);
-		cur->addChild(gs)->addChild(ts);
 	}
 
 	{
-		gs.caption = T_("Greetz and Contributors");
+		gs.caption = T_("Build and Runtime Information");
 		auto seed = WinUtil::Seeds::Dialog::textBox;
 		seed.style &= ~ES_AUTOHSCROLL;
 		seed.style |= ES_MULTILINE | WS_VSCROLL | ES_READONLY;
-		seed.caption = Text::toT(thanks);
+		seed.caption = Text::toT(getAboutInfo());
 		grid->addChild(gs)->addChild(seed);
 	}
 
