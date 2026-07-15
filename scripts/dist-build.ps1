@@ -7,6 +7,9 @@ Interactive helper for producing a small diagnostic distribution zip. The zip
 contains the unstripped executable, its GNU debug companion PDB, and
 changelog-bfe.txt.
 
+Package names use:
+DCPlusPlus-Experimental-VERSION-COMPILER-[Release|Debug]-MSVCRT-gitrev.zip
+
 By default the script prompts for the build configuration and writes packages
 to the root-level dist directory. It can also be used non-interactively:
 
@@ -21,6 +24,8 @@ param(
 	[string]$OutputDirectory,
 
 	[string]$SConsCommand = "scons",
+
+	[string]$CompilerLabel,
 
 	[switch]$NoBuild,
 
@@ -176,6 +181,40 @@ function Get-GitRevision {
 	}
 }
 
+function ConvertTo-PackageToken {
+	param(
+		[string]$Value
+	)
+
+	$token = $Value.Trim() -replace '[^\w.-]+', '-'
+	$token = $token.Trim("-")
+	if([string]::IsNullOrWhiteSpace($token)) {
+		throw "Package token cannot be empty."
+	}
+	return $token
+}
+
+function Get-CompilerLabel {
+	$compilerCandidates = @(
+		"x86_64-w64-mingw32-g++",
+		"g++"
+	)
+
+	foreach($compiler in $compilerCandidates) {
+		$command = Get-Command $compiler -ErrorAction SilentlyContinue
+		if($null -eq $command) {
+			continue
+		}
+
+		$version = (& $command.Source -dumpfullversion -dumpversion 2>$null | Select-Object -First 1)
+		if($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($version)) {
+			return ConvertTo-PackageToken -Value "MinGW-w64-$($version.Trim())"
+		}
+	}
+
+	throw "Unable to determine MinGW compiler version. Pass -CompilerLabel to set it explicitly."
+}
+
 function Get-PackageConfigurationName {
 	param(
 		[string]$Mode
@@ -223,6 +262,7 @@ function New-DistPackage {
 		[string]$Mode,
 		[string]$OutputRoot,
 		[string]$VersionNumber,
+		[string]$CompilerName,
 		[string]$GitRevision,
 		[bool]$OverwriteExisting
 	)
@@ -238,7 +278,7 @@ function New-DistPackage {
 	Assert-RequiredFile -Path $changelogPath -Description "BFE changelog"
 
 	$configurationName = Get-PackageConfigurationName -Mode $Mode
-	$zipName = "DCPlusPlus-Experimental-$VersionNumber-$configurationName-MSVCRT-$GitRevision.zip"
+	$zipName = "DCPlusPlus-Experimental-$VersionNumber-$CompilerName-$configurationName-MSVCRT-$GitRevision.zip"
 	$zipPath = Join-Path $OutputRoot $zipName
 	$stageDir = Join-Path $OutputRoot ".stage-$buildName-$GitRevision"
 
@@ -282,6 +322,11 @@ if([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 $OutputDirectory = Resolve-OutputDirectory -Path $OutputDirectory -RepoRoot $repoRoot
 $versionNumber = Get-VersionNumber -RepoRoot $repoRoot
+$compilerName = if([string]::IsNullOrWhiteSpace($CompilerLabel)) {
+	Get-CompilerLabel
+} else {
+	ConvertTo-PackageToken -Value $CompilerLabel
+}
 $gitRevision = Get-GitRevision -RepoRoot $repoRoot
 
 $runBuild = -not $NoBuild
@@ -296,7 +341,7 @@ foreach($mode in $modes) {
 	if($runBuild) {
 		Invoke-DistBuild -RepoRoot $repoRoot -Mode $mode -SCons $SConsCommand
 	}
-	$packages += New-DistPackage -RepoRoot $repoRoot -Mode $mode -OutputRoot $OutputDirectory -VersionNumber $versionNumber -GitRevision $gitRevision -OverwriteExisting ([bool]$Force)
+	$packages += New-DistPackage -RepoRoot $repoRoot -Mode $mode -OutputRoot $OutputDirectory -VersionNumber $versionNumber -CompilerName $compilerName -GitRevision $gitRevision -OverwriteExisting ([bool]$Force)
 }
 
 Write-Host ""
