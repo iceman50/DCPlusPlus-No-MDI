@@ -178,6 +178,10 @@ void HashManager::HashStore::createSchema() {
 		"FOREIGN KEY(root) REFERENCES trees(root) ON UPDATE CASCADE ON DELETE CASCADE"
 		") WITHOUT ROWID;"
 		"CREATE INDEX IF NOT EXISTS idx_hash_files_root ON files(root);"
+		"CREATE TABLE IF NOT EXISTS metadata ("
+		"key TEXT PRIMARY KEY NOT NULL,"
+		"value TEXT NOT NULL"
+		") WITHOUT ROWID;"
 	);
 
 	migrateSchema(getSchemaVersion());
@@ -221,6 +225,32 @@ bool HashManager::HashStore::hasDbData() {
 		"EXISTS(SELECT 1 FROM files LIMIT 1)"
 	);
 	return stmt.step() && stmt.columnInt(0) != 0;
+}
+
+string HashManager::HashStore::getMetadata(const string& key) {
+	auto stmt = db.prepare("SELECT value FROM metadata WHERE key=?1");
+	stmt.bind(1, key);
+	return stmt.step() ? stmt.columnText(0) : string();
+}
+
+void HashManager::HashStore::setMetadata(const string& key, const string& value) {
+	auto stmt = db.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES(?1, ?2)");
+	stmt.bind(1, key);
+	stmt.bind(2, value);
+	stmt.stepDone();
+}
+
+bool HashManager::HashStore::isLegacyMigrationComplete() {
+	return getMetadata("legacy_migration_complete") == "1";
+}
+
+void HashManager::HashStore::markLegacyMigrationComplete(uint64_t migratedFiles, uint64_t migratedTrees) {
+	setMetadata("legacy_migration_complete", "1");
+	setMetadata("legacy_migration_time", std::to_string(GET_TIME()));
+	setMetadata("legacy_migrated_files", std::to_string(migratedFiles));
+	setMetadata("legacy_migrated_trees", std::to_string(migratedTrees));
+	setMetadata("legacy_index_file", "HashIndex.xml");
+	setMetadata("legacy_data_file", "HashData.dat");
 }
 
 void HashManager::HashStore::ensureDbOpen() {
@@ -574,6 +604,14 @@ string HashManager::HashStore::getIndexFile() { return Util::getPath(Util::PATH_
 string HashManager::HashStore::getDataFile() { return Util::getPath(Util::PATH_USER_CONFIG) + "HashData.dat"; }
 string HashManager::HashStore::getDbFile() { return Util::getPath(Util::PATH_USER_CONFIG) + "HashStore.sqlite3"; }
 
+string HashManager::HashStore::getMigratedFileName(const string& fileName) {
+	auto target = fileName + ".migrated";
+	if(File::getSize(target) == -1) {
+		return target;
+	}
+	return target + "." + std::to_string(GET_TIME());
+}
+
 class HashLoader: public SimpleXMLReader::CallBack {
 public:
 	HashLoader(HashManager::HashStore& s, const CountedInputStream<false>& countedStream, uint64_t fileSize, function<void (float)> progressF) :
@@ -669,10 +707,10 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 	progressF(1);
 }
 
-void HashManager::HashStore::loadLegacy(function<void (float)> progressF) {
+HashManager::HashStore::LegacyLoadResult HashManager::HashStore::loadLegacy(function<void (float)> progressF) {
 	Util::migrate(getIndexFile());
 	if(File::getSize(getIndexFile()) == -1) {
-		return;
+		return LegacyLoadResult::Missing;
 	}
 
 	try {
@@ -680,31 +718,44 @@ void HashManager::HashStore::loadLegacy(function<void (float)> progressF) {
 		CountedInputStream<false> countedStream(&f);
 		HashLoader l(*this, countedStream, f.getSize(), progressF);
 		SimpleXMLReader(&l).parse(countedStream);
+		return LegacyLoadResult::Loaded;
 	} catch (const Exception& e) {
 		logHashStoreWarning(str(F_("Error loading legacy hash database %1%: %2%") % getIndexFile() % e.getError()));
+		return LegacyLoadResult::Failed;
 	}
 }
 
-void HashManager::HashStore::migrateLegacy() {
+bool HashManager::HashStore::migrateLegacy() {
 	if(treeIndex.empty() && fileIndex.empty()) {
-		return;
+		try {
+			SQLiteTransaction transaction(db);
+			markLegacyMigrationComplete(0, 0);
+			transaction.commit();
+			renameLegacyFiles();
+			return true;
+		} catch (const Exception& e) {
+			LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()));
+			return false;
+		}
 	}
 
 	try {
 		flushWrites();
 		unordered_map<TTHValue, TigerTree> validTrees;
-		File dataFile(getDataFile(), File::READ, File::OPEN);
-
 		uint64_t invalidTrees = 0;
-		for(auto i = treeIndex.begin(); i != treeIndex.end();) {
-			TigerTree tree;
-			if(loadLegacyTree(dataFile, i->second, i->first, tree)) {
-				i->second.setIndex(tree.getLeaves().size() == 1 ? SMALL_TREE : 0);
-				validTrees.emplace(i->first, tree);
-				++i;
-			} else {
-				invalidTrees++;
-				i = treeIndex.erase(i);
+
+		{
+			File dataFile(getDataFile(), File::READ, File::OPEN);
+			for(auto i = treeIndex.begin(); i != treeIndex.end();) {
+				TigerTree tree;
+				if(loadLegacyTree(dataFile, i->second, i->first, tree)) {
+					i->second.setIndex(tree.getLeaves().size() == 1 ? SMALL_TREE : 0);
+					validTrees.emplace(i->first, tree);
+					++i;
+				} else {
+					invalidTrees++;
+					i = treeIndex.erase(i);
+				}
 			}
 		}
 
@@ -727,6 +778,7 @@ void HashManager::HashStore::migrateLegacy() {
 			}
 		}
 
+		uint64_t migratedFiles = 0;
 		SQLiteTransaction transaction(db);
 		db.execute("DELETE FROM files");
 		db.execute("DELETE FROM trees");
@@ -739,19 +791,45 @@ void HashManager::HashStore::migrateLegacy() {
 				auto tree = validTrees.find(fi.getRoot());
 				if(tree != validTrees.end()) {
 					writeFileRow(dir + fi.getFileName(), fi.getTimeStamp(), tree->second);
+					migratedFiles++;
 				}
 			}
 		}
+		markLegacyMigrationComplete(migratedFiles, validTrees.size());
 		transaction.commit();
 		if(invalidTrees > 0 || orphanFiles > 0) {
 			logHashStoreWarning(str(F_("Legacy hash database migration skipped %1% invalid trees and %2% file records without matching trees") %
 				invalidTrees % orphanFiles));
 		}
+		renameLegacyFiles();
+		return true;
 	} catch (const Exception& e) {
 		LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()));
 		fileIndex.clear();
 		treeIndex.clear();
+		return false;
 	}
+}
+
+void HashManager::HashStore::renameLegacyFiles() noexcept {
+	auto renameLegacyFile = [](const string& fileName) {
+		if(File::getSize(fileName) == -1) {
+			return;
+		}
+
+		const auto target = getMigratedFileName(fileName);
+		try {
+			File::renameFile(fileName, target);
+			LogManager::getInstance()->message(str(F_("Renamed legacy hash database file %1% to %2% after SQLite migration") %
+				Util::addBrackets(fileName) % Util::addBrackets(target)));
+		} catch (const Exception& e) {
+			logHashStoreWarning(str(F_("Unable to rename legacy hash database file %1% after SQLite migration: %2%") %
+				Util::addBrackets(fileName) % e.getError()));
+		}
+	};
+
+	renameLegacyFile(getIndexFile());
+	renameLegacyFile(getDataFile());
 }
 
 void HashManager::HashStore::load(function<void (float)> progressF) {
@@ -762,9 +840,26 @@ void HashManager::HashStore::load(function<void (float)> progressF) {
 		}
 		if(hasDbData()) {
 			loadDb(progressF);
+			if(!isLegacyMigrationComplete()) {
+				SQLiteTransaction transaction(db);
+				markLegacyMigrationComplete(0, 0);
+				transaction.commit();
+			}
+			renameLegacyFiles();
+		} else if(isLegacyMigrationComplete()) {
+			renameLegacyFiles();
+			progressF(1);
 		} else {
-			loadLegacy(progressF);
-			migrateLegacy();
+			const auto legacyResult = loadLegacy(progressF);
+			if(legacyResult == LegacyLoadResult::Failed) {
+				fileIndex.clear();
+				treeIndex.clear();
+			} else if(migrateLegacy()) {
+				if(legacyResult == LegacyLoadResult::Missing) {
+					LogManager::getInstance()->message(_("No legacy hash database found; SQLite hash database marked as migration complete"));
+				}
+				progressF(1);
+			}
 		}
 	} catch (const Exception& e) {
 		LogManager::getInstance()->message(str(F_("Error loading hash data: %1%") % e.getError()));

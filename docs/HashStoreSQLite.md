@@ -6,10 +6,11 @@ The runtime behavior remains the same as the previous `HashIndex.xml` and `HashD
 
 ## Schema
 
-The database contains two `WITHOUT ROWID` tables:
+The database contains three `WITHOUT ROWID` tables:
 
 * `trees`: one row per TTH root, including file size, block size and the serialized leaf hashes for multi-leaf trees.
 * `files`: one row per hashed file path, including file size, timestamp and the root that points back to `trees`.
+* `metadata`: small key/value records for database state that should survive upgrades, such as whether legacy hash migration has already completed.
 
 Single-leaf trees store a NULL leaf blob because the root is enough to recreate the tree.
 
@@ -17,9 +18,11 @@ Schema version 2 adds a foreign-key relationship from `files.root` to `trees.roo
 
 ## Migration
 
-On startup, DC++ opens `HashStore.sqlite3` and creates the schema if needed. If the SQLite database is empty, it loads the legacy `HashIndex.xml` and `HashData.dat` files, verifies each tree, drops orphaned file records and writes the valid entries into SQLite inside one transaction.
+On startup, DC++ opens `HashStore.sqlite3` and creates the schema if needed. If the SQLite database is empty and legacy migration has not already completed, it loads the legacy `HashIndex.xml` and `HashData.dat` files, verifies each tree, drops orphaned file records and writes the valid entries into SQLite inside one transaction.
 
-The legacy files are not deleted by migration. Keeping them makes downgrade or manual recovery easier, but new hash updates are written only to SQLite.
+Successful migration writes a `legacy_migration_complete` marker into the metadata table. Existing SQLite databases from earlier builds are also marked complete after they load successfully so stale legacy files cannot be imported over newer SQLite data on a later startup.
+
+After a successful legacy import, `HashIndex.xml` and `HashData.dat` are renamed to `.migrated` files. The same cleanup is also applied when an existing SQLite database is accepted as authoritative or when the migration-complete marker already exists but unrenamed legacy files are still present. The old files are not deleted, which keeps manual recovery possible, but the rename prevents repeated migration work and avoids accidentally treating stale legacy data as active. If migration fails because the old files are corrupt or incomplete, DC++ leaves them in place and logs the failure.
 
 ## Rebuild
 
@@ -53,6 +56,7 @@ HashStore writes warnings and errors to the system log when it cannot safely use
 * Invalid tree metadata, missing leaf data, malformed leaf blobs and root mismatches.
 * Invalid file records and file rows whose root has no matching tree.
 * Legacy migration entries that are skipped because the old data cannot be verified.
+* Legacy hash database files that are renamed after successful migration or cannot be renamed.
 * Failures while removing stale hash database entries after a file changed.
 * Failed integrity checks and failed maintenance actions.
 

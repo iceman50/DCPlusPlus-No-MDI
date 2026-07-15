@@ -168,6 +168,12 @@ private:
 		int64_t getBlockSize(const TTHValue& root) const;
 		bool isDirty() { return dirty; }
 	private:
+		enum class LegacyLoadResult {
+			Missing,
+			Loaded,
+			Failed
+		};
+
 		/** Root -> tree mapping info, we assume there's only one tree for each root (a collision would mean we've broken tiger...) */
 		struct TreeInfo {
 			TreeInfo() : size(0), index(0), blockSize(0) { }
@@ -212,11 +218,17 @@ private:
 		int getSchemaVersion();
 		void migrateSchema(int version);
 		bool hasDbData();
+		// Keeps migration state independent from hash rows so empty SQLite stores don't re-import stale legacy files.
+		string getMetadata(const string& key);
+		void setMetadata(const string& key, const string& value);
+		bool isLegacyMigrationComplete();
+		void markLegacyMigrationComplete(uint64_t migratedFiles, uint64_t migratedTrees);
 		void ensureDbOpen();
 
 		void loadDb(function<void (float)> progressF);
-		void loadLegacy(function<void (float)> progressF);
-		void migrateLegacy();
+		LegacyLoadResult loadLegacy(function<void (float)> progressF);
+		bool migrateLegacy();
+		void renameLegacyFiles() noexcept;
 
 		void saveFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth);
 		void removeFile(const string& aFileName) noexcept;
@@ -235,6 +247,7 @@ private:
 		static string getIndexFile();
 		static string getDataFile();
 		static string getDbFile();
+		static string getMigratedFileName(const string& fileName);
 	};
 
 	friend class HashLoader;

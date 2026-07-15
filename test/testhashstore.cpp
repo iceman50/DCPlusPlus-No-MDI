@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 #define private public
 #include <dcpp/HashManager.h>
@@ -17,6 +18,25 @@
 using namespace dcpp;
 
 namespace {
+
+class LogCapture : public LogManagerListener {
+public:
+	void on(Message, time_t, const string& message) noexcept override {
+		messages.push_back(message);
+	}
+
+	bool contains(const string& text) const {
+		for(const auto& message: messages) {
+			if(message.find(text) != string::npos) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+private:
+	std::vector<string> messages;
+};
 
 class HashStoreTest : public ::testing::Test {
 public:
@@ -73,6 +93,12 @@ public:
 	static int scalarInt(SQLiteDB& db, const char* sql) {
 		auto stmt = db.prepare(sql);
 		return stmt.step() ? stmt.columnInt(0) : 0;
+	}
+
+	static string metadataValue(SQLiteDB& db, const string& key) {
+		auto stmt = db.prepare("SELECT value FROM metadata WHERE key=?1");
+		stmt.bind(1, key);
+		return stmt.step() ? stmt.columnText(0) : string();
 	}
 
 	static void insertTree(SQLiteDB& db, const TigerTree& tree) {
@@ -278,6 +304,43 @@ TEST_F(HashStoreTest, v1_sqlite_schema_is_migrated_and_orphans_are_dropped) {
 	EXPECT_EQ(1, scalarInt(db, "SELECT COUNT(*) FROM files"));
 	EXPECT_EQ(1, scalarInt(db, "SELECT COUNT(*) FROM trees"));
 	EXPECT_EQ(2, scalarInt(db, "PRAGMA user_version"));
+	EXPECT_EQ("1", metadataValue(db, "legacy_migration_complete"));
+}
+
+TEST_F(HashStoreTest, existing_sqlite_data_is_marked_as_migrated) {
+	const auto fileName = path("existing-sqlite.bin");
+	const auto legacyName = path("stale-legacy.bin");
+	const uint32_t timeStamp = 44444;
+	const auto tree = makeTree(2048);
+	const auto legacyTree = makeTree(4097);
+
+	{
+		HashManager::HashStore store;
+		store.load([](float) {});
+		store.addFile(fileName, timeStamp, tree, true);
+		store.save();
+	}
+
+	{
+		SQLiteDB db(path("HashStore.sqlite3"));
+		db.execute("DELETE FROM metadata WHERE key LIKE 'legacy_migration_%'");
+	}
+
+	writeLegacyStore(configPath, legacyName, timeStamp + 1, legacyTree);
+
+	HashManager::HashStore store;
+	store.load([](float) {});
+	EXPECT_TRUE(store.getTTH(fileName, tree.getFileSize(), timeStamp));
+	EXPECT_FALSE(store.getTTH(legacyName, legacyTree.getFileSize(), timeStamp + 1));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
+
+	SQLiteDB db(path("HashStore.sqlite3"));
+	EXPECT_EQ("1", metadataValue(db, "legacy_migration_complete"));
+	EXPECT_EQ("0", metadataValue(db, "legacy_migrated_files"));
+	EXPECT_EQ("0", metadataValue(db, "legacy_migrated_trees"));
 }
 
 TEST_F(HashStoreTest, foreign_key_rejects_new_orphan_file_records) {
@@ -343,6 +406,8 @@ TEST_F(HashStoreTest, migrates_legacy_xml_and_dat_store) {
 	const uint32_t timeStamp = 67890;
 	const auto tree = makeTree(4097);
 	writeLegacyStore(configPath, fileName, timeStamp, tree);
+	LogCapture logs;
+	LogManager::getInstance()->addListener(&logs);
 
 	{
 		HashManager::HashStore store;
@@ -351,8 +416,23 @@ TEST_F(HashStoreTest, migrates_legacy_xml_and_dat_store) {
 		ASSERT_TRUE(root);
 		EXPECT_EQ(tree.getRoot(), *root);
 	}
+	LogManager::getInstance()->removeListener(&logs);
 
 	EXPECT_TRUE(std::filesystem::exists(configPath + "HashStore.sqlite3"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
+	EXPECT_TRUE(logs.contains("Renamed legacy hash database file"));
+	EXPECT_TRUE(logs.contains("HashIndex.xml.migrated"));
+	EXPECT_TRUE(logs.contains("HashData.dat.migrated"));
+
+	{
+		SQLiteDB db(path("HashStore.sqlite3"));
+		EXPECT_EQ("1", metadataValue(db, "legacy_migration_complete"));
+		EXPECT_EQ("1", metadataValue(db, "legacy_migrated_files"));
+		EXPECT_EQ("1", metadataValue(db, "legacy_migrated_trees"));
+	}
 
 	{
 		HashManager::HashStore store;
@@ -361,6 +441,31 @@ TEST_F(HashStoreTest, migrates_legacy_xml_and_dat_store) {
 		ASSERT_TRUE(root);
 		EXPECT_EQ(tree.getRoot(), *root);
 	}
+}
+
+TEST_F(HashStoreTest, completed_empty_sqlite_store_does_not_import_later_legacy_files) {
+	{
+		HashManager::HashStore store;
+		store.load([](float) {});
+	}
+
+	const auto fileName = path("late-legacy-file.bin");
+	const uint32_t timeStamp = 78901;
+	const auto tree = makeTree(4097);
+	writeLegacyStore(configPath, fileName, timeStamp, tree);
+
+	HashManager::HashStore store;
+	store.load([](float) {});
+	EXPECT_FALSE(store.getTTH(fileName, tree.getFileSize(), timeStamp));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
+
+	SQLiteDB db(path("HashStore.sqlite3"));
+	EXPECT_EQ("1", metadataValue(db, "legacy_migration_complete"));
+	EXPECT_EQ(0, scalarInt(db, "SELECT COUNT(*) FROM files"));
+	EXPECT_EQ(0, scalarInt(db, "SELECT COUNT(*) FROM trees"));
 }
 
 } // namespace

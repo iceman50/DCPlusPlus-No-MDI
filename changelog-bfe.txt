@@ -2,7 +2,7 @@
 * Replace the About dialog contributor thanks block with build, runtime, OS, memory, compiler and bundled-library diagnostics
 * Fix an About dialog crash in optimized builds when the bundled GeoIP library reports no version string
 * Replace hash database persistence with bundled SQLite storage while preserving existing sharing, search, queue and TTH lookup behavior
-* Migrate existing HashIndex.xml/HashData.dat data into HashStore.sqlite3 on first startup and log invalid, corrupt or orphaned hash records during load, migration and rebuild operations
+* Migrate existing HashIndex.xml/HashData.dat data into HashStore.sqlite3 on first startup, record migration completion metadata, rename migrated legacy files and log invalid, corrupt or orphaned hash records during load, migration and rebuild operations
 * Add SQLite hash database batching, statement reuse, schema migration, foreign-key cleanup, integrity checks, optimize/compact actions and Sharing-page maintenance settings
 * Add unit coverage for SQLite hash persistence, stale hash cleanup, rebuild pruning, legacy migration, schema migration, batching, compacting and corrupt-row handling
 * Add hash-store startup benchmarks and reduce hash/share startup overhead for large shared file sets
