@@ -3,6 +3,7 @@ build/
 **/build/
 out/
 **/out/
+dist/
 bin/
 **/bin/
 obj/
