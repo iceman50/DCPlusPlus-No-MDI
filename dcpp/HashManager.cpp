@@ -34,6 +34,11 @@ namespace {
 void logHashStoreWarning(const string& message) {
 	LogManager::getInstance()->message(message);
 }
+
+uint64_t countRows(SQLiteDB& db, const char* sql) {
+	auto stmt = db.prepare(sql);
+	return stmt.step() ? static_cast<uint64_t>(stmt.columnInt64(0)) : 0;
+}
 }
 
 /* Version history:
@@ -601,6 +606,11 @@ private:
 };
 
 void HashManager::HashStore::loadDb(function<void (float)> progressF) {
+	const auto treeRows = countRows(db, "SELECT COUNT(*) FROM trees");
+	if(treeRows > 0 && treeRows <= static_cast<uint64_t>(treeIndex.max_size())) {
+		treeIndex.reserve(static_cast<size_t>(treeRows));
+	}
+
 	uint64_t invalidTrees = 0;
 	auto trees = db.prepare("SELECT root, size, block_size, leaves IS NULL FROM trees");
 	while(trees.step()) {
@@ -613,7 +623,7 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 		const auto blockSize = trees.columnInt64(2);
 		const auto index = trees.columnInt(3) ? SMALL_TREE : 0;
 		if(size >= 0 && blockSize >= 1024) {
-			treeIndex[root] = TreeInfo(size, index, blockSize);
+			treeIndex.emplace(root, TreeInfo(size, index, blockSize));
 		} else {
 			invalidTrees++;
 		}
@@ -622,6 +632,8 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 	uint64_t invalidFiles = 0;
 	uint64_t orphanFiles = 0;
 	auto files = db.prepare("SELECT path, timestamp, root FROM files ORDER BY path");
+	string lastPath;
+	vector<FileInfo>* currentFileList = nullptr;
 	uint64_t loaded = 0;
 	while(files.step()) {
 		auto file = files.columnText(0);
@@ -638,7 +650,12 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 		}
 
 		auto fname = Util::getFileName(file), fpath = Util::getFilePath(file);
-		fileIndex[fpath].emplace_back(fname, root, timeStamp, false);
+		if(!currentFileList || fpath != lastPath) {
+			auto result = fileIndex.emplace(fpath, decltype(fileIndex)::mapped_type());
+			lastPath = std::move(fpath);
+			currentFileList = &result.first->second;
+		}
+		currentFileList->emplace_back(std::move(fname), root, timeStamp, false);
 		if((++loaded % 1024) == 0) {
 			progressF(0);
 		}

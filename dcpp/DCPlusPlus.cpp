@@ -123,7 +123,7 @@ void load(function<void (const string&)> stepF, function<void (float)> progressF
 	HashManager::getInstance()->startup(progressF);
 
 	announce(_("Shared Files"));
-	ShareManager::getInstance()->refresh(true, false, true, progressF);
+	ShareManager::getInstance()->startupRefresh(progressF);
 
 	announce(_("Download Queue"));
 	QueueManager::getInstance()->loadQueue(progressF);

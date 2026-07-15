@@ -126,6 +126,13 @@ remove(0)
 		}
 
 		{
+			auto row = cur->addChild(Grid::Seed(1, 1));
+			row->column(0).mode = GridInfo::FILL;
+			auto cache = row->addChild(CheckBox::Seed(T_("Use cached share tree on startup")));
+			items.emplace_back(cache, SettingsManager::SHARE_CACHE, PropPage::T_BOOL);
+		}
+
+		{
 			auto row = cur->addChild(Grid::Seed(1, 4));
 			row->column(3).mode = GridInfo::FILL;
 			row->addChild(Button::Seed(T_("&Verify")))->onClicked([this] { handleVerifyHashDbClicked(false); });

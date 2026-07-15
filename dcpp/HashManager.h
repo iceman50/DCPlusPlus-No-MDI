@@ -181,8 +181,8 @@ private:
 		/** File -> root mapping info */
 		struct FileInfo {
 		public:
-			FileInfo(const string& aFileName, const TTHValue& aRoot, uint32_t aTimeStamp, bool aUsed) :
-				fileName(aFileName), root(aRoot), timeStamp(aTimeStamp), used(aUsed) { }
+			FileInfo(string aFileName, const TTHValue& aRoot, uint32_t aTimeStamp, bool aUsed) :
+				fileName(std::move(aFileName)), root(aRoot), timeStamp(aTimeStamp), used(aUsed) { }
 
 			bool operator==(const string& name) { return name == fileName; }
 

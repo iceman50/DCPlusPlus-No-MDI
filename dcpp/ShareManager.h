@@ -60,6 +60,8 @@ class Client;
 class File;
 class OutputStream;
 class MemoryInputStream;
+class SQLiteDB;
+class SQLiteStatement;
 
 struct ShareLoader;
 class ShareManager : public Singleton<ShareManager>, private SettingsManagerListener, private Thread, private TimerManagerListener,
@@ -87,6 +89,8 @@ public:
 	optional<TTHValue> getTTH(const string& virtualFile, const string& hubUrl) const;
 
 	void refresh(bool dirs = false, bool aUpdate = true, bool block = false, function<void (float)> progressF = nullptr) noexcept;
+	/** Load a validated cached share tree when possible, then refresh the real filesystem in the background. */
+	void startupRefresh(function<void (float)> progressF = nullptr) noexcept;
 	void setDirty() { xmlDirty = true; }
 
 	SearchResultList search(const StringList& adcParams, size_t maxResults) noexcept;
@@ -200,6 +204,7 @@ private:
 		static Ptr create(const string& aName, const Ptr& aParent = Ptr()) { return Ptr(new Directory(aName, aParent)); }
 
 		const string& getRealName() const noexcept;
+		const optional<string>& getRealNameOverride() const noexcept { return realName; }
 		template<typename SetT> void setRealName(SetT&& realName) noexcept { this->realName = std::forward<SetT>(realName); }
 
 		string getADCPath() const noexcept;
@@ -315,7 +320,8 @@ private:
 	void updateFilterCache(const std::string& strSetting, std::list<StringMatch>& lst);
 	void updateFilterCache(const std::string& strSetting, const std::string& strExtraPattern, bool escapeDot, std::list<StringMatch>& lst);
 
-	void rebuildIndices();
+	/** Rebuild TTH and bloom indexes after replacing the share tree; expectedFiles pre-sizes large TTH maps. */
+	void rebuildIndices(size_t expectedFiles = 0);
 
 	void updateIndices(Directory& aDirectory);
 	void updateIndices(Directory& dir, const decltype(std::declval<Directory>().files.begin())& i);
@@ -337,6 +343,20 @@ private:
 
 	virtual int run();
 	void runRefresh(function<void (float)> progressF = nullptr);
+
+	/** Return the per-profile SQLite snapshot path for cached share metadata. */
+	string getShareCacheFile() const;
+	/** Hash the configured shares and share-affecting settings used to validate a snapshot. */
+	string getShareCacheFingerprint() const;
+	/** Try to load a complete, validated share snapshot without changing state on failure. */
+	bool loadShareCache() noexcept;
+	/** Persist the current in-memory share tree as one transaction for the next startup. */
+	void saveShareCache() noexcept;
+	/** Create or upgrade the share-cache schema; destructive migrations should use a new schema version. */
+	void createShareCacheSchema(SQLiteDB& db);
+	/** Recursively write one directory subtree using stable parent ids for fast parent-ordered loading. */
+	void saveShareCacheDirectory(SQLiteStatement& dirStmt, SQLiteStatement& fileStmt, const Directory& dir,
+		optional<int64_t> parentId, int64_t& nextId, uint64_t& directoryCount, uint64_t& fileCount) const;
 
 	// QueueManagerListener
 	virtual void on(QueueManagerListener::FileMoved, const string& realPath) noexcept;

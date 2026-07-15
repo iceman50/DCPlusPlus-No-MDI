@@ -33,6 +33,7 @@
 #include "ScopedFunctor.h"
 #include "SearchResult.h"
 #include "SimpleXML.h"
+#include "SQLiteDB.h"
 #include "StringTokenizer.h"
 #include "Transfer.h"
 #include "UserConnection.h"
@@ -56,6 +57,59 @@
 namespace dcpp {
 
 using std::numeric_limits;
+
+namespace {
+const int SHARE_CACHE_SCHEMA_VERSION = 1;
+const size_t MAX_SHARE_CACHE_NAME = 4096;
+const size_t MAX_SHARE_CACHE_PATH = 32768;
+
+// The fingerprint is not a security boundary; it is a compact invalidation key
+// for share roots and settings that change what may be advertised or uploaded.
+void fnvAppend(uint64_t& hash, const string& value) noexcept {
+	for(auto c: value) {
+		hash ^= static_cast<uint8_t>(c);
+		hash *= 1099511628211ULL;
+	}
+	hash ^= 0xff;
+	hash *= 1099511628211ULL;
+}
+
+void fnvAppend(uint64_t& hash, int64_t value) noexcept {
+	fnvAppend(hash, Util::toString(value));
+}
+
+bool hasPathSeparator(const string& value) noexcept {
+	return value.find('\\') != string::npos || value.find('/') != string::npos;
+}
+
+bool isValidCachedName(const string& name) noexcept {
+	return !name.empty() && name.size() <= MAX_SHARE_CACHE_NAME && name != "." && name != ".." && !hasPathSeparator(name);
+}
+
+bool isValidCachedPath(const string& path) noexcept {
+	return !path.empty() && path.size() <= MAX_SHARE_CACHE_PATH;
+}
+
+bool isUnderSharedRoot(const string& path, const map<string, string>& shares) noexcept {
+	for(const auto& share: shares) {
+		if(Util::strnicmp(path, share.first, share.first.size()) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+uint64_t countRows(SQLiteDB& db, const char* sql) {
+	auto stmt = db.prepare(sql);
+	return stmt.step() ? static_cast<uint64_t>(stmt.columnInt64(0)) : 0;
+}
+
+string getMetadata(SQLiteDB& db, const string& key) {
+	auto stmt = db.prepare("SELECT value FROM metadata WHERE key=?1");
+	stmt.bind(1, key);
+	return stmt.step() ? stmt.columnText(0) : string();
+}
+}
 
 std::atomic_flag ShareManager::refreshing = ATOMIC_FLAG_INIT;
 
@@ -965,8 +1019,11 @@ void ShareManager::updateIndices(Directory& dir) {
 	}
 }
 
-void ShareManager::rebuildIndices() {
+void ShareManager::rebuildIndices(size_t expectedFiles) {
 	tthIndex.clear();
+	if(expectedFiles > 0) {
+		tthIndex.reserve(expectedFiles);
+	}
 	bloom.clear();
 
 	for(auto& i: directories) {
@@ -999,6 +1056,327 @@ void ShareManager::updateIndices(Directory& dir, const decltype(std::declval<Dir
 
 	tthIndex[*f.tth] = &f;
 	bloom.add(Text::toLower(f.getName()));
+}
+
+string ShareManager::getShareCacheFile() const {
+	return Util::getPath(Util::PATH_USER_CONFIG) + "ShareCache.sqlite3";
+}
+
+string ShareManager::getShareCacheFingerprint() const {
+	uint64_t hash = 1469598103934665603ULL;
+	fnvAppend(hash, string("ShareCache.v1"));
+
+	for(const auto& share: shares) {
+		fnvAppend(hash, share.first);
+		fnvAppend(hash, share.second);
+	}
+
+	fnvAppend(hash, SETTING(SHARE_HIDDEN) ? 1 : 0);
+	fnvAppend(hash, SETTING(FOLLOW_LINKS) ? 1 : 0);
+	fnvAppend(hash, SETTING(LIST_DUPES) ? 1 : 0);
+	fnvAppend(hash, SETTING(SHARING_SKIPLIST_REGEX));
+	fnvAppend(hash, SETTING(SHARING_SKIPLIST_EXTENSIONS));
+	fnvAppend(hash, SETTING(SHARING_SKIPLIST_PATHS));
+	fnvAppend(hash, SETTING(SHARING_SKIPLIST_MINSIZE));
+	fnvAppend(hash, SETTING(SHARING_SKIPLIST_MAXSIZE));
+	fnvAppend(hash, SETTING(TEMP_DOWNLOAD_DIRECTORY));
+	fnvAppend(hash, SETTING(TLS_PRIVATE_KEY_FILE));
+
+	return std::to_string(hash);
+}
+
+void ShareManager::createShareCacheSchema(SQLiteDB& db) {
+	db.execute(
+		"CREATE TABLE IF NOT EXISTS metadata ("
+		"key TEXT PRIMARY KEY NOT NULL,"
+		"value TEXT NOT NULL"
+		") WITHOUT ROWID;"
+		"CREATE TABLE IF NOT EXISTS directories ("
+		"id INTEGER PRIMARY KEY NOT NULL,"
+		"parent_id INTEGER REFERENCES directories(id) ON DELETE CASCADE,"
+		"name TEXT NOT NULL CHECK(length(name) > 0),"
+		"real_name TEXT"
+		");"
+		"CREATE INDEX IF NOT EXISTS idx_share_cache_directories_parent ON directories(parent_id);"
+		"CREATE TABLE IF NOT EXISTS files ("
+		"id INTEGER PRIMARY KEY NOT NULL,"
+		"directory_id INTEGER NOT NULL REFERENCES directories(id) ON DELETE CASCADE,"
+		"name TEXT NOT NULL CHECK(length(name) > 0),"
+		"size INTEGER NOT NULL CHECK(size >= 0),"
+		"tth TEXT CHECK(tth IS NULL OR length(tth) = 39),"
+		"real_path TEXT"
+		");"
+		"CREATE INDEX IF NOT EXISTS idx_share_cache_files_directory ON files(directory_id);"
+		"CREATE INDEX IF NOT EXISTS idx_share_cache_files_tth ON files(tth);"
+		"PRAGMA user_version = 1;"
+	);
+}
+
+bool ShareManager::loadShareCache() noexcept {
+	if(!SETTING(SHARE_CACHE)) {
+		return false;
+	}
+	// Queue duplicate removal must see the freshly scanned filesystem; a stale
+	// snapshot could otherwise remove valid queued files during startup.
+	if(SETTING(DONT_DL_ALREADY_SHARED)) {
+		LogManager::getInstance()->message(_("Share cache skipped because queued duplicate removal requires a fresh share scan"));
+		return false;
+	}
+
+	const auto cacheFile = getShareCacheFile();
+	if(File::getSize(cacheFile) < 0) {
+		LogManager::getInstance()->message(_("Share cache not found; running full file list refresh"));
+		return false;
+	}
+
+	try {
+		SQLiteDB db(cacheFile);
+		auto versionStmt = db.prepare("PRAGMA user_version");
+		const auto version = versionStmt.step() ? versionStmt.columnInt(0) : 0;
+		if(version != SHARE_CACHE_SCHEMA_VERSION) {
+			LogManager::getInstance()->message(_("Share cache schema version does not match; running full file list refresh"));
+			return false;
+		}
+
+		string expectedFingerprint;
+		std::set<string, noCaseStringLess> expectedRoots;
+		{
+			Lock l(cs);
+			expectedFingerprint = getShareCacheFingerprint();
+			for(const auto& share: shares) {
+				expectedRoots.insert(share.second);
+			}
+		}
+
+		if(getMetadata(db, "fingerprint") != expectedFingerprint) {
+			LogManager::getInstance()->message(_("Share cache does not match current sharing settings; running full file list refresh"));
+			return false;
+		}
+
+		const auto directoryRows = countRows(db, "SELECT COUNT(*) FROM directories");
+		const auto fileRows = countRows(db, "SELECT COUNT(*) FROM files");
+		unordered_map<int64_t, Directory::Ptr> byId;
+		if(directoryRows > 0 && directoryRows <= static_cast<uint64_t>(byId.max_size())) {
+			byId.reserve(static_cast<size_t>(directoryRows));
+		}
+
+		unordered_map<string, Directory::Ptr, noCaseStringHash, noCaseStringEq> newDirectories;
+		if(!expectedRoots.empty()) {
+			newDirectories.reserve(expectedRoots.size());
+		}
+
+		auto dirs = db.prepare("SELECT id, parent_id, name, real_name FROM directories ORDER BY id");
+		while(dirs.step()) {
+			const auto id = dirs.columnInt64(0);
+			if(id <= 0 || byId.find(id) != byId.end()) {
+				throw ShareException(_("Invalid directory record in share cache"));
+			}
+
+			auto name = dirs.columnText(2);
+			if(!isValidCachedName(name)) {
+				throw ShareException(_("Invalid directory name in share cache"));
+			}
+
+			auto dir = Directory::create(name);
+			if(!dirs.columnIsNull(3)) {
+				auto realName = dirs.columnText(3);
+				if(!isValidCachedName(realName)) {
+					throw ShareException(_("Invalid real directory name in share cache"));
+				}
+				dir->setRealName(std::move(realName));
+			}
+
+			if(dirs.columnIsNull(1)) {
+				if(expectedRoots.find(name) == expectedRoots.end()) {
+					throw ShareException(_("Unexpected root directory in share cache"));
+				}
+				if(!newDirectories.emplace(name, dir).second) {
+					throw ShareException(_("Duplicate root directory in share cache"));
+				}
+			} else {
+				const auto parentId = dirs.columnInt64(1);
+				auto parent = byId.find(parentId);
+				if(parent == byId.end()) {
+					throw ShareException(_("Directory parent missing from share cache"));
+				}
+				dir->setParent(parent->second.get());
+				if(!parent->second->directories.emplace(name, dir).second) {
+					throw ShareException(_("Duplicate child directory in share cache"));
+				}
+			}
+			byId.emplace(id, dir);
+		}
+
+		if(newDirectories.size() != expectedRoots.size()) {
+			throw ShareException(_("Share cache is missing a configured root directory"));
+		}
+
+		auto files = db.prepare("SELECT directory_id, name, size, tth, real_path FROM files ORDER BY directory_id, name");
+		while(files.step()) {
+			auto dir = byId.find(files.columnInt64(0));
+			if(dir == byId.end()) {
+				throw ShareException(_("File parent missing from share cache"));
+			}
+
+			auto name = files.columnText(1);
+			const auto size = files.columnInt64(2);
+			if(!isValidCachedName(name) || size < 0) {
+				throw ShareException(_("Invalid file record in share cache"));
+			}
+
+			optional<TTHValue> root;
+			if(!files.columnIsNull(3)) {
+				auto tth = files.columnText(3);
+				if(tth.size() != 39) {
+					throw ShareException(_("Invalid TTH value in share cache"));
+				}
+				root = TTHValue(tth);
+			}
+
+			Directory::File file(name, size, dir->second, root);
+			if(!files.columnIsNull(4)) {
+				auto realPath = files.columnText(4);
+				Lock l(cs);
+				if(!isValidCachedPath(realPath) || !isUnderSharedRoot(realPath, shares)) {
+					throw ShareException(_("Invalid real file path in share cache"));
+				}
+				file.realPath = std::move(realPath);
+			}
+
+			dir->second->files.insert(std::move(file));
+		}
+
+		{
+			Lock l(cs);
+			directories.swap(newDirectories);
+			lastFullUpdate = GET_TICK();
+			xmlDirty = true;
+			forceXmlRefresh = true;
+			rebuildIndices(static_cast<size_t>(std::min<uint64_t>(fileRows, static_cast<uint64_t>(tthIndex.max_size()))));
+		}
+
+		LogManager::getInstance()->message(str(F_("Loaded cached share tree from %1% (%2% directories, %3% files)") %
+			Util::addBrackets(cacheFile) % std::to_string(directoryRows) % std::to_string(fileRows)));
+		return true;
+	} catch(const Exception& e) {
+		LogManager::getInstance()->message(str(F_("Error loading share cache %1%: %2%; running full file list refresh") %
+			Util::addBrackets(cacheFile) % e.getError()));
+	} catch(const std::exception& e) {
+		LogManager::getInstance()->message(str(F_("Error loading share cache %1%: %2%; running full file list refresh") %
+			Util::addBrackets(cacheFile) % e.what()));
+	}
+
+	return false;
+}
+
+void ShareManager::saveShareCacheDirectory(SQLiteStatement& dirStmt, SQLiteStatement& fileStmt, const Directory& dir,
+	optional<int64_t> parentId, int64_t& nextId, uint64_t& directoryCount, uint64_t& fileCount) const
+{
+	const auto id = nextId++;
+	dirStmt.bind(1, id);
+	if(parentId) {
+		dirStmt.bind(2, *parentId);
+	} else {
+		dirStmt.bindNull(2);
+	}
+	dirStmt.bind(3, dir.getName());
+	if(dir.getRealNameOverride()) {
+		dirStmt.bind(4, *dir.getRealNameOverride());
+	} else {
+		dirStmt.bindNull(4);
+	}
+	dirStmt.stepDone();
+	dirStmt.reset();
+	dirStmt.clearBindings();
+	directoryCount++;
+
+	for(const auto& file: dir.files) {
+		fileStmt.bind(1, id);
+		fileStmt.bind(2, file.getName());
+		fileStmt.bind(3, file.getSize());
+		if(file.tth) {
+			fileStmt.bind(4, file.tth->toBase32());
+		} else {
+			fileStmt.bindNull(4);
+		}
+		if(file.realPath) {
+			fileStmt.bind(5, *file.realPath);
+		} else {
+			fileStmt.bindNull(5);
+		}
+		fileStmt.stepDone();
+		fileStmt.reset();
+		fileStmt.clearBindings();
+		fileCount++;
+	}
+
+	for(const auto& child: dir.directories) {
+		saveShareCacheDirectory(dirStmt, fileStmt, *child.second, id, nextId, directoryCount, fileCount);
+	}
+}
+
+void ShareManager::saveShareCache() noexcept {
+	if(!SETTING(SHARE_CACHE)) {
+		return;
+	}
+
+	const auto cacheFile = getShareCacheFile();
+	try {
+		SQLiteDB db(cacheFile);
+		createShareCacheSchema(db);
+		// Rebuild the snapshot atomically so interrupted saves never become a
+		// valid partial cache on the next startup.
+		SQLiteTransaction transaction(db);
+		db.execute("DELETE FROM metadata;DELETE FROM files;DELETE FROM directories;");
+
+		auto metaStmt = db.prepare("INSERT INTO metadata(key, value) VALUES(?1, ?2)");
+		auto putMeta = [&metaStmt](const string& key, const string& value) {
+			metaStmt.bind(1, key);
+			metaStmt.bind(2, value);
+			metaStmt.stepDone();
+			metaStmt.reset();
+			metaStmt.clearBindings();
+		};
+
+		uint64_t directoryCount = 0;
+		uint64_t fileCount = 0;
+		{
+			Lock l(cs);
+			putMeta("schema", Util::toString(SHARE_CACHE_SCHEMA_VERSION));
+			putMeta("fingerprint", getShareCacheFingerprint());
+			putMeta("app", APPNAME " " VERSIONSTRING);
+
+			auto dirStmt = db.prepare("INSERT INTO directories(id, parent_id, name, real_name) VALUES(?1, ?2, ?3, ?4)");
+			auto fileStmt = db.prepare("INSERT INTO files(directory_id, name, size, tth, real_path) VALUES(?1, ?2, ?3, ?4, ?5)");
+			int64_t nextId = 1;
+			for(const auto& dir: directories) {
+				saveShareCacheDirectory(dirStmt, fileStmt, *dir.second, nullopt, nextId, directoryCount, fileCount);
+			}
+		}
+
+		putMeta("directories", std::to_string(directoryCount));
+		putMeta("files", std::to_string(fileCount));
+		transaction.commit();
+		db.execute("PRAGMA optimize;PRAGMA wal_checkpoint(PASSIVE);");
+		LogManager::getInstance()->message(str(F_("Saved share cache %1% (%2% directories, %3% files)") %
+			Util::addBrackets(cacheFile) % std::to_string(directoryCount) % std::to_string(fileCount)));
+	} catch(const Exception& e) {
+		LogManager::getInstance()->message(str(F_("Error saving share cache %1%: %2%") % Util::addBrackets(cacheFile) % e.getError()));
+	} catch(const std::exception& e) {
+		LogManager::getInstance()->message(str(F_("Error saving share cache %1%: %2%") % Util::addBrackets(cacheFile) % e.what()));
+	}
+}
+
+void ShareManager::startupRefresh(function<void (float)> progressF) noexcept {
+	if(loadShareCache()) {
+		// Cached data is immediately usable for share size, search, file lists
+		// and upload path resolution; the background refresh reconciles it with
+		// the live filesystem and broadcasts updated hub info when it finishes.
+		refresh(true, true, false);
+		return;
+	}
+
+	refresh(true, false, true, progressF);
 }
 
 void ShareManager::refresh(bool dirs, bool aUpdate, bool block, function<void (float)> progressF) noexcept {
@@ -1046,6 +1424,7 @@ void ShareManager::runRefresh(function<void (float)> progressF) {
 		refreshDirs = false;
 
 	std::shared_ptr<HashManager::HashPauser> pauser;
+	bool refreshedDirs = false;
 		
 	if(refreshDirs) {
 		pauser = std::make_shared<HashManager::HashPauser>();
@@ -1084,6 +1463,7 @@ void ShareManager::runRefresh(function<void (float)> progressF) {
 			rebuildIndices();
 		}
 		refreshDirs = false;
+		refreshedDirs = true;
 
 		LogManager::getInstance()->message(_("File list refresh finished"));
 	}
@@ -1095,6 +1475,9 @@ void ShareManager::runRefresh(function<void (float)> progressF) {
 	}
 
 	refreshing.clear();
+	if(refreshedDirs) {
+		saveShareCache();
+	}
 }
 
 void ShareManager::getBloom(ByteVector& v, size_t k, size_t m, size_t h) const {

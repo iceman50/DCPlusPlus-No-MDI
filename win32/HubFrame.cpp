@@ -950,6 +950,8 @@ int HubFrame::UserInfo::compareItems(const HubFrame::UserInfo* a, const HubFrame
 void HubFrame::on(Connecting, Client*) noexcept {
 	auto hubUrl = client->getHubUrl();
 	callAsync([this, hubUrl] {
+		clearUserList();
+		clearTaskList();
 		addStatus(str(TF_("Connecting to %1%...") % Text::toT(Util::addBrackets(hubUrl))));
 		setText(Text::toT(hubUrl));
 	});

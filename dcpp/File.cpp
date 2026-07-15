@@ -443,7 +443,7 @@ StringList File::findFiles(const string& path, const string& pattern) {
 FileFindIter::FileFindIter() : handle(INVALID_HANDLE_VALUE) { }
 
 FileFindIter::FileFindIter(const string& path) : handle(INVALID_HANDLE_VALUE) {
-	handle = ::FindFirstFileEx(Text::toT(path).c_str(), FindExInfoStandard, &data,
+	handle = ::FindFirstFileEx(Text::toT(path).c_str(), FindExInfoBasic, &data,
 		FindExSearchNameMatch, nullptr, FIND_FIRST_EX_CASE_SENSITIVE);
 }
 

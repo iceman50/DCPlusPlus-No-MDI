@@ -1233,6 +1233,7 @@ void AdcHub::unknownProtocol(uint32_t target, const string& protocol, const stri
 }
 
 void AdcHub::on(Connected c) noexcept {
+	clearUsers();
 	Client::on(c);
 	resetHBRI();
 

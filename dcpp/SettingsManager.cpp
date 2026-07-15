@@ -126,6 +126,7 @@ const string SettingsManager::settingTags[] =
 	"UsersFilterFavorite", "UsersFilterOnline", "UsersFilterQueue", "UsersFilterWaiting",
 	"RegisterSystemStartup", "DontLogCCPMChat", "AboutCfgDisclaimer", "EnableTaskbarPreview",
 	"EnableSUDP", "BroadDetection", "BroadDetection6", "HashDbVerifyStartup", "HashDbCompactOnRebuild",
+	"ShareCache",
 	"SENTRY",
 	// Int64
 	"TotalUpload", "TotalDownload", "SharingSkiplistMinSize", "SharingSkiplistMaxSize",
@@ -233,6 +234,7 @@ SettingsManager::SettingsManager() {
 	setDefault(MAX_DOWNLOAD_SPEED, 0);
 	setDefault(HASH_DB_VERIFY_STARTUP, false);
 	setDefault(HASH_DB_COMPACT_ON_REBUILD, false);
+	setDefault(SHARE_CACHE, true);
 	setDefault(LOG_DIRECTORY, Util::getPath(Util::PATH_USER_LOCAL) + "Logs" PATH_SEPARATOR_STR);
 	setDefault(LOG_UPLOADS, false);
 	setDefault(LOG_DOWNLOADS, false);
