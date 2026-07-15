@@ -163,6 +163,8 @@ void HashManager::HashStore::openDb() {
 }
 
 void HashManager::HashStore::createSchema() {
+	// Keep table creation idempotent so brand-new databases and older SQLite databases can follow
+	// the same open path before version-specific migrations are considered.
 	db.execute(
 		"CREATE TABLE IF NOT EXISTS trees ("
 		"root BLOB PRIMARY KEY NOT NULL CHECK(length(root) = 24),"
@@ -194,6 +196,8 @@ int HashManager::HashStore::getSchemaVersion() {
 
 void HashManager::HashStore::migrateSchema(int version) {
 	if(version < 2) {
+		// Version 2 adds an enforced files.root -> trees.root relationship. Copying through a
+		// replacement table lets old databases open while dropping orphaned or malformed rows.
 		SQLiteTransaction transaction(db);
 		db.execute(
 			"CREATE TABLE IF NOT EXISTS files_v2 ("
@@ -214,11 +218,15 @@ void HashManager::HashStore::migrateSchema(int version) {
 		);
 		transaction.commit();
 	} else {
+		// Older builds might have created the table but not the index, so keep this repair cheap
+		// and safe for every startup.
 		db.execute("CREATE INDEX IF NOT EXISTS idx_hash_files_root ON files(root);");
 	}
 }
 
 bool HashManager::HashStore::hasDbData() {
+	// The metadata table is intentionally ignored here: an empty database with only migration
+	// metadata should not be treated as containing share hashes.
 	auto stmt = db.prepare(
 		"SELECT "
 		"EXISTS(SELECT 1 FROM trees LIMIT 1) OR "
@@ -228,12 +236,14 @@ bool HashManager::HashStore::hasDbData() {
 }
 
 string HashManager::HashStore::getMetadata(const string& key) {
+	// Missing metadata returns an empty string so callers can use simple equality checks.
 	auto stmt = db.prepare("SELECT value FROM metadata WHERE key=?1");
 	stmt.bind(1, key);
 	return stmt.step() ? stmt.columnText(0) : string();
 }
 
 void HashManager::HashStore::setMetadata(const string& key, const string& value) {
+	// INSERT OR REPLACE keeps metadata writes atomic and avoids needing separate insert/update paths.
 	auto stmt = db.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES(?1, ?2)");
 	stmt.bind(1, key);
 	stmt.bind(2, value);
@@ -245,6 +255,8 @@ bool HashManager::HashStore::isLegacyMigrationComplete() {
 }
 
 void HashManager::HashStore::markLegacyMigrationComplete(uint64_t migratedFiles, uint64_t migratedTrees) {
+	// The marker is the durable decision that SQLite is authoritative. Counters are diagnostic only,
+	// but they make user reports and future migration audits easier to interpret.
 	setMetadata("legacy_migration_complete", "1");
 	setMetadata("legacy_migration_time", std::to_string(GET_TIME()));
 	setMetadata("legacy_migrated_files", std::to_string(migratedFiles));
@@ -605,6 +617,8 @@ string HashManager::HashStore::getDataFile() { return Util::getPath(Util::PATH_U
 string HashManager::HashStore::getDbFile() { return Util::getPath(Util::PATH_USER_CONFIG) + "HashStore.sqlite3"; }
 
 string HashManager::HashStore::getMigratedFileName(const string& fileName) {
+	// Preserve the legacy files for recovery instead of deleting them. If a previous cleanup already
+	// produced a .migrated file, append a timestamp so the rename stays non-destructive.
 	auto target = fileName + ".migrated";
 	if(File::getSize(target) == -1) {
 		return target;
@@ -644,6 +658,8 @@ private:
 };
 
 void HashManager::HashStore::loadDb(function<void (float)> progressF) {
+	// Reserve the tree index when the row count is reasonable; this avoids repeated rehashing for
+	// large hash databases without trusting a corrupt count large enough to exceed container limits.
 	const auto treeRows = countRows(db, "SELECT COUNT(*) FROM trees");
 	if(treeRows > 0 && treeRows <= static_cast<uint64_t>(treeIndex.max_size())) {
 		treeIndex.reserve(static_cast<size_t>(treeRows));
@@ -652,6 +668,8 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 	uint64_t invalidTrees = 0;
 	auto trees = db.prepare("SELECT root, size, block_size, leaves IS NULL FROM trees");
 	while(trees.step()) {
+		// SQLite CHECK constraints protect new writes, but startup still validates rows so older or
+		// manually edited databases cannot poison the in-memory hash index.
 		if(trees.columnBytes(0) != TTHValue::BYTES) {
 			invalidTrees++;
 			continue;
@@ -676,12 +694,16 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 	while(files.step()) {
 		auto file = files.columnText(0);
 		auto timeStamp = static_cast<uint32_t>(files.columnInt64(1));
+		// File rows are skipped unless the path, timestamp and root are all usable by the existing
+		// in-memory lookup contract.
 		if(file.empty() || timeStamp == 0 || files.columnBytes(2) != TTHValue::BYTES) {
 			invalidFiles++;
 			continue;
 		}
 
 		const auto root = TTHValue(static_cast<const uint8_t*>(files.columnBlob(2)));
+		// A file without a valid tree cannot answer TTH or tree requests correctly, so leave it to
+		// normal rehashing instead of exposing a partial record.
 		if(treeIndex.find(root) == treeIndex.end()) {
 			orphanFiles++;
 			continue;
@@ -708,8 +730,10 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 }
 
 HashManager::HashStore::LegacyLoadResult HashManager::HashStore::loadLegacy(function<void (float)> progressF) {
+	// Keep the old Util::migrate behavior for users upgrading from pre-config-path layouts.
 	Util::migrate(getIndexFile());
 	if(File::getSize(getIndexFile()) == -1) {
+		// Missing legacy files are not an error; this is the normal path for fresh SQLite installs.
 		return LegacyLoadResult::Missing;
 	}
 
@@ -720,6 +744,8 @@ HashManager::HashStore::LegacyLoadResult HashManager::HashStore::loadLegacy(func
 		SimpleXMLReader(&l).parse(countedStream);
 		return LegacyLoadResult::Loaded;
 	} catch (const Exception& e) {
+		// A corrupt XML index should not mark migration complete. Leaving the old files untouched
+		// gives the user a chance to inspect or restore them.
 		logHashStoreWarning(str(F_("Error loading legacy hash database %1%: %2%") % getIndexFile() % e.getError()));
 		return LegacyLoadResult::Failed;
 	}
@@ -728,6 +754,8 @@ HashManager::HashStore::LegacyLoadResult HashManager::HashStore::loadLegacy(func
 bool HashManager::HashStore::migrateLegacy() {
 	if(treeIndex.empty() && fileIndex.empty()) {
 		try {
+			// A valid but empty legacy store, or a fresh install with no legacy files, still needs the
+			// completion marker so startup will not retry migration forever.
 			SQLiteTransaction transaction(db);
 			markLegacyMigrationComplete(0, 0);
 			transaction.commit();
@@ -745,10 +773,14 @@ bool HashManager::HashStore::migrateLegacy() {
 		uint64_t invalidTrees = 0;
 
 		{
+			// HashData.dat must be closed before renameLegacyFiles runs on Windows, so constrain the
+			// File handle to this validation block.
 			File dataFile(getDataFile(), File::READ, File::OPEN);
 			for(auto i = treeIndex.begin(); i != treeIndex.end();) {
 				TigerTree tree;
 				if(loadLegacyTree(dataFile, i->second, i->first, tree)) {
+					// Recompute the SMALL_TREE marker from the verified tree rather than trusting
+					// stale XML metadata.
 					i->second.setIndex(tree.getLeaves().size() == 1 ? SMALL_TREE : 0);
 					validTrees.emplace(i->first, tree);
 					++i;
@@ -763,6 +795,8 @@ bool HashManager::HashStore::migrateLegacy() {
 		for(auto i = fileIndex.begin(); i != fileIndex.end();) {
 			auto& fileList = i->second;
 			for(auto j = fileList.begin(); j != fileList.end();) {
+				// Drop file records whose tree failed validation so SQLite never receives rows that
+				// cannot satisfy later tree requests.
 				if(validTrees.find(j->getRoot()) == validTrees.end()) {
 					orphanFiles++;
 					j = fileList.erase(j);
@@ -780,6 +814,8 @@ bool HashManager::HashStore::migrateLegacy() {
 
 		uint64_t migratedFiles = 0;
 		SQLiteTransaction transaction(db);
+		// Replace the SQLite contents atomically so a crash cannot leave a half-migrated hash store
+		// marked as complete.
 		db.execute("DELETE FROM files");
 		db.execute("DELETE FROM trees");
 		for(auto& i: validTrees) {
@@ -804,6 +840,8 @@ bool HashManager::HashStore::migrateLegacy() {
 		renameLegacyFiles();
 		return true;
 	} catch (const Exception& e) {
+		// On failure, keep the legacy files untouched and clear partial memory state; files can be
+		// rehashed normally on the next sharing refresh.
 		LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()));
 		fileIndex.clear();
 		treeIndex.clear();
@@ -814,11 +852,14 @@ bool HashManager::HashStore::migrateLegacy() {
 void HashManager::HashStore::renameLegacyFiles() noexcept {
 	auto renameLegacyFile = [](const string& fileName) {
 		if(File::getSize(fileName) == -1) {
+			// Nothing to clean up for users that never had this legacy file.
 			return;
 		}
 
 		const auto target = getMigratedFileName(fileName);
 		try {
+			// The rename is a safety marker, not data destruction. The system log gives users a clear
+			// audit trail if they later look for the old hash database files.
 			File::renameFile(fileName, target);
 			LogManager::getInstance()->message(str(F_("Renamed legacy hash database file %1% to %2% after SQLite migration") %
 				Util::addBrackets(fileName) % Util::addBrackets(target)));
@@ -839,6 +880,8 @@ void HashManager::HashStore::load(function<void (float)> progressF) {
 			LogManager::getInstance()->message(_("Hash database verification failed during startup; DC++ will rehash files as needed"));
 		}
 		if(hasDbData()) {
+			// Existing SQLite rows always win over legacy files. The metadata marker is backfilled for
+			// databases created by earlier SQLite builds that did not have the metadata table yet.
 			loadDb(progressF);
 			if(!isLegacyMigrationComplete()) {
 				SQLiteTransaction transaction(db);
@@ -847,9 +890,13 @@ void HashManager::HashStore::load(function<void (float)> progressF) {
 			}
 			renameLegacyFiles();
 		} else if(isLegacyMigrationComplete()) {
+			// An empty SQLite store with a completion marker is intentional. Clean up stale legacy files
+			// if they appear later, but do not import them over the completed SQLite state.
 			renameLegacyFiles();
 			progressF(1);
 		} else {
+			// Only databases without rows and without a completion marker are eligible for one-time
+			// legacy XML/DAT import.
 			const auto legacyResult = loadLegacy(progressF);
 			if(legacyResult == LegacyLoadResult::Failed) {
 				fileIndex.clear();

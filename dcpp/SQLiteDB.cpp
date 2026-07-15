@@ -51,6 +51,8 @@ SQLiteDB& SQLiteDB::operator=(SQLiteDB&& rhs) noexcept {
 void SQLiteDB::open(const string& fileName, bool readOnly) {
 	close();
 
+	// Use a fully mutexed private-cache connection because the wrapper may be reached from
+	// different manager paths, while still keeping each database isolated from shared-cache state.
 	const auto flags = (readOnly ? SQLITE_OPEN_READONLY : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)) |
 		SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_PRIVATECACHE;
 
@@ -72,20 +74,28 @@ void SQLiteDB::close() noexcept {
 }
 
 void SQLiteDB::configure() {
+	// Give background maintenance and hash writes time to finish instead of failing immediately when
+	// another connection briefly owns the database lock.
 	sqlite3_busy_timeout(db, 30000);
 
 	int oldValue = 0;
+	// Defensive mode blocks hazardous SQL features such as schema writes through writable_schema.
 	sqlite3_db_config(db, SQLITE_DBCONFIG_DEFENSIVE, 1, &oldValue);
 #ifdef SQLITE_DBCONFIG_TRUSTED_SCHEMA
+	// Treat schema content as untrusted data. The hash store never needs application-defined SQL
+	// functions inside views, triggers or CHECK constraints.
 	sqlite3_db_config(db, SQLITE_DBCONFIG_TRUSTED_SCHEMA, 0, &oldValue);
 #endif
 #ifdef SQLITE_DBCONFIG_ENABLE_TRIGGER
+	// Triggers and views are disabled because all valid hash-store behavior is explicit C++ code.
 	sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_TRIGGER, 0, &oldValue);
 #endif
 #ifdef SQLITE_DBCONFIG_ENABLE_VIEW
 	sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_VIEW, 0, &oldValue);
 #endif
 
+	// Tighten generic SQLite limits to what the hash/share databases actually need. This limits the
+	// blast radius of a corrupt or hostile local database without constraining normal hash records.
 	setLimit(SQLITE_LIMIT_LENGTH, 16 * 1024 * 1024);
 	setLimit(SQLITE_LIMIT_SQL_LENGTH, 64 * 1024);
 	setLimit(SQLITE_LIMIT_COLUMN, 64);
@@ -94,6 +104,8 @@ void SQLiteDB::configure() {
 	setLimit(SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 1024);
 	setLimit(SQLITE_LIMIT_VARIABLE_NUMBER, 128);
 
+	// WAL keeps normal hash writes from blocking readers for long periods. NORMAL sync is the chosen
+	// performance/integrity tradeoff for derived data that can be rebuilt by rehashing shared files.
 	execute(
 		"PRAGMA trusted_schema=OFF;"
 		"PRAGMA foreign_keys=ON;"
@@ -121,6 +133,8 @@ void SQLiteDB::execute(const char* sql) {
 
 SQLiteStatement SQLiteDB::prepare(const char* sql) {
 	sqlite3_stmt* stmt = nullptr;
+	// Prepared statements are usually cached by callers, so mark them persistent to let SQLite avoid
+	// transient allocations where possible.
 	const auto rc = sqlite3_prepare_v3(db, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, nullptr);
 	if (rc != SQLITE_OK) {
 		throwLastError("preparing SQL statement");
@@ -140,6 +154,8 @@ void SQLiteDB::rollback() noexcept {
 	try {
 		execute("ROLLBACK");
 	} catch (const SQLiteException&) {
+		// Rollback may be called from destructors or after a failed transaction; there is no useful
+		// recovery action if SQLite reports that there is nothing left to roll back.
 	}
 }
 
@@ -231,6 +247,8 @@ void SQLiteStatement::bindNull(int index) {
 string SQLiteStatement::columnText(int column) const {
 	const auto text = sqlite3_column_text(stmt, column);
 	const auto bytes = sqlite3_column_bytes(stmt, column);
+	// Preserve embedded NUL bytes if SQLite returns them in text data, even though hash-store paths
+	// should normally be ordinary UTF-8 strings.
 	return text ? string(reinterpret_cast<const char*>(text), bytes) : string();
 }
 

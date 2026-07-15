@@ -213,21 +213,34 @@ private:
 		SQLiteStatement removeFileStmt;
 		SQLiteStatement loadTreeStmt;
 
+		/** Open the SQLite hash database and create or migrate the schema before use. */
 		void openDb();
+		/** Create all current SQLite hash-store tables and then apply versioned migrations. */
 		void createSchema();
+		/** Return SQLite PRAGMA user_version for deciding which compatibility migrations are needed. */
 		int getSchemaVersion();
+		/** Upgrade older SQLite hash-store schemas while preserving only rows that remain valid. */
 		void migrateSchema(int version);
+		/** Return true when SQLite already contains durable hash rows and should be treated as authoritative. */
 		bool hasDbData();
-		// Keeps migration state independent from hash rows so empty SQLite stores don't re-import stale legacy files.
+		/** Read one metadata value used for durable database state such as legacy migration completion. */
 		string getMetadata(const string& key);
+		/** Store one metadata value inside the same SQLite database as the hash rows. */
 		void setMetadata(const string& key, const string& value);
+		/** Return true when legacy XML/DAT import has completed or has been intentionally skipped. */
 		bool isLegacyMigrationComplete();
+		/** Persist the completion marker and migration counters so stale legacy files are not re-imported. */
 		void markLegacyMigrationComplete(uint64_t migratedFiles, uint64_t migratedTrees);
+		/** Lazily open the SQLite database for code paths that may be called before startup loading. */
 		void ensureDbOpen();
 
+		/** Load SQLite tree/file rows into the in-memory indexes used by sharing, search and TTH lookups. */
 		void loadDb(function<void (float)> progressF);
+		/** Read the legacy HashIndex.xml into memory and report whether it was missing, loaded or corrupt. */
 		LegacyLoadResult loadLegacy(function<void (float)> progressF);
+		/** Validate legacy HashData.dat tree data, write valid records into SQLite and mark migration complete. */
 		bool migrateLegacy();
+		/** Rename legacy hash database files after SQLite has become authoritative, logging every result. */
 		void renameLegacyFiles() noexcept;
 
 		void saveFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth);
@@ -244,9 +257,13 @@ private:
 		void flushWritesNoexcept() noexcept;
 		void resetStatements() noexcept;
 
+		/** Return the legacy XML hash-index path in the user configuration directory. */
 		static string getIndexFile();
+		/** Return the legacy DAT hash-tree path in the user configuration directory. */
 		static string getDataFile();
+		/** Return the SQLite hash database path in the user configuration directory. */
 		static string getDbFile();
+		/** Choose a non-destructive .migrated target name for a legacy hash database file. */
 		static string getMigratedFileName(const string& fileName);
 	};
 
