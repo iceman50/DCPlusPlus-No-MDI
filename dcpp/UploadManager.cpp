@@ -71,6 +71,8 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	string sourceFile;
 	Transfer::Type type;
 	std::unique_ptr<MemoryInputStream> preparedList;
+	optional<TTHValue> requestedRoot;
+	int64_t expectedFileSize = -1;
 
 	try {
 		if(aType == Transfer::names[Transfer::TYPE_FILE]) {
@@ -91,6 +93,14 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 			} else {
 				auto info = ShareManager::getInstance()->toRealWithSize(aFile, aSource.getHubUrl());
 				sourceFile = move(info.first);
+				expectedFileSize = info.second;
+				// Keep the requested root alongside the resolved path. If a refresh is
+				// active, the path is treated as a candidate until its bytes prove the TTH.
+				if(aFile.compare(0, 4, "TTH/") == 0) {
+					requestedRoot = TTHValue(aFile.substr(4));
+				} else {
+					requestedRoot = ShareManager::getInstance()->getTTH(aFile, aSource.getHubUrl());
+				}
 				type = Transfer::TYPE_FILE;
 				miniSlot = info.second <= static_cast<int64_t>(SETTING(SET_MINISLOT_SIZE) * 1024);
 			}
@@ -169,11 +179,49 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	int64_t start = 0;
 	int64_t size = 0;
 	int64_t fullSize = -1;
+	// A refresh miss should not permanently poison the peer's queue. Disconnecting
+	// with a maxed-out response lets the remote retry once our share view settles.
+	auto queueRefreshRetry = [&]() {
+		aSource.maxedOut(addFailedUpload(aSource, aFile));
+		aSource.disconnect();
+		return false;
+	};
+	auto verifyUploadPath = [&]() {
+		if(!requestedRoot) {
+			return false;
+		}
+
+		// Try the path from the cached virtual lookup first, then fall back to any
+		// current shared path with the same TTH that this hub is allowed to see.
+		if(HashManager::getInstance()->verifyFileTTH(sourceFile, expectedFileSize, *requestedRoot)) {
+			return true;
+		}
+
+		for(const auto& path: ShareManager::getInstance()->getRealPaths(*requestedRoot, aSource.getHubUrl())) {
+			if(Util::stricmp(path, sourceFile) == 0) {
+				continue;
+			}
+
+			if(HashManager::getInstance()->verifyFileTTH(path, expectedFileSize, *requestedRoot)) {
+				sourceFile = path;
+				return true;
+			}
+		}
+
+		return false;
+	};
 
 	try {
 		switch(type) {
 		case Transfer::TYPE_FILE:
 			{
+				// While refreshing, cached share paths may be stale; verify bytes before serving.
+				if(ShareManager::getInstance()->isRefreshing()) {
+					if(!verifyUploadPath()) {
+						return queueRefreshRetry();
+					}
+				}
+
 				File* f = new File(sourceFile, File::READ, File::OPEN);
 
 				start = aStartPos;

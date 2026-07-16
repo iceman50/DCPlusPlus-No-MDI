@@ -7,6 +7,7 @@
 * Add unit coverage for SQLite hash persistence, stale hash cleanup, rebuild pruning, legacy migration, schema migration, batching, compacting and corrupt-row handling
 * Add hash-store startup benchmarks and reduce hash/share startup overhead for large shared file sets
 * Add a validated SQLite share-tree startup cache with background refresh to avoid blocking startup on large shared directory scans
+* Verify requested uploads by TTH during share refreshes, retry alternate shared paths for moved files and cache verification results for unchanged files before returning a retryable upload-queue response
 * Clear stale ADC hub user state and hub-frame user lists when reconnecting to prevent duplicate self entries with reused CIDs and new SIDs
 * Fix RichTextBox context-menu overload visibility to avoid getMenu overloaded-virtual warnings
 * Clear stale download connection association state before removing redundant queue items to prevent ConnectionManager failure assertions

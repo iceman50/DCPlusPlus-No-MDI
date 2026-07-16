@@ -18,6 +18,7 @@
 #ifndef DCPLUSPLUS_DCPP_HASH_MANAGER_H
 #define DCPLUSPLUS_DCPP_HASH_MANAGER_H
 
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -63,6 +64,12 @@ public:
 
 	/** Get the TTH root associated with the filename if its tree is current. */
 	optional<TTHValue> getTTH(const string& aFileName, int64_t aSize, uint32_t aTimeStamp) noexcept;
+	/**
+	 * Hash a file synchronously and verify that it still matches the advertised root.
+	 * Used for upload requests during share refreshes, where the cached virtual path
+	 * may briefly point at stale or moved filesystem data.
+	 */
+	bool verifyFileTTH(const string& aFileName, int64_t aSize, const TTHValue& root) noexcept;
 
 	void stopHashing(const string& baseDir) { hasher.stopHashing(baseDir); }
 	void setPriority(Thread::Priority p) { hasher.setThreadPriority(p); }
@@ -271,6 +278,22 @@ private:
 
 	Hasher hasher;
 	HashStore store;
+
+	struct VerificationCacheEntry {
+		VerificationCacheEntry(string aFileName, const TTHValue& aRoot, int64_t aSize, uint32_t aTimeStamp, bool aResult) :
+			fileName(std::move(aFileName)), root(aRoot), size(aSize), timeStamp(aTimeStamp), result(aResult) { }
+
+		string fileName;
+		TTHValue root;
+		int64_t size;
+		uint32_t timeStamp;
+		bool result;
+	};
+	// Small proof cache for refresh-time upload checks. Entries are keyed by path, size,
+	// timestamp and requested root, so changed files must be hashed again before upload.
+	// This is intentionally separate from the durable hash store: it is only a short-lived
+	// guard against re-reading the same requested file while a live share refresh catches up.
+	std::deque<VerificationCacheEntry> verificationCache;
 
 	mutable CriticalSection cs;
 

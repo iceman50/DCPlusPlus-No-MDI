@@ -58,6 +58,91 @@ optional<TTHValue> HashManager::getTTH(const string& aFileName, int64_t aSize, u
 	return tth;
 }
 
+bool HashManager::verifyFileTTH(const string& aFileName, int64_t aSize, const TTHValue& root) noexcept {
+	if(aSize < 0) {
+		return false;
+	}
+
+	try {
+		// Refresh-time uploads may be resolved through a cached share entry. Check the
+		// live file size and timestamp first so moved/changed files don't get served
+		// under an old TTH without forcing a full hash when the cheap proof changed.
+		File f(aFileName, File::READ, File::OPEN | File::SHARED);
+		auto size = f.getSize();
+		auto timestamp = f.getLastModified();
+		f.close();
+
+		if(size != aSize) {
+			return false;
+		}
+
+		{
+			Lock l(cs);
+			// The verifier can be hit repeatedly by the same queued remote file while
+			// a refresh is still active. Reuse both success and failure results only
+			// while path, size, timestamp and requested root all still match.
+			auto i = std::find_if(verificationCache.begin(), verificationCache.end(), [&](const VerificationCacheEntry& entry) {
+				return entry.size == size && entry.timeStamp == timestamp && entry.root == root &&
+					Util::stricmp(entry.fileName, aFileName) == 0;
+			});
+			if(i != verificationCache.end()) {
+				auto result = i->result;
+				if(i + 1 != verificationCache.end()) {
+					auto entry = std::move(*i);
+					verificationCache.erase(i);
+					verificationCache.push_back(std::move(entry));
+				}
+				return result;
+			}
+		}
+
+		// A full read is the final authority before upload. This is intentionally
+		// synchronous because the caller is about to expose these bytes to a peer.
+		auto bs = max(TigerTree::calcBlockSize(size, 10), MIN_BLOCK_SIZE);
+		TigerTree tt(bs);
+		auto sizeLeft = size;
+		FileReader(true).read(aFileName, [&](const void* buf, size_t n) {
+			sizeLeft -= static_cast<int64_t>(n);
+			return tt.update(buf, n), true;
+		});
+
+		if(sizeLeft != 0) {
+			Lock l(cs);
+			verificationCache.emplace_back(aFileName, root, size, timestamp, false);
+			if(verificationCache.size() > 256) {
+				verificationCache.pop_front();
+			}
+			return false;
+		}
+
+		tt.finalize();
+		if(tt.getRoot() != root) {
+			Lock l(cs);
+			verificationCache.emplace_back(aFileName, root, size, timestamp, false);
+			if(verificationCache.size() > 256) {
+				verificationCache.pop_front();
+			}
+			return false;
+		}
+
+		{
+			Lock l(cs);
+			store.addFile(aFileName, timestamp, tt, true);
+			verificationCache.emplace_back(aFileName, root, size, timestamp, true);
+			if(verificationCache.size() > 256) {
+				verificationCache.pop_front();
+			}
+		}
+
+		fire(HashManagerListener::TTHDone(), aFileName, root);
+		return true;
+	} catch(const Exception&) {
+		return false;
+	} catch(...) {
+		return false;
+	}
+}
+
 bool HashManager::getTree(const TTHValue& root, TigerTree& tt) {
 	Lock l(cs);
 	return store.getTree(root, tt);

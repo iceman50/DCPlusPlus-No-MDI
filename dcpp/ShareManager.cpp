@@ -112,6 +112,7 @@ string getMetadata(SQLiteDB& db, const string& key) {
 }
 
 std::atomic_flag ShareManager::refreshing = ATOMIC_FLAG_INIT;
+std::atomic<bool> ShareManager::refreshActive { false };
 
 ShareManager::ShareManager() : hits(0), xmlListLen(0), bzXmlListLen(0),
 	xmlDirty(true), forceXmlRefresh(true), refreshDirs(false), update(false), listN(0),
@@ -329,6 +330,33 @@ StringList ShareManager::getRealPaths(const string& virtualPath) {
 	} else {
 		// file
 		ret.push_back(toReal(virtualPath));
+	}
+
+	return ret;
+}
+
+StringList ShareManager::getRealPaths(const TTHValue& tth, const string& hubUrl) const {
+	StringList ret;
+	auto access = getShareAccess(hubUrl);
+
+	Lock l(cs);
+	// During refresh recovery the original cached path may no longer exist, but
+	// the same content can still be shared from another directory. Walk the live
+	// tree and keep hub-specific share rules intact before UploadManager retries.
+	function<void (const Directory&)> collect = [&](const Directory& dir) {
+		for(const auto& file: dir.files) {
+			if(file.tth && *file.tth == tth && isFileAllowed(file, access)) {
+				ret.push_back(file.getRealPath());
+			}
+		}
+
+		for(const auto& child: dir.directories) {
+			collect(*child.second);
+		}
+	};
+
+	for(const auto& dir: directories) {
+		collect(*dir.second);
 	}
 
 	return ret;
@@ -1384,6 +1412,7 @@ void ShareManager::refresh(bool dirs, bool aUpdate, bool block, function<void (f
 		LogManager::getInstance()->message(_("File list refresh in progress, please wait for it to finish before trying to refresh again"));
 		return;
 	}
+	refreshActive = true;
 
 	update = aUpdate;
 	refreshDirs = dirs;
@@ -1399,6 +1428,8 @@ void ShareManager::refresh(bool dirs, bool aUpdate, bool block, function<void (f
 			setThreadPriority(Thread::LOW);
 		} catch(const ThreadException& e) {
 			LogManager::getInstance()->message(str(F_("File list refresh failed: %1%") % e.getError()));
+			refreshActive = false;
+			refreshing.clear();
 		}
 	}
 }
@@ -1475,6 +1506,7 @@ void ShareManager::runRefresh(function<void (float)> progressF) {
 	}
 
 	refreshing.clear();
+	refreshActive = false;
 	if(refreshedDirs) {
 		saveShareCache();
 	}

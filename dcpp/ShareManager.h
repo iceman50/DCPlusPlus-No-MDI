@@ -85,12 +85,16 @@ public:
 	pair<string, int64_t> toRealWithSize(const string& virtualFile);
 	pair<string, int64_t> toRealWithSize(const string& virtualFile, const string& hubUrl);
 	StringList getRealPaths(const string& virtualPath);
+	/** Return all currently shared real paths for a TTH that are visible from the requesting hub. */
+	StringList getRealPaths(const TTHValue& tth, const string& hubUrl) const;
 	optional<TTHValue> getTTH(const string& virtualFile) const;
 	optional<TTHValue> getTTH(const string& virtualFile, const string& hubUrl) const;
 
 	void refresh(bool dirs = false, bool aUpdate = true, bool block = false, function<void (float)> progressF = nullptr) noexcept;
 	/** Load a validated cached share tree when possible, then refresh the real filesystem in the background. */
 	void startupRefresh(function<void (float)> progressF = nullptr) noexcept;
+	/** True while a share refresh is building or applying a live filesystem view. */
+	bool isRefreshing() const noexcept { return refreshActive; }
 	void setDirty() { xmlDirty = true; }
 
 	SearchResultList search(const StringList& adcParams, size_t maxResults) noexcept;
@@ -283,6 +287,7 @@ private:
 	int listN;
 
 	static std::atomic_flag refreshing;
+	static std::atomic<bool> refreshActive;
 
 	uint64_t lastXmlUpdate;
 	uint64_t lastFullUpdate;
