@@ -235,11 +235,11 @@ void Taskbar::initTaskbar(WindowPtr window_) {
 	CLSID CLSID_TaskbarList;
 	OLECHAR tbl[] = L"{56FDF344-FD6D-11d0-958A-006097C9A090}";
 	CLSIDFromString(tbl, &CLSID_TaskbarList);
-	IID IID_ITaskbarList3;
-	OLECHAR itbl[] = L"{EA1AFB91-9E28-4B86-90E9-9E9F8A5EEA84}";
-	CLSIDFromString(itbl, &IID_ITaskbarList3);
+	IID IID_ITaskbarList;
+	OLECHAR itbl[] = L"{56FDF342-FD6D-11d0-958A-006097C9A090}";
+	CLSIDFromString(itbl, &IID_ITaskbarList);
 #endif
-	if(::CoCreateInstance(CLSID_TaskbarList, 0, CLSCTX_INPROC_SERVER, IID_ITaskbarList3,
+	if(::CoCreateInstance(CLSID_TaskbarList, 0, CLSCTX_INPROC_SERVER, IID_ITaskbarList,
 		reinterpret_cast<LPVOID*>(&taskbar)) != S_OK) { taskbar = 0; }
 	if(taskbar && taskbar->HrInit() != S_OK) {
 			taskbar->Release();
