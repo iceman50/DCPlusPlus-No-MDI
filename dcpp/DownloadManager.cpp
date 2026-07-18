@@ -103,10 +103,12 @@ void DownloadManager::on(TimerManagerListener::Second, uint64_t aTick) noexcept 
 	}
 }
 
-void DownloadManager::checkIdle(const UserPtr& user, bool singleConnection) {
+void DownloadManager::checkIdle(const HintedUser& user, bool singleConnection) {
 	Lock l(cs);
 	for(auto uc: idlers) {
-		if(uc->getUser() == user) {
+		if(uc->getUser() == user.user &&
+			(user.hint.empty() || uc->getHubUrl() == user.hint))
+		{
 			uc->callAsync([this, uc] { revive(uc); });
 			// File lists are indivisible transfers. Reusing more than one idle MCN
 			// connection merely creates redundant peer connections for the same list.

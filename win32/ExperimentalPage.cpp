@@ -51,6 +51,8 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) : PropPage(parent, 6, 2)
 		IDH_SETTINGS_EXPERIMENTAL_MAX_SUDP_KEYS, T_("keys"));
 	addItem(T_("Generated partial file list limit"), SettingsManager::MAX_PARTIAL_LIST_BYTES,
 		IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES, T_("bytes"));
+	addItem(T_("Clickable chat link length limit"), SettingsManager::CHAT_LINK_MAX_LENGTH,
+		IDH_SETTINGS_EXPERIMENTAL_CHAT_LINK_MAX_LENGTH, T_("characters"));
 
 	PropPage::read(items);
 }
@@ -80,6 +82,7 @@ void ExperimentalPage::write() {
 	clamp(SettingsManager::MAX_SUDP_PACKET, 32);
 	clamp(SettingsManager::MAX_SUDP_KEYS, 1);
 	clamp(SettingsManager::MAX_PARTIAL_LIST_BYTES, 1024);
+	clamp(SettingsManager::CHAT_LINK_MAX_LENGTH, 1);
 }
 
 void ExperimentalPage::addItem(const tstring& text, int setting, unsigned helpId, const tstring& unit) {

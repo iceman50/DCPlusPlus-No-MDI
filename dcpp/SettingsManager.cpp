@@ -98,6 +98,7 @@ const string SettingsManager::settingTags[] =
 	"MaxQueuedProtocolData", "MaxConcurrentConnections", "FloodWindow",
 	"GlobalWindow", "GlobalLimit", "PeerLimit", "PeerWindow", "MaxTrackedPeers",
 	"MaxSUDPPacket", "MaxSUDPKeys", "MaxPartialListBytes", "HashDbWriteBatchSize",
+	"ChatLinkMaxLength",
 	"SENTRY",
 	// Bools
 	"AddFinishedInstantly", "AdlsBreakOnFirst",
@@ -231,6 +232,7 @@ SettingsManager::SettingsManager() {
 	setDefault(MAX_SUDP_KEYS, 64);
 	setDefault(MAX_PARTIAL_LIST_BYTES, 64 * 1024 * 1024);
 	setDefault(HASH_DB_WRITE_BATCH_SIZE, 256);
+	setDefault(CHAT_LINK_MAX_LENGTH, 256);
 	setDefault(MAX_DOWNLOAD_SPEED, 0);
 	setDefault(HASH_DB_VERIFY_STARTUP, false);
 	setDefault(HASH_DB_COMPACT_ON_REBUILD, false);

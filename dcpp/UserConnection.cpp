@@ -209,7 +209,7 @@ void UserConnection::snd(const string& aType, const string& aName, const int64_t
 void UserConnection::pm(const string& message, bool thirdPerson) {
 	{
 		auto lock = ClientManager::getInstance()->lock();
-		auto ou = ClientManager::getInstance()->findOnlineUser(getHintedUser());
+		auto ou = ClientManager::getInstance()->findOnlineUserHint(getHintedUser());
 
 		if(PluginManager::getInstance()->runHook(HOOK_CHAT_PM_OUT, ou, message))
 			return;
@@ -266,8 +266,8 @@ void UserConnection::handlePM(const AdcCommand& c, bool echo) noexcept {
 
 	auto cm = ClientManager::getInstance();
 	auto lock = cm->lock();
-	auto peer = cm->findOnlineUser(user->getCID(), hubUrl);
-	auto me = cm->findOnlineUser(cm->getMe()->getCID(), hubUrl);
+	auto peer = cm->findOnlineUserHint(user->getCID(), hubUrl);
+	auto me = cm->findOnlineUserHint(cm->getMe()->getCID(), hubUrl);
 	// null pointers allowed here as the conn may be going on without hubs.
 
 	if(echo) {

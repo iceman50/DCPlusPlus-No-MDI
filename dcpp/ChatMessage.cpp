@@ -125,16 +125,21 @@ void ChatMessage::format(Tagger& tags, string& tmp) {
 
 void ChatMessage::format(Tagger& tags, string& tmp, const string& mentionNick) {
 	const auto& text = tags.getText();
+	const auto maxLinkLength = static_cast<size_t>(std::max(1, SETTING(CHAT_LINK_MAX_LENGTH)));
 
 	/* link formatting - optimize the lookup a bit by using the fact that every link identifier
 	(except www ones) contains a colon. */
 
-	auto addLinkStr = [&tmp, &tags](size_t begin, size_t end, const string& link) {
-		tags.addTag(begin, end, "a", "href=\"" + SimpleXML::escape(link, tmp, true) + "\"");
+	auto addLinkStr = [&tmp, &tags, maxLinkLength](size_t begin, size_t end, const string& link) {
+		if(link.size() <= maxLinkLength) {
+			tags.addTag(begin, end, "a", "href=\"" + SimpleXML::escape(link, tmp, true) + "\"");
+		}
 	};
 
-	auto addLink = [&text, &addLinkStr](size_t begin, size_t end) {
-		addLinkStr(begin, end, text.substr(begin, end - begin));
+	auto addLink = [&text, &addLinkStr, maxLinkLength](size_t begin, size_t end) {
+		if(end - begin <= maxLinkLength) {
+			addLinkStr(begin, end, text.substr(begin, end - begin));
+		}
 	};
 
 	static const string delimiters = " \t\r\n<>\"";
@@ -160,7 +165,10 @@ void ChatMessage::format(Tagger& tags, string& tmp, const string& mentionNick) {
 
 		} else if(i == begin + 6 && i + 2 <= n && !text.compare(begin, 6, "magnet") && text[i + 1] == '?') {
 			string link = text.substr(begin, end - begin), hash, name, key;
-			if(Magnet::parseUri(link, hash, name, key)) {
+			if(link.size() > maxLinkLength) {
+				i = end;
+
+			} else if(Magnet::parseUri(link, hash, name, key)) {
 
 				if(!name.empty()) {
 					// magnet link: replace with the friendly name

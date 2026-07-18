@@ -10,6 +10,10 @@
 * Verify requested uploads by TTH during share refreshes, retry alternate shared paths for moved files and cache verification results for unchanged files before returning a retryable upload-queue response
 * Clear stale ADC hub user state and hub-frame user lists when reconnecting to prevent duplicate self entries with reused CIDs and new SIDs
 * Fix RichTextBox context-menu overload visibility to avoid getMenu overloaded-virtual warnings
+* Add an Experimental setting to cap RichEdit auto-detected link lengths and ignore overlong chat links
+* Ensure file-list, private-message and download connection attempts use the UI-initiating hub's hinted user
+* Preserve exact share-cache real paths, skip startup share-cache loading for UNC share roots and normalize legacy hash-database UNC paths
+* Fix share-cache schema upgrades reporting database table locks while replacing older cache files
 * Clear stale download connection association state before removing redundant queue items to prevent ConnectionManager failure assertions
 * Harden QueueManager large-queue handling and index queued files by TTH to avoid invalid iterators and full scans with massive queues
 

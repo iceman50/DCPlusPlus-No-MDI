@@ -106,3 +106,4 @@ Desktop.ini
 **/.hgtags
 dcpp/version-rev-id.inc
 gdb-hang-snapshot.txt
+TODO.md

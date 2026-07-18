@@ -17,6 +17,7 @@
 #include <dcpp/SearchResult.h>
 #include <dcpp/SearchManager.h>
 #include <dcpp/SettingsManager.h>
+#include <dcpp/SQLiteDB.h>
 #include <dcpp/TimerManager.h>
 #include <dcpp/UploadManager.h>
 #include <dcpp/Util.h>
@@ -150,6 +151,12 @@ TEST_F(ShareCacheTest, round_trips_share_tree_and_indices) {
 	EXPECT_EQ(ShareManager::getInstance()->getShareSize(), 1234);
 	EXPECT_TRUE(ShareManager::getInstance()->isTTHShared(TTHValue("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")));
 	EXPECT_EQ(ShareManager::getInstance()->toReal("/Virtual/Child/file.bin"), sharePath + "Child" PATH_SEPARATOR_STR "file.bin");
+
+	auto child = ShareManager::getInstance()->directories["Virtual"]->directories["Child"];
+	auto file = child->findFile("file.bin");
+	ASSERT_NE(file, child->files.cend());
+	ASSERT_TRUE(file->realPath);
+	EXPECT_EQ(*file->realPath, sharePath + "Child" PATH_SEPARATOR_STR "file.bin");
 }
 
 TEST_F(ShareCacheTest, preserves_merged_shares_search_and_protocol_lookups) {
@@ -186,6 +193,25 @@ TEST_F(ShareCacheTest, full_refresh_saves_cache_snapshot_for_refresh_command_pat
 	EXPECT_TRUE(ShareManager::getInstance()->hasVirtual("Virtual"));
 }
 
+TEST_F(ShareCacheTest, replaces_old_share_cache_schema_without_self_lock) {
+	{
+		SQLiteDB db(configPath + "ShareCache.sqlite3");
+		db.execute(
+			"CREATE TABLE metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID;"
+			"CREATE TABLE directories (id INTEGER PRIMARY KEY NOT NULL, parent_id INTEGER, name TEXT NOT NULL, real_name TEXT);"
+			"CREATE TABLE files (id INTEGER PRIMARY KEY NOT NULL, directory_id INTEGER NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, tth TEXT, real_path TEXT);"
+			"PRAGMA user_version = 1;"
+		);
+	}
+
+	populateShare();
+	ShareManager::getInstance()->saveShareCache();
+
+	clearLoadedShare();
+	ASSERT_TRUE(ShareManager::getInstance()->loadShareCache());
+	EXPECT_EQ(ShareManager::getInstance()->toReal("/Virtual/Child/file.bin"), sharePath + "Child" PATH_SEPARATOR_STR "file.bin");
+}
+
 TEST_F(ShareCacheTest, rejects_cache_when_share_settings_change) {
 	populateShare();
 	ShareManager::getInstance()->saveShareCache();
@@ -203,6 +229,18 @@ TEST_F(ShareCacheTest, skips_cache_when_queue_duplicate_removal_requires_fresh_s
 
 	SettingsManager::getInstance()->set(SettingsManager::DONT_DL_ALREADY_SHARED, true);
 	clearLoadedShare();
+
+	EXPECT_FALSE(ShareManager::getInstance()->loadShareCache());
+	EXPECT_EQ(ShareManager::getInstance()->getSharedFiles(), 0U);
+}
+
+TEST_F(ShareCacheTest, skips_cache_for_unc_share_roots) {
+	populateShare();
+	ShareManager::getInstance()->saveShareCache();
+
+	clearLoadedShare();
+	ShareManager::getInstance()->shares.clear();
+	ShareManager::getInstance()->shares["\\\\server\\share\\"] = "Virtual";
 
 	EXPECT_FALSE(ShareManager::getInstance()->loadShareCache());
 	EXPECT_EQ(ShareManager::getInstance()->getSharedFiles(), 0U);

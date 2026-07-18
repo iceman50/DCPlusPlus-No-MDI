@@ -59,7 +59,7 @@ namespace dcpp {
 using std::numeric_limits;
 
 namespace {
-const int SHARE_CACHE_SCHEMA_VERSION = 1;
+const int SHARE_CACHE_SCHEMA_VERSION = 2;
 const size_t MAX_SHARE_CACHE_NAME = 4096;
 const size_t MAX_SHARE_CACHE_PATH = 32768;
 
@@ -88,6 +88,16 @@ bool isValidCachedName(const string& name) noexcept {
 
 bool isValidCachedPath(const string& path) noexcept {
 	return !path.empty() && path.size() <= MAX_SHARE_CACHE_PATH;
+}
+
+bool isUncPath(const string& path) noexcept {
+	if(path.size() < 2) {
+		return false;
+	}
+	if(path.compare(0, 4, "\\\\?\\") == 0) {
+		return path.compare(0, 8, "\\\\?\\UNC\\") == 0;
+	}
+	return (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/');
 }
 
 bool isUnderSharedRoot(const string& path, const map<string, string>& shares) noexcept {
@@ -705,6 +715,7 @@ bool ShareManager::Directory::nameInUse(const string& name) const {
 }
 
 void ShareManager::Directory::File::validateName(const string& sourcePath) {
+	auto diskPath = sourcePath + name;
 	if(parent->nameInUse(name)) {
 		uint32_t num = 0;
 		string base = name, ext, vname;
@@ -718,11 +729,9 @@ void ShareManager::Directory::File::validateName(const string& sourcePath) {
 			vname = base + " (" + Util::toString(num) + ")" + ext;
 		} while(parent->nameInUse(vname));
 		dcdebug("Renaming duplicate <%s> to <%s>\n", name.c_str(), vname.c_str());
-		realPath = sourcePath + move(name);
 		name = move(vname);
-	} else {
-		realPath.reset();
 	}
+	realPath = move(diskPath);
 }
 
 void ShareManager::removeDirectory(const string& realPath) {
@@ -1092,7 +1101,7 @@ string ShareManager::getShareCacheFile() const {
 
 string ShareManager::getShareCacheFingerprint() const {
 	uint64_t hash = 1469598103934665603ULL;
-	fnvAppend(hash, string("ShareCache.v1"));
+	fnvAppend(hash, string("ShareCache.v2"));
 
 	for(const auto& share: shares) {
 		fnvAppend(hash, share.first);
@@ -1114,6 +1123,15 @@ string ShareManager::getShareCacheFingerprint() const {
 }
 
 void ShareManager::createShareCacheSchema(SQLiteDB& db) {
+	int version = 0;
+	{
+		auto versionStmt = db.prepare("PRAGMA user_version");
+		version = versionStmt.step() ? versionStmt.columnInt(0) : 0;
+	}
+	if(version != 0 && version != SHARE_CACHE_SCHEMA_VERSION) {
+		db.execute("DROP TABLE IF EXISTS files;DROP TABLE IF EXISTS directories;DROP TABLE IF EXISTS metadata;");
+	}
+
 	db.execute(
 		"CREATE TABLE IF NOT EXISTS metadata ("
 		"key TEXT PRIMARY KEY NOT NULL,"
@@ -1132,11 +1150,11 @@ void ShareManager::createShareCacheSchema(SQLiteDB& db) {
 		"name TEXT NOT NULL CHECK(length(name) > 0),"
 		"size INTEGER NOT NULL CHECK(size >= 0),"
 		"tth TEXT CHECK(tth IS NULL OR length(tth) = 39),"
-		"real_path TEXT"
+		"real_path TEXT NOT NULL"
 		");"
 		"CREATE INDEX IF NOT EXISTS idx_share_cache_files_directory ON files(directory_id);"
 		"CREATE INDEX IF NOT EXISTS idx_share_cache_files_tth ON files(tth);"
-		"PRAGMA user_version = 1;"
+		"PRAGMA user_version = 2;"
 	);
 }
 
@@ -1149,6 +1167,13 @@ bool ShareManager::loadShareCache() noexcept {
 	if(SETTING(DONT_DL_ALREADY_SHARED)) {
 		LogManager::getInstance()->message(_("Share cache skipped because queued duplicate removal requires a fresh share scan"));
 		return false;
+	}
+	{
+		Lock l(cs);
+		if(any_of(shares.begin(), shares.end(), [](const auto& share) { return isUncPath(share.first); })) {
+			LogManager::getInstance()->message(_("Share cache skipped because UNC shares require a fresh share scan"));
+			return false;
+		}
 	}
 
 	const auto cacheFile = getShareCacheFile();
@@ -1262,14 +1287,17 @@ bool ShareManager::loadShareCache() noexcept {
 			}
 
 			Directory::File file(name, size, dir->second, root);
-			if(!files.columnIsNull(4)) {
-				auto realPath = files.columnText(4);
+			if(files.columnIsNull(4)) {
+				throw ShareException(_("Missing real file path in share cache"));
+			}
+			auto realPath = files.columnText(4);
+			{
 				Lock l(cs);
 				if(!isValidCachedPath(realPath) || !isUnderSharedRoot(realPath, shares)) {
 					throw ShareException(_("Invalid real file path in share cache"));
 				}
-				file.realPath = std::move(realPath);
 			}
+			file.realPath = std::move(realPath);
 
 			dir->second->files.insert(std::move(file));
 		}
@@ -1327,11 +1355,7 @@ void ShareManager::saveShareCacheDirectory(SQLiteStatement& dirStmt, SQLiteState
 		} else {
 			fileStmt.bindNull(4);
 		}
-		if(file.realPath) {
-			fileStmt.bind(5, *file.realPath);
-		} else {
-			fileStmt.bindNull(5);
-		}
+		fileStmt.bind(5, file.getRealPath());
 		fileStmt.stepDone();
 		fileStmt.reset();
 		fileStmt.clearBindings();
@@ -1357,33 +1381,35 @@ void ShareManager::saveShareCache() noexcept {
 		SQLiteTransaction transaction(db);
 		db.execute("DELETE FROM metadata;DELETE FROM files;DELETE FROM directories;");
 
-		auto metaStmt = db.prepare("INSERT INTO metadata(key, value) VALUES(?1, ?2)");
-		auto putMeta = [&metaStmt](const string& key, const string& value) {
-			metaStmt.bind(1, key);
-			metaStmt.bind(2, value);
-			metaStmt.stepDone();
-			metaStmt.reset();
-			metaStmt.clearBindings();
-		};
-
 		uint64_t directoryCount = 0;
 		uint64_t fileCount = 0;
 		{
-			Lock l(cs);
-			putMeta("schema", Util::toString(SHARE_CACHE_SCHEMA_VERSION));
-			putMeta("fingerprint", getShareCacheFingerprint());
-			putMeta("app", APPNAME " " VERSIONSTRING);
+			auto metaStmt = db.prepare("INSERT INTO metadata(key, value) VALUES(?1, ?2)");
+			auto putMeta = [&metaStmt](const string& key, const string& value) {
+				metaStmt.bind(1, key);
+				metaStmt.bind(2, value);
+				metaStmt.stepDone();
+				metaStmt.reset();
+				metaStmt.clearBindings();
+			};
 
-			auto dirStmt = db.prepare("INSERT INTO directories(id, parent_id, name, real_name) VALUES(?1, ?2, ?3, ?4)");
-			auto fileStmt = db.prepare("INSERT INTO files(directory_id, name, size, tth, real_path) VALUES(?1, ?2, ?3, ?4, ?5)");
-			int64_t nextId = 1;
-			for(const auto& dir: directories) {
-				saveShareCacheDirectory(dirStmt, fileStmt, *dir.second, nullopt, nextId, directoryCount, fileCount);
+			{
+				Lock l(cs);
+				putMeta("schema", Util::toString(SHARE_CACHE_SCHEMA_VERSION));
+				putMeta("fingerprint", getShareCacheFingerprint());
+				putMeta("app", APPNAME " " VERSIONSTRING);
+
+				auto dirStmt = db.prepare("INSERT INTO directories(id, parent_id, name, real_name) VALUES(?1, ?2, ?3, ?4)");
+				auto fileStmt = db.prepare("INSERT INTO files(directory_id, name, size, tth, real_path) VALUES(?1, ?2, ?3, ?4, ?5)");
+				int64_t nextId = 1;
+				for(const auto& dir: directories) {
+					saveShareCacheDirectory(dirStmt, fileStmt, *dir.second, nullopt, nextId, directoryCount, fileCount);
+				}
 			}
-		}
 
-		putMeta("directories", std::to_string(directoryCount));
-		putMeta("files", std::to_string(fileCount));
+			putMeta("directories", std::to_string(directoryCount));
+			putMeta("files", std::to_string(fileCount));
+		}
 		transaction.commit();
 		db.execute("PRAGMA optimize;PRAGMA wal_checkpoint(PASSIVE);");
 		LogManager::getInstance()->message(str(F_("Saved share cache %1% (%2% directories, %3% files)") %
@@ -2142,21 +2168,20 @@ optional<std::reference_wrapper<const ShareManager::Directory::File>> ShareManag
 	}
 
 	if(i->realPath && i->realPath == realPath) {
-		/* lucky! the base file already had a real path set (should never happen - it's only for
-		dupes). */
-		dcdebug("ShareManager::getFile: wtf, a non-renamed file has realPath set: <%s>\n", realPath.c_str());
 		return std::cref(*i);
 	}
 
 	/* see if the files sorted right before this one have a real path we are looking for. this is
 	the most common case for dupes: "x (1).ext" is sorted before "x.ext". */
 	auto real = i;
-	--real;
-	while(real != d->files.end() && real->realPath) {
+	while(real != d->files.begin()) {
+		--real;
+		if(!real->realPath) {
+			break;
+		}
 		if(real->realPath == realPath) {
 			return std::cref(*real);
 		}
-		--real;
 	}
 
 	/* couldn't find it before the base file? maybe it's sorted after; could happen with files with

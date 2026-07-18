@@ -31,6 +31,20 @@
 
 namespace dcpp {
 
+namespace {
+
+bool matchesRequestedHint(const HintedUser& queuedUser, const HintedUser& requestedUser) {
+	return queuedUser.user == requestedUser.user &&
+		(requestedUser.hint.empty() || queuedUser.hint == requestedUser.hint);
+}
+
+bool matchesConnectionHub(const HintedUser& queuedUser, const CID& cid, const string& hubUrl) {
+	return queuedUser.user->getCID() == cid &&
+		(queuedUser.hint.empty() || queuedUser.hint == hubUrl);
+}
+
+} // namespace
+
 ConnectionManager::ConnectionManager() :
 	downloads(cqis[CONNECTION_TYPE_DOWNLOAD]),
 	shuttingDown(false)
@@ -127,15 +141,17 @@ void ConnectionManager::getDownloadConnection(const HintedUser& aUser, bool sing
 			// A full or partial list cannot use them, so retain established transfers
 			// and at most one not-yet-established connection attempt.
 			const auto hasActive = std::any_of(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
-				return cqi.getUser() == aUser.user && cqi.getState() == ConnectionQueueItem::ACTIVE;
+				return matchesRequestedHint(cqi.getUser(), aUser) && cqi.getState() == ConnectionQueueItem::ACTIVE;
 			});
 			string keepToken;
 			if(!hasActive) {
 				auto preferred = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
-					return cqi.getUser() == aUser.user && cqi.getState() == ConnectionQueueItem::CONNECTING;
+					return matchesRequestedHint(cqi.getUser(), aUser) && cqi.getState() == ConnectionQueueItem::CONNECTING;
 				});
 				if(preferred == downloads.end()) {
-					preferred = find(downloads.begin(), downloads.end(), aUser.user);
+					preferred = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
+						return matchesRequestedHint(cqi.getUser(), aUser);
+					});
 				}
 				if(preferred != downloads.end()) {
 					keepToken = preferred->getToken();
@@ -161,7 +177,9 @@ void ConnectionManager::getDownloadConnection(const HintedUser& aUser, bool sing
 			}
 		}
 
-		auto i = find(downloads.begin(), downloads.end(), aUser.user);
+		auto i = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
+			return matchesRequestedHint(cqi.getUser(), aUser);
+		});
 		if(i == downloads.end()) {
 			added.reset(new ConnectionQueueItem(getCQI(aUser, CONNECTION_TYPE_DOWNLOAD)));
 		} else {
@@ -175,7 +193,7 @@ void ConnectionManager::getDownloadConnection(const HintedUser& aUser, bool sing
 		fire(ConnectionManagerListener::Removed(), &cqi);
 	}
 	if(checkIdle) {
-		DownloadManager::getInstance()->checkIdle(aUser.user, singleConnection);
+		DownloadManager::getInstance()->checkIdle(aUser, singleConnection);
 	}
 }
 
@@ -751,7 +769,7 @@ void ConnectionManager::on(UserConnectionListener::MyNick, UserConnection* aSour
 		for(auto& cqi: downloads) {
 			cqi.setErrors(0);
 			if((cqi.getState() == ConnectionQueueItem::CONNECTING || cqi.getState() == ConnectionQueueItem::WAITING) &&
-				cqi.getUser().user->getCID() == cid)
+				matchesConnectionHub(cqi.getUser(), cid, aSource->getHubUrl()))
 			{
 				aSource->setUser(cqi.getUser());
 				// Indicate that we're interested in this file...

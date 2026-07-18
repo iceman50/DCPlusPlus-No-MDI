@@ -41,11 +41,25 @@ const string& PrivateFrame::getId() const { return id; }
 
 PrivateFrame::FrameMap PrivateFrame::frames;
 
+namespace {
+
+bool matchesCurrentHub(const HintedUser& queuedUser, const HintedUser& frameUser) {
+	return queuedUser.user == frameUser.user &&
+		(frameUser.hint.empty() || queuedUser.hint == frameUser.hint);
+}
+
+} // namespace
+
 void PrivateFrame::openWindow(TabViewPtr parent, const HintedUser& replyTo_, const tstring& msg,
 	const string& logPath, bool activate)
 {
 	auto i = frames.find(replyTo_);
 	auto frame = (i == frames.end()) ? new PrivateFrame(parent, replyTo_, logPath) : i->second;
+	if(i != frames.end() && !replyTo_.hint.empty() && frame->replyTo.getUser().hint != replyTo_.hint) {
+		frame->closeCC(true);
+		frame->replyTo.getUser().hint = replyTo_.hint;
+		frame->updateOnlineStatus(true);
+	}
 	if(activate)
 		frame->activate();
 	if(!msg.empty())
@@ -302,20 +316,24 @@ void PrivateFrame::layout() {
 
 void PrivateFrame::updateOnlineStatus(bool newChannel) {
 	auto hubs = ClientManager::getInstance()->getHubUrls(replyTo.getUser());
+	auto& user = replyTo.getUser();
 
-	if(newChannel || online != !hubs.empty()) {
-		online = !hubs.empty();
+	if(user.hint.empty() && !hubs.empty()) {
+		user.hint = hubs.front();
+		newChannel = true;
+	}
+
+	auto hintOnline = !hubs.empty() &&
+		(user.hint.empty() || find(hubs.begin(), hubs.end(), user.hint) != hubs.end());
+
+	if(newChannel || online != hintOnline) {
+		online = hintOnline;
 
 		if(!newChannel) {
 			addStatus(online ? T_("User went online") : T_("User went offline"));
 		}
 		setIcon(online ? IDI_PRIVATE : IDI_PRIVATE_OFF);
 		status->setIcon(STATUS_CHANNEL, WinUtil::statusIcon(ccReady() ? IDI_SECURE : online ? IDI_HUB : IDI_HUB_OFF));
-		newChannel = true;
-	}
-
-	if(online && find(hubs.begin(), hubs.end(), replyTo.getUser().hint) == hubs.end()) {
-		replyTo.getUser().hint = hubs.front();
 		newChannel = true;
 	}
 
@@ -344,7 +362,10 @@ void PrivateFrame::startCC(bool silent) {
 
 	{
 		auto lock = ClientManager::getInstance()->lock();
-		auto ou = ClientManager::getInstance()->findOnlineUser(replyTo.getUser());
+		const auto& user = replyTo.getUser();
+		auto ou = user.hint.empty() ?
+			ClientManager::getInstance()->findOnlineUser(user) :
+			ClientManager::getInstance()->findOnlineUserHint(user);
 		if(!ou) {
 			if(!silent) { addStatus(T_("User offline")); }
 			return;
@@ -613,7 +634,7 @@ void PrivateFrame::handleChannelMenu() {
 			auto url = hub.first;
 			auto current = !cc && url == replyTo.getUser().hint;
 			auto pos = menu->appendItem(dwt::util::escapeMenu(Text::toT(hub.second)),
-				[this, url] { closeCC(true); replyTo.getUser().hint = url; updateChannel(); }, nullptr, !current);
+				[this, url] { closeCC(true); replyTo.getUser().hint = url; updateOnlineStatus(true); }, nullptr, !current);
 			if(current) {
 				menu->checkItem(pos);
 			}
@@ -657,7 +678,7 @@ void PrivateFrame::on(ClientManagerListener::UserDisconnected, const UserPtr& aU
 }
 
 void PrivateFrame::on(ConnectionManagerListener::Connected, ConnectionQueueItem* cqi, UserConnection* uc) noexcept {
-	if(cqi->getType() == CONNECTION_TYPE_PM && cqi->getUser() == replyTo.getUser()) {
+	if(cqi->getType() == CONNECTION_TYPE_PM && matchesCurrentHub(cqi->getUser(), replyTo.getUser())) {
 		if(!uc->isSecure()) {
 			uc->disconnect(true);
 			return;
@@ -683,7 +704,7 @@ void PrivateFrame::on(ConnectionManagerListener::Connected, ConnectionQueueItem*
 }
 
 void PrivateFrame::on(ConnectionManagerListener::Removed, ConnectionQueueItem* cqi) noexcept {
-	if(cqi->getType() == CONNECTION_TYPE_PM && cqi->getUser() == replyTo.getUser()) {
+	if(cqi->getType() == CONNECTION_TYPE_PM && matchesCurrentHub(cqi->getUser(), replyTo.getUser())) {
 		{
 			Lock l(mutex);
 			conn = nullptr;

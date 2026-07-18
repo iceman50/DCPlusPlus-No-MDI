@@ -184,9 +184,8 @@ private:
 				bool operator()(const File& a, const File& b) const { return (Util::stricmp(a.getName(), b.getName()) < 0); }
 			};
 
-			/** Ensure this file's name doesn't clash with the names of the parent directory's sub-
-			directories or files; rename to "file (N).ext" otherwise (and set realPath to the
-			actual path on disk).
+			/** Store this file's real path and ensure its virtual name doesn't clash with the names
+			of the parent directory's sub-directories or files; rename to "file (N).ext" otherwise.
 			@param sourcePath Real path (on the disk) of the directory this file came from. */
 			void validateName(const string& sourcePath);
 
@@ -195,7 +194,7 @@ private:
 			string getRealPath() const { return realPath ? *realPath : parent->getRealPath(name); }
 
 			GETSET(string, name, Name);
-			optional<string> realPath; // only defined if this file had to be renamed to avoid duplication.
+			optional<string> realPath; // Exact path on disk; older cache records may not have this.
 			optional<TTHValue> tth;
 			GETSET(int64_t, size, Size);
 			GETSET(Directory*, parent, Parent);

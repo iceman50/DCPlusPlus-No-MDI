@@ -1038,8 +1038,10 @@ bool upgradeFromV2(string& file) {
 	if(buf.empty()) {
 		return false;
 	}
-	// GetFinalPathNameByHandle prepends "\\?\"; remove it.
-	if(buf.size() >= 4 && buf.substr(0, 4) == L"\\\\?\\") {
+	// GetFinalPathNameByHandle prepends "\\?\"; normalize it back to regular paths.
+	if(buf.size() >= 8 && buf.substr(0, 8) == L"\\\\?\\UNC\\") {
+		buf.replace(0, 8, L"\\\\");
+	} else if(buf.size() >= 4 && buf.substr(0, 4) == L"\\\\?\\") {
 		buf.erase(0, 4);
 	}
 

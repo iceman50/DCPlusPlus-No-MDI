@@ -83,6 +83,21 @@ TEST_F(testchatformat, hub_specific_nickname_is_colored_as_a_mention)
 		"<span id=\"mention\">HubSpecificNick</span>"));
 }
 
+TEST_F(testchatformat, overlong_chat_links_are_not_clickable)
+{
+	auto settings = SettingsManager::getInstance();
+	settings->set(SettingsManager::CHAT_LINK_MAX_LENGTH, 24);
+
+	string scratch;
+	Tagger tags("short http://ok.invalid long http://example.invalid/abcdefghijklmnopqrstuvwxyz");
+	ChatMessage::format(tags, scratch);
+	const auto html = tags.merge(scratch);
+
+	EXPECT_NE(string::npos, html.find("<a href=\"http://ok.invalid\">http://ok.invalid</a>"));
+	EXPECT_EQ(string::npos, html.find("href=\"http://example.invalid/abcdefghijklmnopqrstuvwxyz\""));
+	EXPECT_NE(string::npos, html.find("http://example.invalid/abcdefghijklmnopqrstuvwxyz"));
+}
+
 TEST_F(testchatformat, semantic_chat_styles_round_trip)
 {
 	const SettingsManager::StrSetting fonts[] = {

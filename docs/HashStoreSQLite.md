@@ -906,7 +906,7 @@ It stores a snapshot of the in-memory share tree:
 * files
 * file sizes
 * file TTH roots when known
-* optional real-path overrides
+* exact real file paths
 
 It does not replace a filesystem refresh forever. It only allows startup to
 become responsive immediately when the previous share tree is still compatible
@@ -914,7 +914,7 @@ with current settings.
 
 ## Share Cache Schema
 
-`ShareCache.sqlite3` has schema version 1.
+`ShareCache.sqlite3` has schema version 2.
 
 ### `metadata`
 
@@ -971,7 +971,7 @@ CREATE TABLE IF NOT EXISTS files (
     name TEXT NOT NULL CHECK(length(name) > 0),
     size INTEGER NOT NULL CHECK(size >= 0),
     tth TEXT CHECK(tth IS NULL OR length(tth) = 39),
-    real_path TEXT
+    real_path TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_share_cache_files_directory
@@ -990,7 +990,7 @@ Tree leaf data.
 The share cache is accepted only if its fingerprint matches the current share
 configuration. The fingerprint uses FNV-style accumulation and includes:
 
-* cache format marker: `ShareCache.v1`
+* cache format marker: `ShareCache.v2`
 * configured real share roots
 * configured virtual share names
 * `SHARE_HIDDEN`
@@ -1034,6 +1034,7 @@ The share cache is skipped when:
 
 * `SHARE_CACHE` is disabled
 * `DONT_DL_ALREADY_SHARED` is enabled
+* any configured share root is a UNC path
 * `ShareCache.sqlite3` does not exist
 * the schema version does not match
 * the fingerprint does not match
@@ -1069,7 +1070,7 @@ File validation:
 * name must be a valid path segment
 * size must be non-negative
 * TTH text, when present, must be 39 characters and parse as a TTH value
-* `real_path`, when present, must be non-empty
+* `real_path` must be present and non-empty
 * `real_path` must be at most 32768 bytes
 * `real_path` must remain under a configured shared root
 

@@ -443,7 +443,9 @@ OnlineUser* ClientManager::findOnlineUserHint(const CID& cid, const string& hint
 
 void ClientManager::connect(const HintedUser& user, const string& token, ConnectionType type) {
 	Lock l(cs);
-	OnlineUser* u = findOnlineUser(user);
+	OnlineUser* u = user.hint.empty() ?
+		findOnlineUser(user) :
+		findOnlineUserHint(user);
 
 	if(u) {
 		u->getClient().connect(*u, token, type);
@@ -452,7 +454,9 @@ void ClientManager::connect(const HintedUser& user, const string& token, Connect
 
 void ClientManager::privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo) {
 	Lock l(cs);
-	OnlineUser* u = findOnlineUser(user);
+	OnlineUser* u = user.hint.empty() ?
+		findOnlineUser(user) :
+		findOnlineUserHint(user);
 
 	if(u && !PluginManager::getInstance()->runHook(HOOK_CHAT_PM_OUT, u, msg)) {
 		u->getClient().privateMessage(*u, msg, thirdPerson, echo);
