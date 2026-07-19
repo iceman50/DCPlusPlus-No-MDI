@@ -38,7 +38,7 @@ Client::Client(const string& hubURL, char separator_, bool secure_) :
 	myIdentity(ClientManager::getInstance()->getMe(), 0), uniqueId(++idCounter),
 	reconnDelay(120), registered(false), autoReconnect(false),
 	encoding(Text::systemCharset), state(STATE_DISCONNECTED), sock(0), lastActivity(GET_TICK()),
-	hubUrl(hubURL), separator(separator_),
+	hubUrl(hubURL), connectionUrl(hubURL), separator(separator_),
 	secure(secure_), failoverIndex(0), usingFailover(false), countType(COUNT_UNCOUNTED)
 {
 	string file, proto, query, fragment;
@@ -75,6 +75,7 @@ void Client::reloadSettings(bool updateNick) {
 		prevNick = get(Nick);
 
 	*static_cast<HubSettings*>(this) = SettingsManager::getInstance()->getHubSettings();
+	setFailoverUrls(StringList());
 
 	auto fav = FavoriteManager::getInstance()->getFavoriteHubEntry(getHubUrl());
 	if(fav) {
@@ -128,8 +129,10 @@ void Client::connect() {
 void Client::connectImpl(bool resetAttemptedHubUrls) {
 	if(resetAttemptedHubUrls) {
 		attemptedHubUrls.clear();
+		setConnectionUrl(hubUrl, false);
+		usingFailover = false;
 	}
-	markHubUrlAttempted(hubUrl);
+	markHubUrlAttempted(connectionUrl);
 	updateActivity();
 
 	if(sock) {
@@ -213,9 +216,9 @@ bool Client::isValidFailoverUrl(const string& url, bool adcClient, bool requireP
 	return true;
 }
 
-bool Client::setHubUrl(const string& hubURL) {
+bool Client::setConnectionUrl(const string& hubURL, bool validateProtocol) {
 	const bool adcClient = dynamic_cast<AdcHub*>(this) != nullptr;
-	if(!isValidFailoverUrl(hubURL, adcClient)) {
+	if(validateProtocol && !isValidFailoverUrl(hubURL, adcClient)) {
 		return false;
 	}
 
@@ -226,7 +229,7 @@ bool Client::setHubUrl(const string& hubURL) {
 	if(address_.empty() || port_.empty())
 		return false;
 
-	hubUrl = hubURL;
+	connectionUrl = hubURL;
 	address = address_;
 	port = port_;
 	if(!query.empty()) {
@@ -246,7 +249,7 @@ bool Client::advanceFailoverUrl() {
 		if(hasAttemptedHubUrl(url)) {
 			continue;
 		}
-		if(setHubUrl(url)) {
+		if(setConnectionUrl(url)) {
 			usingFailover = true;
 			return true;
 		}
@@ -254,8 +257,8 @@ bool Client::advanceFailoverUrl() {
 	return false;
 }
 
-void Client::markHubUrlAttempted(const string& hubURL) {
-	attemptedHubUrls.insert(Text::toLower(hubURL));
+void Client::markHubUrlAttempted(const string& connectionURL) {
+	attemptedHubUrls.insert(Text::toLower(connectionURL));
 }
 
 bool Client::hasAttemptedHubUrl(const string& hubURL) const {

@@ -233,6 +233,13 @@ socket_t Socket::setSock(socket_t s, int af) {
 		throw SocketException(str(F_("Unknown protocol %d") % af));
 	}
 
+	if(receiveBufferSize > 0) {
+		check([&] { return setSocketOpt2(s, SOL_SOCKET, SO_RCVBUF, receiveBufferSize); });
+	}
+	if(sendBufferSize > 0) {
+		check([&] { return setSocketOpt2(s, SOL_SOCKET, SO_SNDBUF, sendBufferSize); });
+	}
+
 	return s;
 }
 
@@ -368,6 +375,7 @@ string Socket::listen(const string& port) {
 
 void Socket::connect(const string& aAddr, const string& aPort, const string& localPort) {
 	disconnect();
+	ip.clear();
 
 	// We try to connect to both IPv4 and IPv6 if available
 	auto addr = resolveAddr(aAddr, aPort);
@@ -424,8 +432,12 @@ void Socket::socksConnect(const string& aAddr, const string& aPort, uint32_t tim
 
 	connect(SETTING(SOCKS_SERVER), std::to_string(SETTING(SOCKS_PORT)));
 
-	if(!waitConnected(timeLeft(start, timeout))) {
-		throw SocketException(_("The socks server failed establish a connection"));
+	// Establish the raw proxy connection before negotiating SOCKS or TLS. A
+	// failed address family may complete before another family succeeds.
+	while(!Socket::waitConnected(static_cast<uint32_t>(timeLeft(start, timeout)))) {
+		if(timeout == 0) {
+			throw SocketException(_("The socks server failed establish a connection"));
+		}
 	}
 
 	socksAuth(timeLeft(start, timeout));
@@ -566,6 +578,12 @@ int Socket::getSocketOptInt(int option) {
 }
 
 void Socket::setSocketOpt(int option, int val) {
+	if(option == SO_RCVBUF) {
+		receiveBufferSize = val;
+	} else if(option == SO_SNDBUF) {
+		sendBufferSize = val;
+	}
+
 	int len = sizeof(val);
 	if(sock4.valid()) {
 		check([&] { return ::setsockopt(sock4, SOL_SOCKET, option, (char*)&val, len); });
@@ -786,23 +804,28 @@ std::pair<bool, bool> Socket::wait(uint32_t millis, bool checkRead, bool checkWr
 
 bool Socket::waitConnected(uint32_t millis) {
 	timeval tv = { static_cast<long int>(millis/1000), static_cast<long int>((millis%1000)*1000) };
-	fd_set fd;
-	FD_ZERO(&fd);
+	fd_set wfd, efd;
+	FD_ZERO(&wfd);
+	FD_ZERO(&efd);
 
 	int nfds = -1;
 	if(sock4.valid()) {
-		FD_SET(sock4, &fd);
+		FD_SET(sock4, &wfd);
+		FD_SET(sock4, &efd);
 		nfds = sock4;
 	}
 
 	if(sock6.valid()) {
-		FD_SET(sock6, &fd);
+		FD_SET(sock6, &wfd);
+		FD_SET(sock6, &efd);
 		nfds = std::max((int)sock6, nfds);
 	}
 
-	check([&] { return ::select(nfds + 1, NULL, &fd, NULL, &tv); });
+	// Winsock reports failed nonblocking connects through exceptfds.
+	check([&] { return ::select(nfds + 1, NULL, &wfd, &efd, &tv); });
+	auto connectReady = [&wfd, &efd](socket_t s) { return FD_ISSET(s, &wfd) || FD_ISSET(s, &efd); };
 
-	if(sock6.valid() && FD_ISSET(sock6, &fd)) {
+	if(sock6.valid() && connectReady(sock6)) {
 		int err6 = getSocketOptInt2(sock6, SO_ERROR);
 		if(err6 == 0) {
 			sock4.reset(); // We won't be needing this any more...
@@ -816,7 +839,7 @@ bool Socket::waitConnected(uint32_t millis) {
 		sock6.reset();
 	}
 
-	if(sock4.valid() && FD_ISSET(sock4, &fd)) {
+	if(sock4.valid() && connectReady(sock4)) {
 		int err4 = getSocketOptInt2(sock4, SO_ERROR);
 		if(err4 == 0) {
 			sock6.reset(); // We won't be needing this any more...

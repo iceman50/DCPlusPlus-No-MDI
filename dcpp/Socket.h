@@ -93,7 +93,7 @@ public:
 	};
 
 	// Try both IPv4 and IPv6 by default; callers may force IPv4-only explicitly.
-	explicit Socket(SocketType type) : v4only(false), type(type) { }
+	explicit Socket(SocketType type) : v4only(false), type(type), receiveBufferSize(0), sendBufferSize(0) { }
 
 	virtual ~Socket() { }
 
@@ -228,6 +228,9 @@ private:
 	// Low level interface
 	socket_t create(const addrinfo& ai);
 	static string resolveName(const sockaddr* sa, socklen_t sa_len, int flags = NI_NUMERICHOST);
+
+	int receiveBufferSize;
+	int sendBufferSize;
 };
 
 } // namespace dcpp

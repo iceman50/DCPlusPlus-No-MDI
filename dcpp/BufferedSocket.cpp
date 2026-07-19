@@ -125,6 +125,7 @@ void BufferedSocket::connect(const string& aAddress, const string& aPort, const 
 	s->setLocalIp6(CONNSETTING(BIND_ADDRESS6));
 
 	setSocket(move(s));
+	setOptions();
 
 	Lock l(cs);
 	addTask(CONNECT, new ConnectInfo(aAddress, aPort, localPort, natRole, proxy && (CONNSETTING(OUTGOING_CONNECTIONS) == SettingsManager::OUTGOING_SOCKS5)));
@@ -149,8 +150,6 @@ void BufferedSocket::threadConnect(const string& aAddr, const string& aPort, con
 			} else {
 				sock->connect(aAddr, aPort, localPort);
 			}
-
-			setOptions();
 
 			bool connSucceeded;
 			while(!(connSucceeded = sock->waitConnected(POLL_TIMEOUT)) && endTime >= GET_TICK()) {

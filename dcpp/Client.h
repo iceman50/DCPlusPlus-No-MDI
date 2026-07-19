@@ -100,7 +100,9 @@ public:
 	string getHubName() const { return getHubIdentity().getNick().empty() ? getHubUrl() : getHubIdentity().getNick(); }
 	string getHubDescription() const { return getHubIdentity().getDescription(); }
 
+	// Keep the logical hub identity stable while a failover endpoint is active.
 	const string& getHubUrl() const { return hubUrl; }
+	const string& getConnectionUrl() const { return connectionUrl; }
 	bool isUsingFailover() const { return usingFailover; }
 	/** Validate a failover URL without changing client state. */
 	static bool isValidFailoverUrl(const string& url, bool adcClient, bool requirePublicNumeric = false);
@@ -181,17 +183,18 @@ protected:
 
 private:
 	std::atomic<uint64_t> lastActivity;
-	bool setHubUrl(const string& hubURL);
+	bool setConnectionUrl(const string& hubURL, bool validateProtocol = true);
 	void setFailoverUrls(const StringList& urls);
 	bool advanceFailoverUrl();
 	void connectImpl(bool resetAttemptedHubUrls);
-	void markHubUrlAttempted(const string& hubURL);
+	void markHubUrlAttempted(const string& connectionURL);
 	bool hasAttemptedHubUrl(const string& hubURL) const;
 
 	virtual OnlineUserList getUsers() const = 0;
 	virtual void infoImpl() = 0;
 
 	string hubUrl;
+	string connectionUrl;
 	string address;
 	string ip;
 	string keyprint;

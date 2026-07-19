@@ -1,8 +1,47 @@
 #include "testbase.h"
 
+#include <dcpp/Socket.h>
+#include <dcpp/TimerManager.h>
 #include <dcpp/Util.h>
 
 using namespace dcpp;
+
+namespace {
+
+class NetworkSession {
+public:
+	NetworkSession() {
+#ifdef _WIN32
+		WSADATA data;
+		result = WSAStartup(MAKEWORD(2, 2), &data);
+#endif
+	}
+
+	~NetworkSession() {
+#ifdef _WIN32
+		if(result == 0) {
+			WSACleanup();
+		}
+#endif
+	}
+
+	bool ready() const { return result == 0; }
+
+private:
+	int result = 0;
+};
+
+bool waitForConnect(Socket& socket, uint32_t timeout) {
+	const auto deadline = GET_TICK() + timeout;
+	do {
+		if(socket.waitConnected(100)) {
+			return true;
+		}
+	} while(GET_TICK() < deadline);
+	return false;
+}
+
+}
 
 TEST(testnetwork, classifies_ipv4_addresses)
 {
@@ -56,4 +95,69 @@ TEST(testnetwork, validates_peer_endpoints)
 	EXPECT_FALSE(Util::isSafePeerEndpoint("192.168.1.10", "0", "192.168.1.1"));
 	EXPECT_FALSE(Util::isSafePeerEndpoint("192.168.1.10", "65536", "192.168.1.1"));
 	EXPECT_FALSE(Util::isSafePeerEndpoint("not-an-ip", "411", "192.168.1.1"));
+}
+
+TEST(testnetwork, connects_to_ipv4_loopback_with_preconfigured_buffers)
+{
+	NetworkSession network;
+	ASSERT_TRUE(network.ready());
+
+	Socket listener(Socket::TYPE_TCP);
+	listener.setV4only(true);
+	listener.setLocalIp4("127.0.0.1");
+	const auto port = listener.listen("0");
+
+	Socket client(Socket::TYPE_TCP);
+	client.setV4only(true);
+	client.setSocketOpt(SO_RCVBUF, 32 * 1024);
+	client.setSocketOpt(SO_SNDBUF, 32 * 1024);
+	client.connect("127.0.0.1", port);
+
+	EXPECT_TRUE(waitForConnect(client, 2000));
+	EXPECT_GE(client.getSocketOptInt(SO_RCVBUF), 32 * 1024);
+	EXPECT_GE(client.getSocketOptInt(SO_SNDBUF), 32 * 1024);
+}
+
+TEST(testnetwork, reports_failed_nonblocking_connect)
+{
+	NetworkSession network;
+	ASSERT_TRUE(network.ready());
+
+	Socket listener(Socket::TYPE_TCP);
+	listener.setV4only(true);
+	listener.setLocalIp4("127.0.0.1");
+	const auto port = listener.listen("0");
+	listener.disconnect();
+
+	Socket client(Socket::TYPE_TCP);
+	client.setV4only(true);
+	bool failed = false;
+	try {
+		client.connect("127.0.0.1", port);
+		waitForConnect(client, 2000);
+	} catch(const SocketException&) {
+		failed = true;
+	}
+
+	EXPECT_TRUE(failed);
+}
+
+TEST(testnetwork, clears_resolved_ip_before_reusing_a_socket)
+{
+	NetworkSession network;
+	ASSERT_TRUE(network.ready());
+
+	Socket listener(Socket::TYPE_TCP);
+	listener.setV4only(true);
+	listener.setLocalIp4("127.0.0.1");
+	const auto port = listener.listen("0");
+
+	Socket client(Socket::TYPE_TCP);
+	client.setV4only(true);
+	client.connect("127.0.0.1", port);
+	ASSERT_TRUE(waitForConnect(client, 2000));
+	ASSERT_FALSE(client.getIp().empty());
+
+	client.setLocalIp4("192.0.2.1");
+	EXPECT_THROW(client.connect("127.0.0.1", port), SocketException);
 }

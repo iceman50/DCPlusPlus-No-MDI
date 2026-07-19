@@ -8,7 +8,7 @@ contains the unstripped executable, its GNU debug companion PDB, and
 changelog-bfe.txt.
 
 Package names use:
-DCPlusPlus-Experimental-VERSION-COMPILER-[Release|Debug]-MSVCRT-gitrev.zip
+DCPlusPlus-Experimental-VERSION-COMPILER-[Release|Debug]-MSVCRT-gitrev-yyyyMMdd-HHmmssZ.zip
 
 By default the script prompts for the build configuration and writes packages
 to the root-level dist directory. It can also be used non-interactively:
@@ -264,6 +264,7 @@ function New-DistPackage {
 		[string]$VersionNumber,
 		[string]$CompilerName,
 		[string]$GitRevision,
+		[string]$BuildTimestamp,
 		[bool]$OverwriteExisting
 	)
 
@@ -278,9 +279,9 @@ function New-DistPackage {
 	Assert-RequiredFile -Path $changelogPath -Description "BFE changelog"
 
 	$configurationName = Get-PackageConfigurationName -Mode $Mode
-	$zipName = "DCPlusPlus-Experimental-$VersionNumber-$CompilerName-$configurationName-MSVCRT-$GitRevision.zip"
+	$zipName = "DCPlusPlus-Experimental-$VersionNumber-$CompilerName-$configurationName-MSVCRT-$GitRevision-$BuildTimestamp.zip"
 	$zipPath = Join-Path $OutputRoot $zipName
-	$stageDir = Join-Path $OutputRoot ".stage-$buildName-$GitRevision"
+	$stageDir = Join-Path $OutputRoot ".stage-$buildName-$GitRevision-$BuildTimestamp"
 
 	if((Test-Path -LiteralPath $zipPath) -and -not $OverwriteExisting) {
 		throw "Package already exists: $zipPath. Re-run with -Force to replace it."
@@ -328,6 +329,7 @@ $compilerName = if([string]::IsNullOrWhiteSpace($CompilerLabel)) {
 	ConvertTo-PackageToken -Value $CompilerLabel
 }
 $gitRevision = Get-GitRevision -RepoRoot $repoRoot
+$buildTimestamp = [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
 
 $runBuild = -not $NoBuild
 if($runBuild -and $promptForBuild) {
@@ -341,7 +343,7 @@ foreach($mode in $modes) {
 	if($runBuild) {
 		Invoke-DistBuild -RepoRoot $repoRoot -Mode $mode -SCons $SConsCommand
 	}
-	$packages += New-DistPackage -RepoRoot $repoRoot -Mode $mode -OutputRoot $OutputDirectory -VersionNumber $versionNumber -CompilerName $compilerName -GitRevision $gitRevision -OverwriteExisting ([bool]$Force)
+	$packages += New-DistPackage -RepoRoot $repoRoot -Mode $mode -OutputRoot $OutputDirectory -VersionNumber $versionNumber -CompilerName $compilerName -GitRevision $gitRevision -BuildTimestamp $buildTimestamp -OverwriteExisting ([bool]$Force)
 }
 
 Write-Host ""

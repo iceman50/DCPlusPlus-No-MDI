@@ -948,7 +948,7 @@ int HubFrame::UserInfo::compareItems(const HubFrame::UserInfo* a, const HubFrame
 }
 
 void HubFrame::on(Connecting, Client*) noexcept {
-	auto hubUrl = client->getHubUrl();
+	auto hubUrl = client->getConnectionUrl();
 	callAsync([this, hubUrl] {
 		clearUserList();
 		clearTaskList();
@@ -959,7 +959,7 @@ void HubFrame::on(Connecting, Client*) noexcept {
 
 void HubFrame::on(Connected, Client* aClient) noexcept {
 	const auto failover = aClient->isUsingFailover();
-	const auto hubUrl = aClient->getHubUrl();
+	const auto hubUrl = aClient->getConnectionUrl();
 	callAsync([this, failover, hubUrl] {
 		onConnected();
 		if(failover) {
