@@ -202,6 +202,72 @@ int Socket::getLastError() { return errno; }
 
 #endif
 
+SocketWakeup::SocketWakeup() {
+	receiver = check([&] { return ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); });
+
+	sockaddr_in address = {};
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	address.sin_port = 0;
+	check([&] { return ::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)); });
+
+	socklen_t addressSize = sizeof(address);
+	check([&] { return ::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &addressSize); });
+	check([&] { return ::connect(receiver, reinterpret_cast<sockaddr*>(&address), addressSize); });
+
+	setBlocking2(receiver, false);
+}
+
+void SocketWakeup::signal() noexcept {
+	const char value = 0;
+	for(;;) {
+		if(::send(receiver, &value, 1, 0) == 1) {
+			return;
+		}
+
+		const auto error = Socket::getLastError();
+#ifdef _WIN32
+		if(error == WSAEWOULDBLOCK) {
+			return;
+		}
+#else
+		if(error == EINTR) {
+			continue;
+		}
+		if(error == EAGAIN || error == EWOULDBLOCK) {
+			return;
+		}
+#endif
+		dcdebug("SocketWakeup::signal failed: %d\n", error);
+		return;
+	}
+}
+
+void SocketWakeup::clear() noexcept {
+	char buffer[64];
+	for(;;) {
+		if(::recv(receiver, buffer, sizeof(buffer), 0) > 0) {
+			continue;
+		}
+
+		const auto error = Socket::getLastError();
+#ifdef _WIN32
+		if(error == WSAEWOULDBLOCK) {
+			return;
+		}
+#else
+		if(error == EINTR) {
+			continue;
+		}
+		if(error == EAGAIN || error == EWOULDBLOCK) {
+			return;
+		}
+#endif
+		dcdebug("SocketWakeup::clear failed: %d\n", error);
+		return;
+	}
+}
+
 // https://en.cppreference.com/w/cpp/language/default_initialization
 // Initialized to 0
 Socket::Stats Socket::stats;
@@ -761,13 +827,28 @@ void Socket::writeTo(const string& aAddr, const string& aPort, const void* aBuff
  * @throw SocketException Select or the connection attempt failed.
  */
 std::pair<bool, bool> Socket::wait(uint32_t millis, bool checkRead, bool checkWrite) {
-	timeval tv = { static_cast<long int>(millis/1000), static_cast<long int>((millis%1000)*1000) };
+	auto result = waitImpl(millis, checkRead, checkWrite, INVALID_SOCKET);
+	return std::make_pair(result.read, result.write);
+}
+
+SocketWaitResult Socket::wait(uint32_t millis, bool checkRead, bool checkWrite, const SocketWakeup& wakeup) {
+	return waitImpl(millis, checkRead, checkWrite, wakeup.getHandle());
+}
+
+SocketWaitResult Socket::waitImpl(uint32_t millis, bool checkRead, bool checkWrite, socket_t wakeupHandle) {
+	timeval tv = {};
+	timeval* timeout = NULL;
+	if(millis != WAIT_INFINITE) {
+		tv.tv_sec = static_cast<long int>(millis / 1000);
+		tv.tv_usec = static_cast<long int>((millis % 1000) * 1000);
+		timeout = &tv;
+	}
 	fd_set rfd, wfd;
 	fd_set *rfdp = NULL, *wfdp = NULL;
 
 	int nfds = -1;
 
-	if(checkRead) {
+	if(checkRead || wakeupHandle != INVALID_SOCKET) {
 		rfdp = &rfd;
 		FD_ZERO(rfdp);
 		if(sock4.valid()) {
@@ -778,6 +859,11 @@ std::pair<bool, bool> Socket::wait(uint32_t millis, bool checkRead, bool checkWr
 		if(sock6.valid()) {
 			FD_SET(sock6, &rfd);
 			nfds = std::max((int)sock6, nfds);
+		}
+
+		if(wakeupHandle != INVALID_SOCKET) {
+			FD_SET(wakeupHandle, &rfd);
+			nfds = std::max((int)wakeupHandle, nfds);
 		}
 	}
 
@@ -795,11 +881,13 @@ std::pair<bool, bool> Socket::wait(uint32_t millis, bool checkRead, bool checkWr
 		}
 	}
 
-	check([&] { return ::select(nfds + 1, rfdp, wfdp, NULL, &tv); });
+	check([&] { return ::select(nfds + 1, rfdp, wfdp, NULL, timeout); });
 
-	return std::make_pair(
+	return {
 		rfdp && ((sock4.valid() && FD_ISSET(sock4, rfdp)) || (sock6.valid() && FD_ISSET(sock6, rfdp))),
-		wfdp && ((sock4.valid() && FD_ISSET(sock4, wfdp)) || (sock6.valid() && FD_ISSET(sock6, wfdp))));
+		wfdp && ((sock4.valid() && FD_ISSET(sock4, wfdp)) || (sock6.valid() && FD_ISSET(sock6, wfdp))),
+		rfdp && wakeupHandle != INVALID_SOCKET && FD_ISSET(wakeupHandle, rfdp)
+	};
 }
 
 bool Socket::waitConnected(uint32_t millis) {

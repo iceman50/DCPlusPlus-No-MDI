@@ -34,12 +34,11 @@ namespace dcpp {
 using std::min;
 using std::max;
 
-// Polling is used for tasks...should be fixed...
-#define POLL_TIMEOUT 250
+constexpr uint32_t INTERRUPT_CHECK_INTERVAL = 250;
 
 BufferedSocket::BufferedSocket(char aSeparator, bool v4only) :
-separator(aSeparator), mode(MODE_LINE), dataBytes(0), rollback(0), state(STARTING),
-disconnecting(false), v4only(v4only)
+separator(aSeparator), taskWakeupPending(false), mode(MODE_LINE), dataBytes(0), rollback(0),
+state(STARTING), disconnecting(false), v4only(v4only)
 {
 	start();
 
@@ -152,7 +151,7 @@ void BufferedSocket::threadConnect(const string& aAddr, const string& aPort, con
 			}
 
 			bool connSucceeded;
-			while(!(connSucceeded = sock->waitConnected(POLL_TIMEOUT)) && endTime >= GET_TICK()) {
+			while(!(connSucceeded = sock->waitConnected(INTERRUPT_CHECK_INTERVAL)) && endTime >= GET_TICK()) {
 				if(disconnecting) return;
 			}
 
@@ -185,7 +184,7 @@ void BufferedSocket::threadAccept() {
 	inbuf.resize(sock->getSocketOptInt(SO_RCVBUF));
 
 	uint64_t startTime = GET_TICK();
-	while(!sock->waitAccepted(POLL_TIMEOUT)) {
+	while(!sock->waitAccepted(INTERRUPT_CHECK_INTERVAL)) {
 		if(disconnecting)
 			return;
 
@@ -388,7 +387,7 @@ void BufferedSocket::threadSendFile(InputStream* file) {
 					}
 				} else {
 					while(!disconnecting) {
-						auto w = sock->wait(POLL_TIMEOUT, true, true);
+						auto w = sock->wait(INTERRUPT_CHECK_INTERVAL, true, true);
 						if(w.first) {
 							threadRead();
 						}
@@ -439,7 +438,7 @@ void BufferedSocket::threadSendData() {
 			return;
 		}
 
-		auto w = sock->wait(POLL_TIMEOUT, true, true);
+		auto w = sock->wait(INTERRUPT_CHECK_INTERVAL, true, true);
 
 		if(w.first) {
 			threadRead();
@@ -499,17 +498,17 @@ bool BufferedSocket::checkEvents() {
 }
 
 void BufferedSocket::checkSocket() {
-	auto w = sock->wait(POLL_TIMEOUT, true, false);
+	if(!prepareSocketWait()) {
+		return;
+	}
 
-	if(w.first) {
+	auto w = sock->wait(Socket::WAIT_INFINITE, true, false, taskWakeup);
+
+	if(w.read) {
 		threadRead();
 	}
 }
 
-/**
- * Main task dispatcher for the buffered socket abstraction.
- * @todo Fix the polling...
- */
 int BufferedSocket::run() {
 	dcdebug("BufferedSocket::run() start %p\n", (void*)this);
 	while(true) {
@@ -549,7 +548,19 @@ void BufferedSocket::shutdown() {
 
 void BufferedSocket::addTask(Tasks task, TaskData* data) {
 	dcassert(task == DISCONNECT || task == SHUTDOWN || sock.get());
-	tasks.push_back(make_pair(task, unique_ptr<TaskData>(data))); taskSem.signal();
+	tasks.push_back(make_pair(task, unique_ptr<TaskData>(data)));
+	taskSem.signal();
+	if(!taskWakeupPending) {
+		taskWakeupPending = true;
+		taskWakeup.signal();
+	}
+}
+
+bool BufferedSocket::prepareSocketWait() {
+	Lock l(cs);
+	taskWakeup.clear();
+	taskWakeupPending = false;
+	return tasks.empty();
 }
 
 } // namespace dcpp

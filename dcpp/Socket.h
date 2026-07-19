@@ -81,6 +81,26 @@ private:
 	socket_t sock;
 };
 
+class SocketWakeup {
+public:
+	SocketWakeup();
+	SocketWakeup(const SocketWakeup&) = delete;
+	SocketWakeup& operator=(const SocketWakeup&) = delete;
+
+	void signal() noexcept;
+	void clear() noexcept;
+	socket_t getHandle() const noexcept { return receiver.get(); }
+
+private:
+	SocketHandle receiver;
+};
+
+struct SocketWaitResult {
+	bool read;
+	bool write;
+	bool wakeup;
+};
+
 class Socket
 {
 public:
@@ -155,7 +175,9 @@ public:
 	 */
 	int readAll(void* aBuffer, int aBufLen, uint32_t timeout = 0);
 
+	enum : uint32_t { WAIT_INFINITE = static_cast<uint32_t>(-1) };
 	virtual std::pair<bool, bool> wait(uint32_t millis, bool checkRead, bool checkWrite);
+	virtual SocketWaitResult wait(uint32_t millis, bool checkRead, bool checkWrite, const SocketWakeup& wakeup);
 
 	typedef std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> addrinfo_p;
 	static string resolve(const string& aDns, int af = AF_UNSPEC) noexcept;
@@ -222,6 +244,7 @@ protected:
 	static socklen_t udpAddrLen;
 
 private:
+	SocketWaitResult waitImpl(uint32_t millis, bool checkRead, bool checkWrite, socket_t wakeupHandle);
 	void socksAuth(uint32_t timeout);
 	socket_t setSock(socket_t s, int af);
 

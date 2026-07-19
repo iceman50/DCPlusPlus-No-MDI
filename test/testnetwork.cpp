@@ -1,8 +1,11 @@
 #include "testbase.h"
 
 #include <dcpp/Socket.h>
+#include <dcpp/Thread.h>
 #include <dcpp/TimerManager.h>
 #include <dcpp/Util.h>
+
+#include <thread>
 
 using namespace dcpp;
 
@@ -160,4 +163,29 @@ TEST(testnetwork, clears_resolved_ip_before_reusing_a_socket)
 
 	client.setLocalIp4("192.0.2.1");
 	EXPECT_THROW(client.connect("127.0.0.1", port), SocketException);
+}
+
+TEST(testnetwork, wakes_socket_wait_for_queued_tasks)
+{
+	NetworkSession network;
+	ASSERT_TRUE(network.ready());
+
+	Socket socket(Socket::TYPE_TCP);
+	SocketWakeup wakeup;
+	std::thread signaler([&wakeup] {
+		Thread::sleep(25);
+		wakeup.signal();
+	});
+
+	const auto start = GET_TICK();
+	const auto result = socket.wait(2000, true, false, wakeup);
+	signaler.join();
+
+	EXPECT_TRUE(result.wakeup);
+	EXPECT_FALSE(result.read);
+	EXPECT_FALSE(result.write);
+	EXPECT_LT(GET_TICK() - start, 1000U);
+
+	wakeup.clear();
+	EXPECT_FALSE(socket.wait(0, true, false, wakeup).wakeup);
 }

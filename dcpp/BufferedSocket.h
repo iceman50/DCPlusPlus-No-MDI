@@ -157,6 +157,8 @@ private:
 	CriticalSection cs;
 
 	Semaphore taskSem;
+	SocketWakeup taskWakeup;
+	bool taskWakeupPending;
 	deque<pair<Tasks, unique_ptr<TaskData> > > tasks;
 
 	Modes mode;
@@ -186,6 +188,7 @@ private:
 
 	bool checkEvents();
 	void checkSocket();
+	bool prepareSocketWait();
 
 	void setSocket(std::unique_ptr<Socket>&& s);
 	void setOptions();

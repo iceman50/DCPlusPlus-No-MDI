@@ -58,6 +58,7 @@ public:
 	virtual int read(void* aBuffer, int aBufLen);
 	virtual int write(const void* aBuffer, int aLen);
 	virtual std::pair<bool, bool> wait(uint32_t millis, bool checkRead, bool checkWrite);
+	virtual SocketWaitResult wait(uint32_t millis, bool checkRead, bool checkWrite, const SocketWakeup& wakeup);
 	virtual void shutdown() noexcept;
 	virtual void close() noexcept;
 
@@ -71,6 +72,7 @@ public:
 	virtual bool waitAccepted(uint32_t millis);
 
 private:
+	bool hasPendingRead();
 
 	SSL_CTX* ctx;
 	ssl::SSL ssl;

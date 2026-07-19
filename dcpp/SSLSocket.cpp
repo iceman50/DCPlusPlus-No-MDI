@@ -229,13 +229,27 @@ int SSLSocket::checkSSL(int ret) {
 }
 
 std::pair<bool, bool> SSLSocket::wait(uint32_t millis, bool checkRead, bool checkWrite) {
-	if(ssl && checkRead) {
-		/** @todo Take writing into account as well if reading is possible? */
-		char c;
-		if(SSL_peek(ssl, &c, 1) > 0)
-			return std::make_pair(true, false);
+	if(checkRead && hasPendingRead()) {
+		return std::make_pair(true, false);
 	}
 	return Socket::wait(millis, checkRead, checkWrite);
+}
+
+SocketWaitResult SSLSocket::wait(uint32_t millis, bool checkRead, bool checkWrite, const SocketWakeup& wakeup) {
+	if(checkRead && hasPendingRead()) {
+		return { true, false, false };
+	}
+	return Socket::wait(millis, checkRead, checkWrite, wakeup);
+}
+
+bool SSLSocket::hasPendingRead() {
+	if(!ssl) {
+		return false;
+	}
+
+	/** @todo Take writing into account as well if reading is possible? */
+	char c;
+	return SSL_peek(ssl, &c, 1) > 0;
 }
 
 bool SSLSocket::isTrusted() const noexcept {

@@ -17,6 +17,7 @@
 * Clear stale download connection association state before removing redundant queue items to prevent ConnectionManager failure assertions
 * Restore the primary hub identity after failover so manual and automatic reconnects retry the configured hub and retain standard hub hints and favorite settings
 * Harden nonblocking socket reconnects after network sleep/resume, preserve pre-connect buffer options and establish SOCKS tunnels before TLS
+* Wake buffered-socket task dispatch immediately instead of polling idle sockets every 250 milliseconds
 * Harden QueueManager large-queue handling and index queued files by TTH to avoid invalid iterators and full scans with massive queues
 
 == 07-04-2026 - 0.8833 !!!Experimental!!! ==
