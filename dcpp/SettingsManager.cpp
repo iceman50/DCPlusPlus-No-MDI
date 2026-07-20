@@ -134,7 +134,7 @@ const string SettingsManager::settingTags[] =
 	"SENTRY",
 	// Floats
 	"FileListPanedPos", "HubPanedPos", "QueuePanedPos", "SearchPanedPos",
-	"TransfersPanedPos", "UsersPanedPos",
+	"TransfersPanedPos", "UsersPanedPos", "StatsPanedPos",
 	"SENTRY"
 };
 
@@ -376,6 +376,7 @@ SettingsManager::SettingsManager() {
 	setDefault(SEARCH_PANED_POS, .2);
 	setDefault(TRANSFERS_PANED_POS, .7);
 	setDefault(USERS_PANED_POS, .7);
+	setDefault(STATS_PANED_POS, .5);
 	setDefault(KEEP_FINISHED_FILES, false);
 	setDefault(MIN_MESSAGE_LINES, 1);
 	setDefault(MAX_MESSAGE_LINES, 10);

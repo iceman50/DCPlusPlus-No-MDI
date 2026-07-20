@@ -1,4 +1,5 @@
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
+* Redesign Network Statistics with a detailed activity, connectivity and transfer overview, an enhanced flicker-free traffic graph, live theme-color updates and a persistent draggable pane divider
 * Replace the About dialog contributor thanks block with build, runtime, OS, memory, compiler and bundled-library diagnostics
 * Fix an About dialog crash in optimized builds when the bundled GeoIP library reports no version string
 * Replace hash database persistence with bundled SQLite storage while preserving existing sharing, search, queue and TTH lookup behavior

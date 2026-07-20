@@ -20,21 +20,19 @@
 
 #include <deque>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "StaticFrame.h"
 
 using std::deque;
 using std::string;
+using std::vector;
 
 class StatsFrame : public StaticFrame<StatsFrame>
 {
 	typedef StaticFrame<StatsFrame> BaseType;
 public:
-	enum Stats {
-		STATUS_STATUS,
-		STATUS_LAST
-	};
-
 	static const string id;
 	const string& getId() const;
 
@@ -43,15 +41,25 @@ private:
 	friend class MDIChildFrame<StatsFrame>;
 
 	enum { PIX_PER_SEC = 2 }; // Pixels per second
-	enum { LINE_HEIGHT = 10 };
 	enum { AVG_SIZE = 5 };
+	enum { PANEL_PADDING = 14 };
+	enum { MIN_PANE_WIDTH = 200 };
+	enum { SPLITTER_HIT_RADIUS = 5 };
 
 	StatsFrame(TabViewPtr parent);
 	virtual ~StatsFrame();
 
-	dwt::PenPtr pen;
+	dwt::FontPtr headingFont;
+	dwt::PenPtr borderPen;
+	dwt::PenPtr gridPen;
 	dwt::PenPtr upPen;
 	dwt::PenPtr downPen;
+	dwt::PenPtr upGlowPen;
+	dwt::PenPtr downGlowPen;
+	dwt::BrushPtr backgroundBrush;
+	dwt::BrushPtr cardBrush;
+	dwt::BrushPtr graphBrush;
+	COLORREF secondaryTextColor;
 
 	struct Stat {
 		Stat() : scroll(0), speed(0) { }
@@ -60,29 +68,43 @@ private:
 		int64_t speed;
 	};
 	typedef deque<Stat> StatList;
-	typedef StatList::iterator StatIter;
 	typedef deque<int64_t> AvgList;
-	typedef AvgList::iterator AvgIter;
 	StatList up;
 	StatList down;
 	AvgList upAvg;
 	AvgList downAvg;
 
+	struct InfoSection {
+		tstring title;
+		vector<std::pair<tstring, tstring>> rows;
+	};
+	vector<InfoSection> infoSections;
+
+	double splitRatio;
+	bool movingSplitter;
 	long width;
-	long height;
-	long twidth;
 	uint32_t lastTick;
 	uint32_t scrollTick;
-	int64_t lastUp;
-	int64_t lastDown;
+	uint64_t lastUp;
+	uint64_t lastDown;
+	int64_t currentUp;
+	int64_t currentDown;
+	int64_t peakUp;
+	int64_t peakDown;
 	int64_t max;
 
 	void draw(dwt::Canvas& canvas, const dwt::Rectangle& rect);
+	void drawInfo(dwt::Canvas& canvas, const dwt::Rectangle& rect);
+	void drawGraph(dwt::Canvas& canvas, const dwt::Rectangle& rect);
+	void drawSeries(dwt::Canvas& canvas, const StatList& stats, const dwt::Rectangle& plot);
+	long getSplitterPosition(long clientWidth) const;
+	void moveSplitter(long x);
 
 	void layout();
 	bool eachSecond();
+	void updateColors();
+	void updateStats(uint64_t totalDown, uint64_t totalUp);
 
-	void drawLine(dwt::Canvas& canvas, StatIter begin, StatIter end, const dwt::Rectangle& rect, long clientRight);
 	void addTick(int64_t bdiff, int64_t tdiff, StatList& lst, AvgList& avg, int scroll);
 };
 
