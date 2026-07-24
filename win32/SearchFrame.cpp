@@ -880,6 +880,35 @@ MenuPtr SearchFrame::makeMenu() {
 	UserCollector users = results->forEachSelectedT(UserCollector());
 	WinUtil::addUserItems(menu.get(), users.users, getParent(), users.dirs);
 
+	if(users.users.size() == 1) {
+		const auto& selectedUser = users.users.front();
+		StringPairList connectedHubs;
+		for(const auto& hub: ClientManager::getInstance()->getHubs(selectedUser)) {
+			auto existing = std::find_if(connectedHubs.begin(), connectedHubs.end(),
+				[&hub](const StringPair& item) { return item.first == hub.first; });
+			if(existing == connectedHubs.end()) {
+				connectedHubs.push_back(hub);
+			}
+		}
+
+		if(connectedHubs.size() > 1) {
+			auto through = menu->appendPopup(T_("Connect through..."));
+			for(const auto& hub: connectedHubs) {
+				const auto hubUrl = hub.first;
+				const auto hubName = hub.second;
+				auto label = hubName.empty() ? Text::toT(hubUrl) :
+					str(TF_("%1% (%2%)") % Text::toT(hubName) % Text::toT(hubUrl));
+				auto pos = through->appendItem(escapeMenu(label),
+					[this, user = selectedUser.user, hubUrl, hubName] {
+						setUserHubHint(user, hubUrl, hubName);
+					});
+				if(selectedUser.hint == hubUrl) {
+					through->checkItem(pos);
+				}
+			}
+		}
+	}
+
 	menu->appendSeparator();
 	menu->appendItem(T_("&Remove"), [this] { handleRemove(); });
 
@@ -888,6 +917,21 @@ MenuPtr SearchFrame::makeMenu() {
 	prepareMenu(menu.get(), UserCommand::CONTEXT_SEARCH, checkTTH.hubs);
 
 	return menu;
+}
+
+void SearchFrame::setUserHubHint(const UserPtr& user, const string& hubUrl, const string& hubName) {
+	for(auto& info: searchResults) {
+		for(auto& result: info.srs) {
+			if(result->getUser().user == user) {
+				result->getUser().hint = hubUrl;
+			}
+		}
+	}
+
+	const HintedUser hintedUser(user, hubUrl);
+	const auto displayHub = hubName.empty() ? hubUrl : hubName;
+	status->setText(STATUS_STATUS, str(TF_("%1% will connect through %2%") %
+		WinUtil::getNicks(hintedUser) % Text::toT(displayHub)));
 }
 
 void SearchFrame::addTargetMenu(Menu* menu, const StringPairList& favoriteDirs, const SearchInfo::CheckTTH& checkTTH) {

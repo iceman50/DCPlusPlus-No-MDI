@@ -254,6 +254,7 @@ private:
 	MenuPtr makeMenu();
 	void addTargetMenu(Menu* menu, const StringPairList& favoriteDirs, const SearchInfo::CheckTTH& checkTTH);
 	void addTargetDirMenu(Menu* menu, const StringPairList& favoriteDirs);
+	void setUserHubHint(const UserPtr& user, const string& hubUrl, const string& hubName);
 
 	// SearchManagerListener
 	virtual void on(SearchManagerListener::SR, const SearchResultPtr& sr) noexcept;
