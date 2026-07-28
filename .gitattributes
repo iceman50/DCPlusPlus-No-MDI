@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# These zlib tests compare exact bytes against a checked-in compressed fixture.
+test/gtest.h text eol=lf
+test/data/gtest_h_compressed binary
