@@ -102,22 +102,14 @@ private:
 
 	struct {
 		tstring homepage;
-		tstring downloads;
 		tstring geoip6;
 		tstring geoip4;
 		tstring geoip6_city;
 		tstring geoip4_city;
 		tstring geoip_regions;
-		tstring faq;
-		tstring help;
-		tstring discuss;
-		tstring features;
 		tstring bugs;
-		tstring donate;
-		tstring blog;
 		tstring community;
 		tstring pluginrepo;
-		tstring contribute;
 	} links;
 
 	enum {

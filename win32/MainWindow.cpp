@@ -116,24 +116,17 @@ away(false),
 awayIdle(false),
 fullSlots(false)
 {
-	// Don't forget to update version.xml when changing these links!
-	links.homepage = _T("https://dcplusplus.sourceforge.io/");
-	links.downloads = links.homepage + _T("download/");
+	// Project-owned links are intentionally not overridden by the upstream version.xml.
+	links.homepage = _T("https://github.com/iceman50/DCPlusPlus-No-MDI");
+	links.bugs = _T("https://github.com/iceman50/DCPlusPlus-No-MDI/issues");
+	links.community = _T("https://www.dcbase.org/");
+	links.pluginrepo = _T("https://dcplusplus.sourceforge.io/plugins/");
+
 	links.geoip6 = _T("https://dcplusplus.sourceforge.io/geoip/GeoIPv6.dat.gz");
 	links.geoip4 = _T("https://dcplusplus.sourceforge.io/geoip/GeoIP.dat.gz");
 	links.geoip6_city = _T("https://dcplusplus.sourceforge.io/geoip/GeoIPCityv6.dat.gz");
 	links.geoip4_city = _T("https://dcplusplus.sourceforge.io/geoip/GeoIPCity.dat.gz");
 	links.geoip_regions = _T("https://dcplusplus.sourceforge.io/geoip/region.csv");
-	links.faq = links.homepage + _T("faq/");
-	links.help = links.homepage + _T("help/");
-	links.discuss = links.homepage + _T("discussion/");
-	links.features = links.homepage + _T("featurereq/");
-	links.bugs = links.homepage + _T("bugs/");
-	links.donate = links.homepage + _T("donate/");
-	links.blog = _T("https://dcpp.wordpress.com");
-	links.community = _T("https://www.dcbase.org/");
-	links.pluginrepo = links.homepage + _T("plugins/");
-	links.contribute = _T("https://www.dcbase.org/contribute/");
 
 	initWindow();
 	initTabs();
@@ -420,15 +413,7 @@ void MainWindow::initMenu() {
 
 		help = help->appendPopup(T_("Links"), WinUtil::menuIcon(IDI_LINKS));
 		help->appendItem(T_("Homepage"), [this] { WinUtil::openLink(links.homepage); });
-		help->appendItem(T_("Downloads"), [this] { WinUtil::openLink(links.downloads); });
-		help->appendItem(T_("Frequently asked questions"), [this] { WinUtil::openLink(links.faq); });
-		help->appendItem(T_("Help center"), [this] { WinUtil::openLink(links.help); });
-		help->appendItem(T_("Discussion forum"), [this] { WinUtil::openLink(links.discuss); });
-		help->appendItem(T_("Request a feature"), [this] { WinUtil::openLink(links.features); });
 		help->appendItem(T_("Report a bug"), [this] { WinUtil::openLink(links.bugs); });
-		help->appendItem(T_("Donate (paypal)"), [this] { WinUtil::openLink(links.donate); }, WinUtil::menuIcon(IDI_DONATE));
-		help->appendItem(T_("Contribute"), [this] { WinUtil::openLink(links.contribute); });
-		help->appendItem(T_("Blog"), [this] { WinUtil::openLink(links.blog); });
 		help->appendItem(T_("DC Network Foundation community"), [this] { WinUtil::openLink(links.community); });
 		help->appendItem(T_("Plugin repository"), [this] { WinUtil::openLink(links.pluginrepo); });
 	}
@@ -1569,14 +1554,6 @@ void MainWindow::completeVersionUpdate(bool success, const string& result) {
 		xml.resetCurrentChild();
 		if(xml.findChild("Links")) {
 			xml.stepIn();
-			if(xml.findChild("Homepage")) {
-				links.homepage = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
-			if(xml.findChild("Downloads")) {
-				links.downloads = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
 			if(xml.findChild("GeoIPv6")) {
 				links.geoip6 = Text::toT(xml.getChildData());
 			}
@@ -1595,30 +1572,6 @@ void MainWindow::completeVersionUpdate(bool success, const string& result) {
 			xml.resetCurrentChild();
 			if(xml.findChild("GeoIP_Regions")) {
 				links.geoip_regions = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
-			if(xml.findChild("Faq")) {
-				links.faq = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
-			if(xml.findChild("Bugs")) {
-				links.bugs = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
-			if(xml.findChild("Features")) {
-				links.features = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
-			if(xml.findChild("Help")) {
-				links.help = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
-			if(xml.findChild("Forum")) {
-				links.discuss = Text::toT(xml.getChildData());
-			}
-			xml.resetCurrentChild();
-			if(xml.findChild("Blog")) {
-				links.blog = Text::toT(xml.getChildData());
 			}
 			xml.resetCurrentChild();
 			if(xml.findChild("Community")) {
