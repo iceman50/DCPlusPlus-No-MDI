@@ -137,7 +137,10 @@ TEST(testnetwork, reports_failed_nonblocking_connect)
 	bool failed = false;
 	try {
 		client.connect("127.0.0.1", port);
-		waitForConnect(client, 2000);
+		// Some Windows network stacks report a refused loopback connection only
+		// after the first TCP retransmission, which can take slightly over two
+		// seconds.
+		waitForConnect(client, 5000);
 	} catch(const SocketException&) {
 		failed = true;
 	}
