@@ -166,12 +166,12 @@ opts.AddVariables(
         '- "x86_64-w64-mingw32-" for 64-bit MinGW builds.\n'
         'May be forced to nothing via "prefix=".',
     ),
-    EnumVariable("arch", "Target architecture", "x86", ["x86", "x64"]),
+    EnumVariable("arch", "Target architecture", "x64", ["x86", "x64"]),
     BoolVariable("msvcproj", "Build MSVC project files", "no"),
     BoolVariable(
         "distro",
         "Produce the official distro (forces tools=mingw, mode=release, "
-        "i18n=1, help=1, webhelp=1, arch=x86)",
+        "i18n=1, help=1, webhelp=1, arch=x64)",
         "no",
     ),
 )
@@ -185,7 +185,7 @@ if defEnv["distro"]:
     defEnv["i18n"] = 1
     defEnv["help"] = 1
     defEnv["webhelp"] = 1
-    defEnv["arch"] = "x86"
+    defEnv["arch"] = "x64"
 
 # workaround for SCons 1.2 which hard-codes possible archs (only allows 'x86'
 # and 'amd64'...) TODO remove when SCons knows about all available archs
@@ -208,7 +208,7 @@ if env["distro"]:
     env["i18n"] = 1
     env["help"] = 1
     env["webhelp"] = 1
-    env["arch"] = "x86"
+    env["arch"] = "x64"
 
 
 def filterExternalDeps(x):
