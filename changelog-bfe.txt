@@ -17,6 +17,7 @@
 * Match hub hints case-insensitively across connection routing, idle reuse, searches, private messages, hub windows and plugin lookups while preserving empty-hint fallback behavior
 * Keep hub-mediated peer keyprints scoped to the hinted hub instead of falling back to another shared hub
 * Retarget repeated file-list requests to the latest explicitly selected hub and prevent hub-specific lists from using another hub's share profile
+* Group multiple direct encrypted private-message connections into a collapsible TransferView row and safely tear down grouped child rows as channels close
 * Preserve exact share-cache real paths, skip startup share-cache loading for UNC share roots and normalize legacy hash-database UNC paths
 * Fix share-cache schema upgrades reporting database table locks while replacing older cache files
 * Clear stale download connection association state before removing redundant queue items to prevent ConnectionManager failure assertions

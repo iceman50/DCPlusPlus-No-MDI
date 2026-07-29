@@ -346,7 +346,9 @@ void TransferView::TransferInfo::update() {
 		columns[COLUMN_COUNTRY] = conn.getText(COLUMN_COUNTRY);
 
 	} else {
-		if(running > 0) {
+		if(type == CONNECTION_TYPE_PM) {
+			columns[COLUMN_STATUS] = str(TF_("%1% direct encrypted private message channels") % users);
+		} else if(running > 0) {
 			tstring userStr = Text::toT(std::to_string(running) + "/" + std::to_string(users));
 			columns[COLUMN_STATUS] = type == CONNECTION_TYPE_DOWNLOAD ?
 				str(TF_("Downloading from %1% users") % userStr) :
@@ -365,10 +367,18 @@ void TransferView::TransferInfo::update() {
 		columns[COLUMN_COUNTRY].clear();
 	}
 
-	columns[COLUMN_TIMELEFT] = Text::toT(Util::formatSeconds(timeleft));
-	columns[COLUMN_SPEED] = str(TF_("%1%/s") % Text::toT(Util::formatBytes(speed)));
-	columns[COLUMN_TRANSFERRED] = Text::toT(Util::formatBytes(transferred));
-	columns[COLUMN_SIZE] = Text::toT(Util::formatBytes(size));
+	if(type == CONNECTION_TYPE_PM) {
+		// CCPM channels don't transfer files, so byte and time totals are meaningless.
+		columns[COLUMN_TIMELEFT].clear();
+		columns[COLUMN_SPEED].clear();
+		columns[COLUMN_TRANSFERRED].clear();
+		columns[COLUMN_SIZE].clear();
+	} else {
+		columns[COLUMN_TIMELEFT] = Text::toT(Util::formatSeconds(timeleft));
+		columns[COLUMN_SPEED] = str(TF_("%1%/s") % Text::toT(Util::formatBytes(speed)));
+		columns[COLUMN_TRANSFERRED] = Text::toT(Util::formatBytes(transferred));
+		columns[COLUMN_SIZE] = Text::toT(Util::formatBytes(size));
+	}
 }
 
 void TransferView::TransferInfo::updatePath() {
@@ -816,9 +826,21 @@ void TransferView::addConn(const UpdateInfo& ui) {
 			// bound transfer with a new blank connection row.
 			return;
 		}
-		transferItems.emplace_back(TTHValue(), ui.type, ui.user.user->getCID().toBase32(), Util::emptyString);
-		transfer = &transferItems.back();
-		transfers->insert(transfer);
+
+		// CCPM connections never become file transfers. Keep them under one stable
+		// parent so TableTree can collapse many channels into a single row. Other
+		// pathless connections must remain separate until a transfer event binds
+		// their token to a concrete path.
+		if(ui.type == CONNECTION_TYPE_PM) {
+			transfer = findTransfer(Util::emptyString, ui.type);
+		}
+		if(!transfer) {
+			auto path = ui.type == CONNECTION_TYPE_PM ?
+				Util::emptyString : ui.user.user->getCID().toBase32();
+			transferItems.emplace_back(TTHValue(), ui.type, std::move(path), Util::emptyString);
+			transfer = &transferItems.back();
+			transfers->insert(transfer);
+		}
 	}
 
 	if(!conn) {
@@ -873,11 +895,19 @@ TransferView::TransferInfo* TransferView::findTransfer(const string& path, Conne
 
 void TransferView::removeConn(ConnectionInfo& conn) {
 	auto& transfer = conn.parent;
+	auto connPos = std::find_if(transfer.conns.begin(), transfer.conns.end(),
+		[&conn](const ConnectionInfo& item) { return &item == &conn; });
+	dcassert(connPos != transfer.conns.end());
+	if(connPos == transfer.conns.end()) {
+		return;
+	}
 
 	transfers->eraseChild(reinterpret_cast<LPARAM>(&conn));
 	connections[transfer.type].erase(conn.token);
 
-	transfer.conns.remove(conn);
+	// Erase the exact node. list::remove(conn) would keep comparing against
+	// conn after erasing the node that owns that reference.
+	transfer.conns.erase(connPos);
 
 	if(transfer.conns.empty()) {
 		removeTransfer(transfer);
@@ -893,8 +923,15 @@ void TransferView::removeConn(ConnectionInfo& conn) {
 }
 
 void TransferView::removeTransfer(TransferInfo& transfer) {
+	auto transferPos = std::find_if(transferItems.begin(), transferItems.end(),
+		[&transfer](const TransferInfo& item) { return &item == &transfer; });
+	dcassert(transferPos != transferItems.end());
+	if(transferPos == transferItems.end()) {
+		return;
+	}
+
 	transfers->erase(&transfer);
-	transferItems.remove(transfer);
+	transferItems.erase(transferPos);
 }
 
 void TransferView::addHttpConn(const UpdateInfo& ui) {
