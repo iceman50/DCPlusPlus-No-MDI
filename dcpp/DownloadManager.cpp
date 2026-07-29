@@ -107,7 +107,7 @@ void DownloadManager::checkIdle(const HintedUser& user, bool singleConnection) {
 	Lock l(cs);
 	for(auto uc: idlers) {
 		if(uc->getUser() == user.user &&
-			(user.hint.empty() || uc->getHubUrl() == user.hint))
+			hubHintMatches(user.hint, uc->getHubUrl()))
 		{
 			uc->callAsync([this, uc] { revive(uc); });
 			// File lists are indivisible transfers. Reusing more than one idle MCN

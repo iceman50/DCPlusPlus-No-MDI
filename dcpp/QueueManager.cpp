@@ -188,7 +188,9 @@ void QueueManager::UserQueue::add(QueueItem* qi, const UserPtr& aUser) {
 	}
 }
 
-QueueItem* QueueManager::UserQueue::getNext(const UserPtr& aUser, QueueItem::Priority minPrio, int64_t wantedSize) {
+QueueItem* QueueManager::UserQueue::getNext(const UserPtr& aUser, QueueItem::Priority minPrio,
+	int64_t wantedSize, const string* hubUrl)
+{
 	int p = QueueItem::LAST - 1;
 
 	do {
@@ -196,6 +198,14 @@ QueueItem* QueueManager::UserQueue::getNext(const UserPtr& aUser, QueueItem::Pri
 		if(i != userQueue[p].end()) {
 			dcassert(!i->second.empty());
 			for(auto qi: i->second) {
+				// File lists may be generated from a hub-specific share profile.
+				// Do not satisfy a hinted list request through another hub.
+				if(hubUrl && qi->isSet(QueueItem::FLAG_USER_LIST) &&
+					!qi->isSourceForHub(aUser, *hubUrl))
+				{
+					continue;
+				}
+
 				if(qi->isWaiting()) {
 					return qi;
 				}
@@ -689,6 +699,16 @@ bool QueueManager::addSource(QueueItem* qi, const HintedUser& aUser, Flags::Mask
 
 	if(qi->isSource(aUser)) {
 		if(qi->isSet(QueueItem::FLAG_USER_LIST)) {
+			auto source = qi->getSource(aUser);
+			if(!aUser.hint.empty() && !hubHintsEqual(source->getUser().hint, aUser.hint)) {
+				// There is one list queue item per CID. A new explicit request
+				// selects the hub whose share profile the caller wants to browse.
+				auto updatedUser = source->getUser();
+				updatedUser.hint = aUser.hint;
+				source->setUser(std::move(updatedUser));
+				fire(QueueManagerListener::SourcesUpdated(), qi);
+				setDirty();
+			}
 			return wantConnection;
 		}
 		throw QueueException(str(F_("Duplicate source: %1%") % Util::getFileName(qi->getTarget())));
@@ -893,7 +913,8 @@ Download* QueueManager::getDownload(UserConnection& aSource) noexcept {
 	UserPtr& u = aSource.getUser();
 	dcdebug("Getting download for %s...", u->getCID().toBase32().c_str());
 
-	QueueItem* q = userQueue.getNext(u, QueueItem::LOWEST, aSource.getChunkSize());
+	const auto& hubUrl = aSource.getHubUrl();
+	QueueItem* q = userQueue.getNext(u, QueueItem::LOWEST, aSource.getChunkSize(), &hubUrl);
 
 	if(!q) {
 		dcdebug("none\n");

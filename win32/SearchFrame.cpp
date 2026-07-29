@@ -885,7 +885,7 @@ MenuPtr SearchFrame::makeMenu() {
 		StringPairList connectedHubs;
 		for(const auto& hub: ClientManager::getInstance()->getHubs(selectedUser)) {
 			auto existing = std::find_if(connectedHubs.begin(), connectedHubs.end(),
-				[&hub](const StringPair& item) { return item.first == hub.first; });
+				[&hub](const StringPair& item) { return hubHintsEqual(item.first, hub.first); });
 			if(existing == connectedHubs.end()) {
 				connectedHubs.push_back(hub);
 			}
@@ -902,7 +902,7 @@ MenuPtr SearchFrame::makeMenu() {
 					[this, user = selectedUser.user, hubUrl, hubName] {
 						setUserHubHint(user, hubUrl, hubName);
 					});
-				if(selectedUser.hint == hubUrl) {
+				if(hubHintsEqual(selectedUser.hint, hubUrl)) {
 					through->checkItem(pos);
 				}
 			}

@@ -147,6 +147,10 @@ public:
 	SourceConstIter getBadSource(const UserPtr& aUser) const { return find(badSources.begin(), badSources.end(), aUser); }
 
 	bool isSource(const UserPtr& aUser) const { return getSource(aUser) != sources.end(); }
+	bool isSourceForHub(const UserPtr& aUser, const string& hubUrl) const {
+		auto source = getSource(aUser);
+		return source != sources.end() && hubHintMatches(source->getUser().hint, hubUrl);
+	}
 	bool isBadSource(const UserPtr& aUser) const { return getBadSource(aUser) != badSources.end(); }
 	bool isBadSourceExcept(const UserPtr& aUser, Flags::MaskType exceptions) const {
 		auto i = getBadSource(aUser);

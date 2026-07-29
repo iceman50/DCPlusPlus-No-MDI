@@ -24,10 +24,21 @@
 #include "Client.h"
 #include "OnlineUser.h"
 #include "User.h"
+#include "Util.h"
 
 namespace dcpp {
 
 using std::string;
+
+/** Hub URLs are case-insensitive throughout favorites and failover handling. */
+inline bool hubHintsEqual(const string& lhs, const string& rhs) noexcept {
+	return Util::stricmp(lhs, rhs) == 0;
+}
+
+/** An empty hint means that any hub may be used. */
+inline bool hubHintMatches(const string& hint, const string& hubUrl) noexcept {
+	return hint.empty() || hubHintsEqual(hint, hubUrl);
+}
 
 /** User pointer associated to a hub url */
 struct HintedUser {

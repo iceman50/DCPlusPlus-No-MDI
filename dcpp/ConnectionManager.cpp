@@ -35,12 +35,12 @@ namespace {
 
 bool matchesRequestedHint(const HintedUser& queuedUser, const HintedUser& requestedUser) {
 	return queuedUser.user == requestedUser.user &&
-		(requestedUser.hint.empty() || queuedUser.hint == requestedUser.hint);
+		hubHintMatches(requestedUser.hint, queuedUser.hint);
 }
 
 bool matchesConnectionHub(const HintedUser& queuedUser, const CID& cid, const string& hubUrl) {
 	return queuedUser.user->getCID() == cid &&
-		(queuedUser.hint.empty() || queuedUser.hint == hubUrl);
+		hubHintMatches(queuedUser.hint, hubUrl);
 }
 
 } // namespace
@@ -592,7 +592,7 @@ void ConnectionManager::nmdcConnect(const string& aServer, const string& aPort, 
 	{
 		auto clientLock = ClientManager::getInstance()->lock();
 		for(auto client: ClientManager::getInstance()->getClients()) {
-			if(client->getHubUrl() == hubUrl) {
+			if(hubHintsEqual(client->getHubUrl(), hubUrl)) {
 				hubIp = client->getIp();
 				break;
 			}

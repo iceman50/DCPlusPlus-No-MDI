@@ -164,13 +164,13 @@ vector<Identity> ClientManager::getIdentities(const UserPtr &u) const {
 
 string ClientManager::getNick(const HintedUser& user) const {
 	Lock l(cs);
-	auto ou = findOnlineUserHint(user);
+	auto ou = user.hint.empty() ? findOnlineUser(user) : findOnlineUserHint(user);
 	return ou ? ou->getIdentity().getNick() : getOfflineNick(user.user->getCID());
 }
 
 string ClientManager::getHubName(const HintedUser& user) const {
 	Lock l(cs);
-	auto ou = findOnlineUserHint(user);
+	auto ou = user.hint.empty() ? findOnlineUser(user) : findOnlineUserHint(user);
 	return ou ? ou->getClient().getHubName() : _("Offline");
 }
 
@@ -184,6 +184,12 @@ string ClientManager::getField(const CID& cid, const string& hint, const char* f
 		if(!value.empty()) {
 			return value;
 		}
+	}
+
+	// A non-empty hint identifies the hub that mediated hub-specific fields
+	// such as a peer keyprint. Never substitute a value advertised elsewhere.
+	if(!hint.empty()) {
+		return Util::emptyString;
 	}
 
 	for(auto i = p.first; i != p.second; ++i) {
@@ -224,7 +230,7 @@ bool ClientManager::isConnected(const string& aUrl) const {
 	Lock l(cs);
 
 	for(auto i: clients) {
-		if(i->getHubUrl() == aUrl) {
+		if(hubHintsEqual(i->getHubUrl(), aUrl)) {
 			return true;
 		}
 	}
@@ -235,7 +241,7 @@ bool ClientManager::isHubConnected(const string& aUrl) const {
 	Lock l(cs);
 
 	for(auto i: clients) {
-		if(i->getHubUrl() == aUrl) {
+		if(hubHintsEqual(i->getHubUrl(), aUrl)) {
 			return i->isConnected();
 		}
 	}
@@ -265,7 +271,7 @@ string ClientManager::findHubEncoding(const string& aUrl) const {
 	Lock l(cs);
 
 	for(auto i: clients) {
-		if(i->getHubUrl() == aUrl) {
+		if(hubHintsEqual(i->getHubUrl(), aUrl)) {
 			return i->getEncoding();
 		}
 	}
@@ -335,7 +341,7 @@ bool ClientManager::isOp(const UserPtr& user, const string& aHubUrl) const {
 	Lock l(cs);
 	OnlinePairC p = onlineUsers.equal_range(user->getCID());
 	for(auto i = p.first; i != p.second; ++i) {
-		if(i->second->getClient().getHubUrl() == aHubUrl) {
+		if(hubHintsEqual(i->second->getClient().getHubUrl(), aHubUrl)) {
 			return i->second->getIdentity().isOp();
 		}
 	}
@@ -406,7 +412,7 @@ OnlineUser* ClientManager::findOnlineUserHint(const CID& cid, const string& hint
 	if(!hintUrl.empty()) {
 		for(auto i = p.first; i != p.second; ++i) {
 			OnlineUser* u = i->second;
-			if(u->getClient().getHubUrl() == hintUrl) {
+			if(hubHintsEqual(u->getClient().getHubUrl(), hintUrl)) {
 				return u;
 			}
 		}
@@ -595,7 +601,7 @@ void ClientManager::search(StringList& who, int aSizeMode, int64_t aSize, int aF
 
 	for(auto& client: who) {
 		for(auto c: clients) {
-			if(c->isConnected() && c->getHubUrl() == client) {
+			if(c->isConnected() && hubHintsEqual(c->getHubUrl(), client)) {
 				c->search(aSizeMode, aSize, aFileType, aString, aToken, aExtList, aKey);
 			}
 		}

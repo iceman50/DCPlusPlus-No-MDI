@@ -45,7 +45,7 @@ namespace {
 
 bool matchesCurrentHub(const HintedUser& queuedUser, const HintedUser& frameUser) {
 	return queuedUser.user == frameUser.user &&
-		(frameUser.hint.empty() || queuedUser.hint == frameUser.hint);
+		hubHintMatches(frameUser.hint, queuedUser.hint);
 }
 
 } // namespace
@@ -55,7 +55,9 @@ void PrivateFrame::openWindow(TabViewPtr parent, const HintedUser& replyTo_, con
 {
 	auto i = frames.find(replyTo_);
 	auto frame = (i == frames.end()) ? new PrivateFrame(parent, replyTo_, logPath) : i->second;
-	if(i != frames.end() && !replyTo_.hint.empty() && frame->replyTo.getUser().hint != replyTo_.hint) {
+	if(i != frames.end() && !replyTo_.hint.empty() &&
+		!hubHintsEqual(frame->replyTo.getUser().hint, replyTo_.hint))
+	{
 		frame->closeCC(true);
 		frame->replyTo.getUser().hint = replyTo_.hint;
 		frame->updateOnlineStatus(true);
@@ -323,8 +325,10 @@ void PrivateFrame::updateOnlineStatus(bool newChannel) {
 		newChannel = true;
 	}
 
-	auto hintOnline = !hubs.empty() &&
-		(user.hint.empty() || find(hubs.begin(), hubs.end(), user.hint) != hubs.end());
+	auto hintOnline = !hubs.empty() && (user.hint.empty() ||
+		any_of(hubs.begin(), hubs.end(), [&user](const string& hubUrl) {
+			return hubHintsEqual(user.hint, hubUrl);
+		}));
 
 	if(newChannel || online != hintOnline) {
 		online = hintOnline;
@@ -632,7 +636,7 @@ void PrivateFrame::handleChannelMenu() {
 
 		for(auto& hub: hubs) {
 			auto url = hub.first;
-			auto current = !cc && url == replyTo.getUser().hint;
+			auto current = !cc && hubHintsEqual(url, replyTo.getUser().hint);
 			auto pos = menu->appendItem(dwt::util::escapeMenu(Text::toT(hub.second)),
 				[this, url] { closeCC(true); replyTo.getUser().hint = url; updateOnlineStatus(true); }, nullptr, !current);
 			if(current) {

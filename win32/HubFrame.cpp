@@ -77,7 +77,9 @@ void HubFrame::openWindow(TabViewPtr parent, string url, bool activate, bool con
 		return;
 	}
 
-	auto i = find_if(frames.begin(), frames.end(), [&url](HubFrame* frame) { return frame->url == url; });
+	auto i = find_if(frames.begin(), frames.end(), [&url](HubFrame* frame) {
+		return hubHintsEqual(frame->url, url);
+	});
 
 	if(i == frames.end()) {
 		// new hub window
@@ -96,7 +98,9 @@ void HubFrame::openWindow(TabViewPtr parent, string url, bool activate, bool con
 }
 
 void HubFrame::activateWindow(const string& url) {
-	auto i = find_if(frames.begin(), frames.end(), [&url](HubFrame* frame) { return frame->url == url; });
+	auto i = find_if(frames.begin(), frames.end(), [&url](HubFrame* frame) {
+		return hubHintsEqual(frame->url, url);
+	});
 	if(i != frames.end()) {
 		(*i)->activate();
 	}
