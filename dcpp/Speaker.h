@@ -95,8 +95,13 @@ public:
 			{
 				Lock l(listenerCS);
 				auto i = activeCallbacks.find(listener);
-				if(i != activeCallbacks.end() && --i->second == 0) {
-					activeCallbacks.erase(i);
+				if(i != activeCallbacks.end()) {
+					if(--i->second == 0) {
+						activeCallbacks.erase(i);
+					}
+					// Re-entrant removal may be waiting for the count to fall
+					// to its local callback depth rather than all the way to
+					// zero, so every decrement can satisfy a waiter.
 					listenerCV.notify_all();
 				}
 			}

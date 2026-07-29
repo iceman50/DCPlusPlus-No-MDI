@@ -18,11 +18,12 @@
 #ifndef DCPLUSPLUS_WIN32_PRIVATE_FRAME_H
 #define DCPLUSPLUS_WIN32_PRIVATE_FRAME_H
 
+#include <atomic>
+
 #include <dcpp/ClientManagerListener.h>
 #include <dcpp/ConnectionManagerListener.h>
 #include <dcpp/CriticalSection.h>
 #include <dcpp/User.h>
-#include <dcpp/UserConnectionListener.h>
 
 #include "MDIChildFrame.h"
 #include "IRecent.h"
@@ -35,7 +36,6 @@ class PrivateFrame :
 	public IRecent<PrivateFrame>,
 	private ClientManagerListener,
 	private ConnectionManagerListener,
-	private UserConnectionListener,
 	public AspectChat<PrivateFrame>,
 	public AspectUserInfo<PrivateFrame>,
 	public AspectUserCommand<PrivateFrame>
@@ -73,7 +73,11 @@ public:
 	static void openWindow(TabViewPtr parent, const HintedUser& replyTo, const tstring& msg = Util::emptyStringT,
 		const string& logPath = Util::emptyString, bool activate = true);
 	static void activateWindow(const UserPtr& u);
-	static bool isOpen(const UserPtr& u) { return frames.find(u) != frames.end(); }
+	static bool isOpen(const UserPtr& u);
+	static void handlePMConnection(const HintedUser& user, const string& connectionToken);
+	static void handlePMMessage(const HintedUser& user, const string& connectionToken,
+		const ChatMessage& message);
+	static void handlePMI(const HintedUser& user, const string& connectionToken, const AdcCommand& cmd);
 	static void closeAll(bool offline);
 
 	WindowParams getWindowParams() const;
@@ -88,8 +92,15 @@ private:
 	UserInfoBase replyTo;
 	bool online;
 
+	// ConnectionManager::Removed takes this lock before returning to the
+	// UserConnection deletion path. Holding it therefore pins conn while it is
+	// being used.
+	mutable CriticalSection connLifetimeMutex;
 	mutable CriticalSection mutex;
-	UserConnection* conn;
+	std::atomic<UserConnection*> conn;
+	string connToken;
+	std::atomic<uint64_t> connRevision;
+	bool acceptCCPMConnections;
 	bool localTyping;
 	bool remoteTyping;
 	bool messageSeenPending;
@@ -101,7 +112,10 @@ private:
 	ParamMap ucLineParams;
 
 	typedef unordered_map<UserPtr, PrivateFrame*, User::Hash> FrameMap;
+	// Frame creation, lookup-and-use and destruction remain on the UI thread;
+	// this mutex also makes the worker-thread isOpen probe data-race free.
 	static FrameMap frames;
+	static CriticalSection framesMutex;
 
 	PrivateFrame(TabViewPtr parent, const HintedUser& replyTo_, const string& logPath = Util::emptyString);
 	virtual ~PrivateFrame();
@@ -122,7 +136,11 @@ private:
 	void updateChannel();
 	void startCC(bool silent = false);
 	void closeCC(bool silent = false);
+	void changeHub(const string& hubHint);
+	void adoptPMConnection(const string& connectionToken);
 	bool ccReady() const;
+	bool isCurrentConnection(const string& token, uint64_t revision) const;
+	bool isDisconnectedConnection(uint64_t revision) const;
 
 	bool handleChatContextMenu(dwt::ScreenCoordinate pt);
 	void handleChannelMenu();
@@ -146,10 +164,6 @@ private:
 	// ConnectionManagerListener
 	virtual void on(ConnectionManagerListener::Connected, ConnectionQueueItem* cqi, UserConnection* uc) noexcept;
 	virtual void on(ConnectionManagerListener::Removed, ConnectionQueueItem* cqi) noexcept;
-
-	// UserConnectionListener
-	virtual void on(UserConnectionListener::PrivateMessage, UserConnection* uc, const ChatMessage& message) noexcept;
-	virtual void on(AdcCommand::PMI, UserConnection* uc, const AdcCommand& cmd) noexcept;
 };
 
 #endif // !defined(PRIVATE_FRAME_H)

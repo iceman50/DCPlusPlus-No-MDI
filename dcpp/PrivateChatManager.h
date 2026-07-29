@@ -42,9 +42,12 @@ public:
 
 	void setAcceptConnectionF(AcceptConnectionF f);
 
-	UserConnection* getPMConn(const UserPtr& user, UserConnectionListener* listener);
-	void returnPMConn(const UserPtr& user, UserConnection* uc, UserConnectionListener* listener);
-	void releasePMConn(const UserPtr& user, bool disconnect);
+	UserConnection* getPMConn(const UserPtr& user,
+		const string& expectedToken = Util::emptyString);
+	// False means that the expected connection is no longer live or suitable
+	// for parking.
+	bool returnPMConn(const UserPtr& user, const string& token, UserConnection* uc);
+	void releasePMConn(const UserPtr& user, const string& token, bool disconnect);
 
 private:
 	friend class Singleton<PrivateChatManager>;
@@ -52,9 +55,21 @@ private:
 	PrivateChatManager();
 	~PrivateChatManager();
 
-	unordered_map<UserPtr, UserConnection*, User::Hash> ccpms;
+	struct PMConnection {
+		UserConnection* connection;
+		string token;
+	};
+
+	struct KnownPMConnection {
+		UserPtr user;
+		string token;
+	};
+
+	unordered_map<UserPtr, PMConnection, User::Hash> ccpms;
+	unordered_map<UserConnection*, KnownPMConnection> knownCCPMs;
 	CriticalSection cs;
 	AcceptConnectionF acceptConnectionF;
+	bool shuttingDown = false;
 
 	// ConnectionManagerListener
 	void on(ConnectionManagerListener::Connected, ConnectionQueueItem* cqi, UserConnection* uc) noexcept;

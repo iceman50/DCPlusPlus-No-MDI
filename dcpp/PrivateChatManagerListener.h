@@ -29,8 +29,14 @@ public:
 	template<int I>	struct X { enum { TYPE = I }; };
 
 	typedef X<0> PrivateMessage;
+	typedef X<1> PMConnection;
+	typedef X<2> PMI;
 
-	virtual void on(PrivateMessage, const ChatMessage&, const HintedUser&, bool /* fromBot */) noexcept { }
+	virtual void on(PrivateMessage, const ChatMessage&, const HintedUser&, const string& /* connectionToken */,
+		bool /* fromBot */) noexcept { }
+	virtual void on(PMConnection, const HintedUser&, const string& /* connectionToken */) noexcept { }
+	virtual void on(PMI, const HintedUser&, const string& /* connectionToken */,
+		const AdcCommand&) noexcept { }
 };
 
 } // namespace dcpp

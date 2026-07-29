@@ -18,6 +18,9 @@
 * Keep hub-mediated peer keyprints scoped to the hinted hub instead of falling back to another shared hub
 * Retarget repeated file-list requests to the latest explicitly selected hub and prevent hub-specific lists from using another hub's share profile
 * Group multiple direct encrypted private-message connections into a collapsible TransferView row and safely tear down grouped child rows as channels close
+* Prevent stale direct-message channels from crashing PM tabs, preserve token-specific hub-scoped handoffs and keep CCPM message and PMI delivery continuous while tabs open or close
+* Remove connection-queue and HTTP transfer entries by exact object identity to avoid aliased erase operations
+* Wake re-entrant listener removals whenever concurrent callback counts reach the caller's safe depth
 * Preserve exact share-cache real paths, skip startup share-cache loading for UNC share roots and normalize legacy hash-database UNC paths
 * Fix share-cache schema upgrades reporting database table locks while replacing older cache files
 * Clear stale download connection association state before removing redundant queue items to prevent ConnectionManager failure assertions

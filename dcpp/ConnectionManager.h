@@ -127,6 +127,11 @@ public:
 	void disconnectUploads(const string& hubUrl);
 	void disconnectAll(); // disconnect all transfers for all users
 
+	// Used when handing a parked CCPM connection to a newly registered
+	// listener. The check is serialized with PM queue removal so a successful
+	// result guarantees that any later Removed event can reach that listener.
+	bool isPMConnectionActive(const UserPtr& user, const string& token) const noexcept;
+
 	void shutdown();
 
 	/** Find a suitable port to listen on, and start doing it */
@@ -174,6 +179,7 @@ private:
 		string hubUrl;
 	};
 	unordered_map<string, TokenInfo> tokens;
+	uint64_t nextPMConnectionId = 0;
 
 	ExpectedMap expectedConnections;
 

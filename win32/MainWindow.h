@@ -253,7 +253,12 @@ private:
 	void on(LogManagerListener::Message, time_t t, const string& m) noexcept;
 
 	// PrivateChatManagerListener
-	void on(PrivateChatManagerListener::PrivateMessage, const ChatMessage& message, const HintedUser& user, bool fromBot) noexcept;
+	void on(PrivateChatManagerListener::PrivateMessage, const ChatMessage& message, const HintedUser& user,
+		const string& connectionToken, bool fromBot) noexcept;
+	void on(PrivateChatManagerListener::PMConnection, const HintedUser& user,
+		const string& connectionToken) noexcept;
+	void on(PrivateChatManagerListener::PMI, const HintedUser& user,
+		const string& connectionToken, const AdcCommand& cmd) noexcept;
 
 	// QueueManagerListener
 	void on(QueueManagerListener::Finished, QueueItem* qi, const string& dir, int64_t speed) noexcept;

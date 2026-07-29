@@ -40,6 +40,7 @@ const string PrivateFrame::id = "PM";
 const string& PrivateFrame::getId() const { return id; }
 
 PrivateFrame::FrameMap PrivateFrame::frames;
+CriticalSection PrivateFrame::framesMutex;
 
 namespace {
 
@@ -53,14 +54,23 @@ bool matchesCurrentHub(const HintedUser& queuedUser, const HintedUser& frameUser
 void PrivateFrame::openWindow(TabViewPtr parent, const HintedUser& replyTo_, const tstring& msg,
 	const string& logPath, bool activate)
 {
-	auto i = frames.find(replyTo_);
-	auto frame = (i == frames.end()) ? new PrivateFrame(parent, replyTo_, logPath) : i->second;
-	if(i != frames.end() && !replyTo_.hint.empty() &&
+	PrivateFrame* frame = nullptr;
+	{
+		Lock l(framesMutex);
+		auto i = frames.find(replyTo_);
+		if(i != frames.end()) {
+			frame = i->second;
+		}
+	}
+
+	const auto existing = frame != nullptr;
+	if(!frame) {
+		frame = new PrivateFrame(parent, replyTo_, logPath);
+	}
+	if(existing && !replyTo_.hint.empty() &&
 		!hubHintsEqual(frame->replyTo.getUser().hint, replyTo_.hint))
 	{
-		frame->closeCC(true);
-		frame->replyTo.getUser().hint = replyTo_.hint;
-		frame->updateOnlineStatus(true);
+		frame->changeHub(replyTo_.hint);
 	}
 	if(activate)
 		frame->activate();
@@ -71,11 +81,21 @@ void PrivateFrame::openWindow(TabViewPtr parent, const HintedUser& replyTo_, con
 bool PrivateFrame::gotMessage(TabViewPtr parent, const ChatMessage& message, const string& hubHint, bool fromBot) {
 	auto& user = (message.replyTo == ClientManager::getInstance()->getMe()) ? message.to : message.replyTo;
 
-	auto i = frames.find(user);
-	if(i == frames.end()) {
+	PrivateFrame* frame = nullptr;
+	size_t frameCount;
+	{
+		Lock l(framesMutex);
+		auto i = frames.find(user);
+		if(i != frames.end()) {
+			frame = i->second;
+		}
+		frameCount = frames.size();
+	}
+
+	if(!frame) {
 		// creating a new window
 
-		if(static_cast<int>(frames.size()) >= SETTING(MAX_PM_WINDOWS)) {
+		if(static_cast<int>(frameCount) >= SETTING(MAX_PM_WINDOWS)) {
 			return false;
 		}
 
@@ -89,10 +109,6 @@ bool PrivateFrame::gotMessage(TabViewPtr parent, const ChatMessage& message, con
 
 		p->addChat(message);
 		p->lastMessageTime = message.timestamp;
-		if(p->ccReady() && message.from != ClientManager::getInstance()->getMe()) {
-			p->messageSeenPending = true;
-			p->sendSeenIfActive();
-		}
 
 		if(Util::getAway() && !(SETTING(NO_AWAYMSG_TO_BOTS) && fromBot)) {
 			auto awayMessage = Util::getAwayMessage();
@@ -105,8 +121,8 @@ bool PrivateFrame::gotMessage(TabViewPtr parent, const ChatMessage& message, con
 
 	} else {
 		// send the message to the existing window
-		i->second->addChat(message);
-		i->second->lastMessageTime = message.timestamp;
+		frame->addChat(message);
+		frame->lastMessageTime = message.timestamp;
 	}
 
 	WinUtil::notify(WinUtil::NOTIFICATION_PM, Text::toT(message.message), [user] { activateWindow(user); });
@@ -115,15 +131,133 @@ bool PrivateFrame::gotMessage(TabViewPtr parent, const ChatMessage& message, con
 }
 
 void PrivateFrame::activateWindow(const UserPtr& u) {
-	auto i = frames.find(u);
-	if(i != frames.end())
-		i->second->activate();
+	PrivateFrame* frame = nullptr;
+	{
+		Lock l(framesMutex);
+		auto i = frames.find(u);
+		if(i != frames.end()) {
+			frame = i->second;
+		}
+	}
+	if(frame) {
+		frame->activate();
+	}
+}
+
+bool PrivateFrame::isOpen(const UserPtr& u) {
+	Lock l(framesMutex);
+	return frames.find(u) != frames.end();
+}
+
+void PrivateFrame::handlePMConnection(const HintedUser& user, const string& connectionToken) {
+	PrivateFrame* frame = nullptr;
+	{
+		Lock l(framesMutex);
+		auto i = frames.find(user.user);
+		if(i != frames.end()) {
+			frame = i->second;
+		}
+	}
+
+	if(frame) {
+		frame->adoptPMConnection(connectionToken);
+	}
+	// With no frame, PrivateChatManager remains the continuous listener and
+	// keeps the exact channel safely parked. A delayed availability task must
+	// not undo an intentional return performed while the tab was closing.
+}
+
+void PrivateFrame::handlePMMessage(const HintedUser& user, const string& connectionToken,
+	const ChatMessage& message)
+{
+	if(message.from == ClientManager::getInstance()->getMe()) {
+		return;
+	}
+
+	PrivateFrame* frame = nullptr;
+	{
+		Lock l(framesMutex);
+		auto i = frames.find(user.user);
+		if(i != frames.end()) {
+			frame = i->second;
+		}
+	}
+	if(!frame) {
+		return;
+	}
+
+	Lock lifetimeLock(frame->connLifetimeMutex);
+	{
+		Lock l(frame->mutex);
+		if(!frame->conn.load() || frame->connToken != connectionToken) {
+			return;
+		}
+	}
+	frame->messageSeenPending = true;
+	frame->sendSeenIfActive();
+}
+
+void PrivateFrame::handlePMI(const HintedUser& user, const string& connectionToken, const AdcCommand& cmd) {
+	PrivateFrame* frame = nullptr;
+	{
+		Lock l(framesMutex);
+		auto i = frames.find(user.user);
+		if(i != frames.end()) {
+			frame = i->second;
+		}
+	}
+
+	if(!frame) {
+		if(cmd.hasFlag("QU", 0)) {
+			PrivateChatManager::getInstance()->releasePMConn(user.user, connectionToken, true);
+		}
+		return;
+	}
+
+	uint64_t revision;
+	{
+		Lock l(frame->mutex);
+		if(!frame->conn.load() || frame->connToken != connectionToken) {
+			if(cmd.hasFlag("QU", 0)) {
+				PrivateChatManager::getInstance()->releasePMConn(user.user, connectionToken, true);
+			}
+			return;
+		}
+		revision = frame->connRevision.load();
+	}
+
+	PMInfo type;
+	string value;
+	if(cmd.hasFlag("SN", 0)) {
+		type = PM_INFO_SEEN;
+	} else if(cmd.getParam("TP", 0, value) && (value == "0" || value == "1")) {
+		type = value == "1" ? PM_INFO_TYPING_ON : PM_INFO_TYPING_OFF;
+	} else if(cmd.getParam("AC", 0, value) && value == "0") {
+		type = PM_INFO_NO_AUTOCONNECT;
+	} else if(cmd.hasFlag("QU", 0)) {
+		type = PM_INFO_QUIT;
+	} else {
+		return;
+	}
+
+	if(frame->isCurrentConnection(connectionToken, revision)) {
+		frame->updatePMInfo(type);
+	}
 }
 
 void PrivateFrame::closeAll(bool offline) {
-	for(auto& i: frames) {
-		if(!offline || !i.second->online) {
-			i.second->close(true);
+	vector<PrivateFrame*> snapshot;
+	{
+		Lock l(framesMutex);
+		snapshot.reserve(frames.size());
+		for(const auto& i: frames) {
+			snapshot.push_back(i.second);
+		}
+	}
+
+	for(auto frame: snapshot) {
+		if(!offline || !frame->online) {
+			frame->close(true);
 		}
 	}
 }
@@ -162,6 +296,8 @@ BaseType(parent, _T(""), IDH_PM, IDI_PRIVATE_OFF, false),
 replyTo(replyTo_),
 online(false),
 conn(nullptr),
+connRevision(0),
+acceptCCPMConnections(true),
 localTyping(false),
 remoteTyping(false),
 messageSeenPending(false),
@@ -215,18 +351,39 @@ lastMessageTime(time(NULL))
 
 	readLog(logPath, SETTING(PM_LAST_LOG_LINES));
 
-	ConnectionManager::getInstance()->addListener(this);
+	// Publish before registering/adopting so PrivateChatManager can park a
+	// connection that overlaps construction. Its Connected callback always
+	// parks first, making getPMConn below an atomic handoff under its lock.
 	{
-		Lock l(mutex);
-		conn = PrivateChatManager::getInstance()->getPMConn(replyTo.getUser().user, this);
+		Lock l(framesMutex);
+		frames.emplace(replyTo.getUser(), this);
 	}
 
+	ConnectionManager::getInstance()->addListener(this);
+	{
+		Lock lifetimeLock(connLifetimeMutex);
+		Lock l(mutex);
+		auto activeConn = PrivateChatManager::getInstance()->getPMConn(replyTo.getUser().user);
+		if(activeConn && !matchesCurrentHub(activeConn->getHintedUser(), replyTo.getUser())) {
+			// Parked channels are hub-scoped just like live Connected events.
+			// Do not silently reuse a channel from another hub in this frame.
+			activeConn->disconnect(true);
+			activeConn = nullptr;
+		}
+		if(activeConn && replyTo.getUser().hint.empty()) {
+			replyTo.getUser().hint = activeConn->getHintedUser().hint;
+		}
+		conn.store(activeConn);
+		if(activeConn) {
+			connToken = activeConn->getToken();
+			++connRevision;
+		}
+	}
+
+	ClientManager::getInstance()->addListener(this);
 	callAsync([this] {
-		ClientManager::getInstance()->addListener(this);
 		updateOnlineStatus(true);
 	});
-
-	frames.emplace(replyTo.getUser(), this);
 
 	addRecent();
 }
@@ -263,23 +420,51 @@ void PrivateFrame::addStatus(const tstring& text) {
 bool PrivateFrame::preClosing() {
 	updateTypingState(false);
 	{
-		Lock l(mutex);
-		if(conn) {
-			if(conn->supportsCPMI()) {
-				conn->pmi("QU", "1");
-				PrivateChatManager::getInstance()->returnPMConn(replyTo.getUser().user, conn, this);
-			} else {
-				conn->removeListener(this);
-				conn->disconnect(false);
+		Lock lifetimeLock(connLifetimeMutex);
+		UserConnection* activeConn;
+		string activeToken;
+		{
+			Lock l(mutex);
+			acceptCCPMConnections = false;
+			allowAutoCCPM = false;
+			activeConn = conn.exchange(nullptr);
+			activeToken = connToken;
+			connToken.clear();
+			++connRevision;
+		}
+
+		// Stop advertising this frame before removing its ConnectionManager
+		// listener. Otherwise PrivateChatManager could leave a new connection
+		// for a frame that can no longer adopt it.
+		{
+			Lock l(framesMutex);
+			frames.erase(replyTo.getUser());
+		}
+
+		if(activeConn) {
+			const auto canPark = activeConn->supportsCPMI() &&
+				activeConn->getState() == UserConnection::STATE_CMD;
+			if(canPark) {
+				activeConn->pmi("QU", "1");
 			}
-			conn = nullptr;
+			// A failed connection is already being removed and must not be
+			// returned to PrivateChatManager while its removal event is in flight.
+			if(canPark) {
+				if(!PrivateChatManager::getInstance()->returnPMConn(
+					replyTo.getUser().user, activeToken, activeConn) &&
+					activeConn->getState() == UserConnection::STATE_CMD)
+				{
+					activeConn->disconnect(false);
+				}
+			} else if(activeConn->getState() != UserConnection::STATE_UNCONNECTED) {
+				activeConn->disconnect(false);
+			}
 		}
 	}
 
 	ClientManager::getInstance()->removeListener(this);
 	ConnectionManager::getInstance()->removeListener(this);
 
-	frames.erase(replyTo.getUser());
 	return true;
 }
 
@@ -321,8 +506,11 @@ void PrivateFrame::updateOnlineStatus(bool newChannel) {
 	auto& user = replyTo.getUser();
 
 	if(user.hint.empty() && !hubs.empty()) {
-		user.hint = hubs.front();
-		newChannel = true;
+		Lock l(mutex);
+		if(user.hint.empty()) {
+			user.hint = hubs.front();
+			newChannel = true;
+		}
 	}
 
 	auto hintOnline = !hubs.empty() && (user.hint.empty() ||
@@ -390,27 +578,124 @@ void PrivateFrame::startCC(bool silent) {
 }
 
 void PrivateFrame::closeCC(bool silent) {
-	UserConnection* activeConn = nullptr;
+	bool found = false;
 	{
-		Lock l(mutex);
-		activeConn = conn;
+		Lock lifetimeLock(connLifetimeMutex);
+		UserConnection* activeConn;
+		{
+			Lock l(mutex);
+			activeConn = conn.load();
+			if(activeConn && activeConn->getState() == UserConnection::STATE_CMD) {
+				allowAutoCCPM = false;
+			} else {
+				activeConn = nullptr;
+			}
+		}
+		if(activeConn) {
+			if(activeConn->supportsCPMI()) {
+				activeConn->pmi("AC", "0");
+			}
+			activeConn->disconnect(false);
+			found = true;
+		}
 	}
 
-	if(activeConn) {
+	if(found) {
 		if(!silent) { addStatus(T_("Disconnecting the direct encrypted channel...")); }
-		allowAutoCCPM = false;
-		if(activeConn->supportsCPMI()) {
-			activeConn->pmi("AC", "0");
-		}
-		activeConn->disconnect(false);
 	} else {
 		if(!silent) { addStatus(T_("No direct encrypted channel available")); }
 	}
 }
 
+void PrivateFrame::changeHub(const string& hubHint) {
+	{
+		// Keep the close request and hint change atomic with respect to a
+		// connection event for the old hub.
+		Lock lifetimeLock(connLifetimeMutex);
+		closeCC(true);
+		{
+			Lock l(mutex);
+			replyTo.getUser().hint = hubHint;
+		}
+	}
+	updateOnlineStatus(true);
+}
+
+void PrivateFrame::adoptPMConnection(const string& connectionToken) {
+	uint64_t revision = 0;
+	bool adopted = false;
+	{
+		Lock lifetimeLock(connLifetimeMutex);
+		Lock l(mutex);
+		if(!acceptCCPMConnections) {
+			PrivateChatManager::getInstance()->releasePMConn(
+				replyTo.getUser().user, connectionToken, true);
+			return;
+		}
+
+		auto activeConn = conn.load();
+		if(activeConn) {
+			if(connToken == connectionToken) {
+				// ConnectionManager may have called this frame before
+				// PrivateChatManager parked its fallback copy.
+				PrivateChatManager::getInstance()->releasePMConn(
+					replyTo.getUser().user, connectionToken, false);
+			}
+			return;
+		}
+
+		activeConn = PrivateChatManager::getInstance()->getPMConn(
+			replyTo.getUser().user, connectionToken);
+		if(!activeConn) {
+			return;
+		}
+
+		if(!matchesCurrentHub(activeConn->getHintedUser(), replyTo.getUser())) {
+			activeConn->disconnect(true);
+			return;
+		}
+
+		if(replyTo.getUser().hint.empty()) {
+			replyTo.getUser().hint = activeConn->getHintedUser().hint;
+		}
+		conn.store(activeConn);
+		connToken = connectionToken;
+		revision = ++connRevision;
+		adopted = true;
+	}
+
+	if(adopted) {
+		callAsync([this, connectionToken, revision] {
+			if(isCurrentConnection(connectionToken, revision)) {
+				localTyping = false;
+				remoteTyping = false;
+				updateOnlineStatus(true);
+				addStatus(T_("A direct encrypted channel has been established"));
+				updateTypingState();
+				sendSeenIfActive();
+			}
+		});
+	}
+}
+
 bool PrivateFrame::ccReady() const {
+	Lock lifetimeLock(connLifetimeMutex);
+	UserConnection* activeConn;
+	{
+		Lock l(mutex);
+		activeConn = conn.load();
+	}
+	return activeConn && activeConn->getState() == UserConnection::STATE_CMD && activeConn->isSecure();
+}
+
+bool PrivateFrame::isCurrentConnection(const string& token, uint64_t revision) const {
 	Lock l(mutex);
-	return conn && conn->isSecure();
+	return conn.load() && connToken == token && connRevision.load() == revision;
+}
+
+bool PrivateFrame::isDisconnectedConnection(uint64_t revision) const {
+	Lock l(mutex);
+	return !conn.load() && connRevision.load() == revision;
 }
 
 void PrivateFrame::updatePMInfo(PMInfo type) {
@@ -437,9 +722,16 @@ void PrivateFrame::updatePMInfo(PMInfo type) {
 }
 
 bool PrivateFrame::sendPMI(const char* name, const string& value) {
-	Lock l(mutex);
-	if(conn && conn->isSecure() && conn->supportsCPMI()) {
-		conn->pmi(name, value);
+	Lock lifetimeLock(connLifetimeMutex);
+	UserConnection* activeConn;
+	{
+		Lock l(mutex);
+		activeConn = conn.load();
+	}
+	if(activeConn && activeConn->getState() == UserConnection::STATE_CMD &&
+		activeConn->isSecure() && activeConn->supportsCPMI())
+	{
+		activeConn->pmi(name, value);
 		return true;
 	}
 	return false;
@@ -448,8 +740,14 @@ bool PrivateFrame::sendPMI(const char* name, const string& value) {
 void PrivateFrame::updateTypingState(bool refreshTimeout) {
 	bool cpmiReady;
 	{
-		Lock l(mutex);
-		cpmiReady = conn && conn->isSecure() && conn->supportsCPMI();
+		Lock lifetimeLock(connLifetimeMutex);
+		UserConnection* activeConn;
+		{
+			Lock l(mutex);
+			activeConn = conn.load();
+		}
+		cpmiReady = activeConn && activeConn->getState() == UserConnection::STATE_CMD &&
+			activeConn->isSecure() && activeConn->supportsCPMI();
 	}
 	const auto typing = cpmiReady && refreshTimeout && !message->getText().empty() && message->hasFocus() && isActive();
 	if(typing != localTyping) {
@@ -581,9 +879,14 @@ void PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson) {
 	auto msg8 = Text::fromT(msg);
 
 	{
-		Lock l(mutex);
-		if(conn && conn->isSecure()) {
-			conn->pm(msg8, thirdPerson);
+		Lock lifetimeLock(connLifetimeMutex);
+		UserConnection* activeConn;
+		{
+			Lock l(mutex);
+			activeConn = conn.load();
+		}
+		if(activeConn && activeConn->getState() == UserConnection::STATE_CMD && activeConn->isSecure()) {
+			activeConn->pm(msg8, thirdPerson);
 			return;
 		}
 	}
@@ -638,7 +941,7 @@ void PrivateFrame::handleChannelMenu() {
 			auto url = hub.first;
 			auto current = !cc && hubHintsEqual(url, replyTo.getUser().hint);
 			auto pos = menu->appendItem(dwt::util::escapeMenu(Text::toT(hub.second)),
-				[this, url] { closeCC(true); replyTo.getUser().hint = url; updateOnlineStatus(true); }, nullptr, !current);
+				[this, url] { changeHub(url); }, nullptr, !current);
 			if(current) {
 				menu->checkItem(pos);
 			}
@@ -682,84 +985,118 @@ void PrivateFrame::on(ClientManagerListener::UserDisconnected, const UserPtr& aU
 }
 
 void PrivateFrame::on(ConnectionManagerListener::Connected, ConnectionQueueItem* cqi, UserConnection* uc) noexcept {
-	if(cqi->getType() == CONNECTION_TYPE_PM && matchesCurrentHub(cqi->getUser(), replyTo.getUser())) {
-		if(!uc->isSecure()) {
-			uc->disconnect(true);
-			return;
-		}
+	if(cqi->getType() != CONNECTION_TYPE_PM || cqi->getUser().user != replyTo.getUser().user) {
+		return;
+	}
 
+	if(!uc->isSecure()) {
+		uc->disconnect(true);
+		return;
+	}
+
+	const auto token = cqi->getToken();
+	const auto connectedHint = cqi->getUser().hint;
+	uint64_t revision = 0;
+	UserConnection* oldConn = nullptr;
+	bool reject = false;
+	bool alreadyCurrent = false;
+	{
+		Lock lifetimeLock(connLifetimeMutex);
 		{
 			Lock l(mutex);
-			if(conn) {
-				conn->removeListener(this);
+			if(!acceptCCPMConnections || !matchesCurrentHub(cqi->getUser(), replyTo.getUser())) {
+				reject = true;
+			} else {
+				oldConn = conn.load();
+				if(oldConn == uc && connToken == token) {
+					alreadyCurrent = true;
+				} else {
+					conn.store(uc);
+					connToken = token;
+					revision = ++connRevision;
+				}
 			}
-			conn = uc;
-			conn->addListener(this);
 		}
-		callAsync([this] {
+
+		if(!alreadyCurrent && oldConn && oldConn != uc) {
+			oldConn->disconnect(false);
+		}
+		if(!reject) {
+			// Keep adoption and fallback release atomic with tab closing.
+			// Otherwise closing could re-park this channel in between and this
+			// callback would subsequently remove its final owner.
+			PrivateChatManager::getInstance()->releasePMConn(
+				replyTo.getUser().user, token, false);
+		}
+	}
+	if(reject) {
+		// PrivateChatManager leaves connections for an open frame to adopt.
+		// Reject one that raced with closing or a hub change so it isn't left
+		// alive without an owner.
+		uc->disconnect(true);
+		return;
+	}
+
+	if(alreadyCurrent) {
+		return;
+	}
+
+	callAsync([this, token, connectedHint, revision] {
+		bool current = false;
+		{
+			Lock l(mutex);
+			if(conn.load() && connToken == token && connRevision.load() == revision) {
+				current = true;
+				if(replyTo.getUser().hint.empty()) {
+					replyTo.getUser().hint = connectedHint;
+				}
+			}
+		}
+		if(current) {
 			localTyping = false;
 			remoteTyping = false;
 			updateOnlineStatus(true);
 			addStatus(T_("A direct encrypted channel has been established"));
 			updateTypingState();
 			sendSeenIfActive();
-		});
-	}
+		}
+	});
 }
 
 void PrivateFrame::on(ConnectionManagerListener::Removed, ConnectionQueueItem* cqi) noexcept {
-	if(cqi->getType() == CONNECTION_TYPE_PM && matchesCurrentHub(cqi->getUser(), replyTo.getUser())) {
+	if(cqi->getType() != CONNECTION_TYPE_PM || cqi->getUser().user != replyTo.getUser().user) {
+		return;
+	}
+
+	const auto token = cqi->getToken();
+	uint64_t revision = 0;
+	bool removedCurrent = false;
+	{
+		Lock lifetimeLock(connLifetimeMutex);
 		{
 			Lock l(mutex);
-			conn = nullptr;
+			if(conn.load() && connToken == token) {
+				conn.store(nullptr);
+				connToken.clear();
+				revision = ++connRevision;
+				removedCurrent = true;
+			}
 		}
-		// The manager may have received the removal event just before a closing
-		// frame returned this connection to it.
-		PrivateChatManager::getInstance()->releasePMConn(replyTo.getUser().user, false);
-		callAsync([this] {
+	}
+
+	// This is deliberately token-specific. PrivateChatManager may have handled
+	// this event just before a closing frame tried to return the same connection.
+	PrivateChatManager::getInstance()->releasePMConn(replyTo.getUser().user, token, false);
+	if(!removedCurrent) {
+		return;
+	}
+
+	callAsync([this, revision] {
+		if(isDisconnectedConnection(revision)) {
 			updateTypingState(false);
 			remoteTyping = false;
 			updateOnlineStatus(true);
 			addStatus(T_("The direct encrypted channel has been disconnected"));
-		});
-	}
-}
-
-void PrivateFrame::on(UserConnectionListener::PrivateMessage, UserConnection* uc, const ChatMessage& message) noexcept {
-	auto user = uc->getHintedUser();
-	callAsync([this, message, user] {
-		addChat(message);
-		lastMessageTime = message.timestamp;
-		if(message.from != ClientManager::getInstance()->getMe()) {
-			messageSeenPending = true;
-			sendSeenIfActive();
 		}
-		WinUtil::notify(WinUtil::NOTIFICATION_PM, Text::toT(message.message), [user] { activateWindow(user); });
-		WinUtil::mainWindow->TrayPM();
 	});
-}
-
-void PrivateFrame::on(AdcCommand::PMI, UserConnection* uc, const AdcCommand& cmd) noexcept {
-	{
-		Lock l(mutex);
-		if(conn != uc) {
-			return;
-		}
-	}
-
-	PMInfo type;
-	string value;
-	if(cmd.hasFlag("SN", 0)) {
-		type = PM_INFO_SEEN;
-	} else if(cmd.getParam("TP", 0, value) && (value == "0" || value == "1")) {
-		type = value == "1" ? PM_INFO_TYPING_ON : PM_INFO_TYPING_OFF;
-	} else if(cmd.getParam("AC", 0, value) && value == "0") {
-		type = PM_INFO_NO_AUTOCONNECT;
-	} else if(cmd.hasFlag("QU", 0)) {
-		type = PM_INFO_QUIT;
-	} else {
-		return;
-	}
-
-	callAsync([this, type] { updatePMInfo(type); });
 }

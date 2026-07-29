@@ -1984,16 +1984,64 @@ void MainWindow::handleWhatsThis() {
 	sendMessage(WM_SYSCOMMAND, SC_CONTEXTHELP);
 }
 
-void MainWindow::on(PrivateChatManagerListener::PrivateMessage, const ChatMessage& message, const HintedUser& user, bool fromBot) noexcept {
-	callAsync([this, message, user, fromBot] {
-		auto opened = PrivateFrame::isOpen(user) || PrivateFrame::gotMessage(getTabView(), message, user.hint, fromBot);
+void MainWindow::on(PrivateChatManagerListener::PrivateMessage, const ChatMessage& message, const HintedUser& user,
+	const string& connectionToken, bool fromBot) noexcept
+{
+	callAsync([this, message, user, connectionToken, fromBot] {
+		if(closing()) {
+			PrivateChatManager::getInstance()->releasePMConn(user.user, connectionToken, true);
+			return;
+		}
+		if(message.from == ClientManager::getInstance()->getMe() &&
+			!PrivateFrame::isOpen(user.user))
+		{
+			// An outgoing echo may arrive after its originating tab has closed.
+			// Preserve any channel that preClosing intentionally parked, but do
+			// not recreate a window solely for the stale local echo.
+			return;
+		}
+		// Always deliver the queued message. A frame may have opened after the
+		// manager posted this UI task, in which case isOpen() alone would skip it.
+		auto opened = PrivateFrame::gotMessage(getTabView(), message, user.hint, fromBot);
+		PrivateFrame::handlePMConnection(user, connectionToken);
+		PrivateFrame::handlePMMessage(user, connectionToken, message);
 
-		// remove the manager listener as the PM window now handles the conn.
-		PrivateChatManager::getInstance()->releasePMConn(user.user, !opened);
+		// Remove only the parked connection that delivered this message. A newer
+		// channel may have replaced it before this UI task was dispatched.
+		// If this exact channel is still parked, the frame did not adopt it
+		// (for example, it opened during the connection handoff). It has no
+		// remaining owner and must be disconnected.
+		PrivateChatManager::getInstance()->releasePMConn(user.user, connectionToken, true);
 
 		if(opened) {
 			TrayPM();
 		}
+	});
+}
+
+void MainWindow::on(PrivateChatManagerListener::PMConnection, const HintedUser& user,
+	const string& connectionToken) noexcept
+{
+	callAsync([this, user, connectionToken] {
+		if(closing()) {
+			PrivateChatManager::getInstance()->releasePMConn(user.user, connectionToken, true);
+			return;
+		}
+
+		PrivateFrame::handlePMConnection(user, connectionToken);
+	});
+}
+
+void MainWindow::on(PrivateChatManagerListener::PMI, const HintedUser& user,
+	const string& connectionToken, const AdcCommand& cmd) noexcept
+{
+	callAsync([this, user, connectionToken, cmd] {
+		if(closing()) {
+			PrivateChatManager::getInstance()->releasePMConn(user.user, connectionToken, true);
+			return;
+		}
+
+		PrivateFrame::handlePMI(user, connectionToken, cmd);
 	});
 }
 

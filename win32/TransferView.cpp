@@ -971,8 +971,14 @@ TransferView::HttpInfo* TransferView::findHttpItem(const string& url) {
 }
 
 void TransferView::removeHttpItem(HttpInfo& item) {
+	auto itemPos = find_if(httpItems.begin(), httpItems.end(),
+		[&item](const HttpInfo& current) { return &current == &item; });
+	if(itemPos == httpItems.end()) {
+		return;
+	}
+
 	transfers->erase(&item);
-	httpItems.remove(item);
+	httpItems.erase(itemPos);
 }
 
 TransferView::UserInfoList TransferView::selectedUsersImpl() const {

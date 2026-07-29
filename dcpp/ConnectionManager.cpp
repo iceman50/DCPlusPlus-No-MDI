@@ -276,8 +276,21 @@ ConnectionQueueItem& ConnectionManager::getCQI(const HintedUser& user, Connectio
 
 void ConnectionManager::putCQI(ConnectionQueueItem& cqi) {
 	auto& container = cqis[cqi.getType()];
-	dcassert(find(container.begin(), container.end(), cqi) != container.end());
-	container.erase(remove(container.begin(), container.end(), cqi), container.end());
+	auto i = find_if(container.begin(), container.end(),
+		[&cqi](const ConnectionQueueItem& item) { return &item == &cqi; });
+	dcassert(i != container.end());
+	if(i != container.end()) {
+		container.erase(i);
+	}
+}
+
+bool ConnectionManager::isPMConnectionActive(const UserPtr& user, const string& token) const noexcept {
+	Lock l(cs);
+	const auto& container = cqis[CONNECTION_TYPE_PM];
+	return std::any_of(container.begin(), container.end(), [&](const ConnectionQueueItem& cqi) {
+		return cqi.getUser().user == user && cqi.getToken() == token &&
+			cqi.getState() == ConnectionQueueItem::ACTIVE;
+	});
 }
 
 UserConnection* ConnectionManager::getConnection(bool aNmdc, bool secure) noexcept {
@@ -907,12 +920,17 @@ void ConnectionManager::addNewConnection(UserConnection* uc, ConnectionType type
 			return cqi.getUser() == uc->getUser();
 		}) : 0;
 		if(i == container.end() && (!multiple || userConnections < std::max(1, SETTING(MAX_MCN_UPLOADS)))) {
+			const bool syncQueueToken = type == CONNECTION_TYPE_UPLOAD || type == CONNECTION_TYPE_PM;
+			const auto queueToken = type == CONNECTION_TYPE_UPLOAD ? uc->getToken() :
+				type == CONNECTION_TYPE_PM ? "CCPM-" + std::to_string(++nextPMConnectionId) :
+				Util::emptyString;
 			auto& cqi = getCQI(uc->getHintedUser(), type,
-				type == CONNECTION_TYPE_UPLOAD ? uc->getToken() : Util::emptyString);
+				queueToken);
 			added.reset(new ConnectionQueueItem(cqi));
-			if(type == CONNECTION_TYPE_UPLOAD) {
-				// NMDC and older ADC peers may not supply a token. Keep the internally generated
-				// queue token on the connection so transfer events can identify it unambiguously.
+			if(syncQueueToken) {
+				// Upload events use the negotiated token. CCPM switches to a local,
+				// monotonic token after the handshake so a peer cannot make a stale
+				// removal collide with a replacement by reusing its protocol token.
 				uc->setToken(cqi.getToken());
 			}
 
@@ -1146,8 +1164,9 @@ void ConnectionManager::failed(UserConnection* aSource, const string& aError, bo
 					aSource->isSet(UserConnection::FLAG_PM) ? CONNECTION_TYPE_PM : CONNECTION_TYPE_LAST;
 				if(type != CONNECTION_TYPE_LAST) {
 					auto& container = cqis[type];
-					const bool multiple = type == CONNECTION_TYPE_UPLOAD && aSource->isMCN();
-					auto i = multiple ? find_if(container.begin(), container.end(), [&](const ConnectionQueueItem& cqi) {
+					const bool matchByToken = type == CONNECTION_TYPE_PM ||
+						(type == CONNECTION_TYPE_UPLOAD && aSource->isMCN());
+					auto i = matchByToken ? find_if(container.begin(), container.end(), [&](const ConnectionQueueItem& cqi) {
 						return cqi.getToken() == aSource->getToken();
 					}) : find(container.begin(), container.end(), aSource->getUser());
 					dcassert(i != container.end());
