@@ -3,7 +3,7 @@
 # - hg (this tree must be under hg version control)
 # - NSIS <http://nsis.sourceforge.net>
 # - Perl, in order to use po4a <https://www.po4a.org/>
-# - zip (MSYS / Cygwin provide one)
+# - zip (MSYS / Cygwin provide one) or 7z (on Windows)
 
 Import("dev")
 env = dev.env.Clone()
@@ -95,13 +95,17 @@ for line in f:
         if env.FindFile(match, "#"):
             # copy from the root dir
             match = "#/" + match
-        elif match[-4:] == "-x64":
-            # copy from the x64 build dir
-            match = dev.get_build_root()[:-1] + "-x64/bin/" + match[:-4]
-            x64_rename.append(env.File(match).abspath)
+#        elif match[-4:] == "-x64":
+#            # copy from the x64 build dir
+#            match = dev.get_build_root()[:-1] + "-x64/bin/" + match[:-4]
+#            x64_rename.append(env.File(match).abspath)
         else:
-            # copy from the build dir
+            # copy from the x64 build dir
             match = dev.get_build_path("bin") + "/" + match
+#            match = dev.get_build_root()[:-1] + "-x64/bin/" + match
+#            x64_rename.append(env.File(match).abspath)
+#            # copy from the build dir
+#            match = dev.get_build_path("bin") + "/" + match
         if line.lstrip().startswith("File /r"):
             sources.append(Dir(match))
         else:
@@ -235,12 +239,12 @@ def gen_installer(target, source, env):
         )
 
     zip_cmd(target[1].abspath)
-    env.Execute(Move(build_path + "DCPlusPlus.exe", build_path + "DCPlusPlus.exe-x64"))
-    env.Execute(Move(build_path + "DCPlusPlus.pdb", build_path + "DCPlusPlus.pdb-x64"))
-    zip_cmd(target[2].abspath)
+#    env.Execute(Move(build_path + "DCPlusPlus.exe", build_path + "DCPlusPlus.exe-x64"))
+#    env.Execute(Move(build_path + "DCPlusPlus.pdb", build_path + "DCPlusPlus.pdb-x64"))
+#    zip_cmd(target[2].abspath)
 
     # use "hg archive" to zip the source
-    env.Execute('hg archive "' + nixify(str(target[3])) + '"')
+    env.Execute('git archive --format=zip --output="' + nixify(str(target[2])) + '" HEAD')
 
     return ret
 
@@ -250,7 +254,7 @@ ret = env.Command(
     [
         distro_path + "DCPlusPlus-xxx.exe",
         distro_path + "DCPlusPlus-xxx.zip",
-        distro_path + "DCPlusPlus-xxx-x64.zip",
+#        distro_path + "DCPlusPlus-xxx-x64.zip",
         distro_path + "DCPlusPlus-xxx-src.zip",
     ],
     sources,

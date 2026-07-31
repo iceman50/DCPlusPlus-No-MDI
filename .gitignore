@@ -104,6 +104,12 @@ Desktop.ini
 **/.hgignore
 .hgtags
 **/.hgtags
+
+# Project / dev specific
 dcpp/version-rev-id.inc
 gdb-hang-snapshot.txt
 TODO.md
+help/cshelp.h
+help/changelog.html
+help/compile.html
+mingw/include/*.h
