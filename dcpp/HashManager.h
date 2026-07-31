@@ -247,8 +247,6 @@ private:
 		LegacyLoadResult loadLegacy(function<void (float)> progressF);
 		/** Validate legacy HashData.dat tree data, write valid records into SQLite and mark migration complete. */
 		bool migrateLegacy();
-		/** Rename legacy hash database files after SQLite has become authoritative, logging every result. */
-		void renameLegacyFiles() noexcept;
 
 		void saveFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth);
 		void removeFile(const string& aFileName) noexcept;
@@ -270,8 +268,6 @@ private:
 		static string getDataFile();
 		/** Return the SQLite hash database path in the user configuration directory. */
 		static string getDbFile();
-		/** Choose a non-destructive .migrated target name for a legacy hash database file. */
-		static string getMigratedFileName(const string& fileName);
 	};
 
 	friend class HashLoader;

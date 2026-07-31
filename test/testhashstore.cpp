@@ -3,7 +3,6 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <vector>
 
 #define private public
 #include <dcpp/HashManager.h>
@@ -18,25 +17,6 @@
 using namespace dcpp;
 
 namespace {
-
-class LogCapture : public LogManagerListener {
-public:
-	void on(Message, time_t, const string& message) noexcept override {
-		messages.push_back(message);
-	}
-
-	bool contains(const string& text) const {
-		for(const auto& message: messages) {
-			if(message.find(text) != string::npos) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-private:
-	std::vector<string> messages;
-};
 
 class HashStoreTest : public ::testing::Test {
 public:
@@ -332,10 +312,10 @@ TEST_F(HashStoreTest, existing_sqlite_data_is_marked_as_migrated) {
 	store.load([](float) {});
 	EXPECT_TRUE(store.getTTH(fileName, tree.getFileSize(), timeStamp));
 	EXPECT_FALSE(store.getTTH(legacyName, legacyTree.getFileSize(), timeStamp + 1));
-	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml"));
-	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat"));
-	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
-	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
 
 	SQLiteDB db(path("HashStore.sqlite3"));
 	EXPECT_EQ("1", metadataValue(db, "legacy_migration_complete"));
@@ -401,13 +381,11 @@ TEST_F(HashStoreTest, compact_on_rebuild_setting_runs_after_pruning) {
 	EXPECT_FALSE(store.getTTH(pruneName, pruneTree.getFileSize(), 222));
 }
 
-TEST_F(HashStoreTest, migrates_legacy_xml_and_dat_store) {
+TEST_F(HashStoreTest, migrates_legacy_xml_and_dat_store_without_renaming) {
 	const auto fileName = path("legacy-file.bin");
 	const uint32_t timeStamp = 67890;
 	const auto tree = makeTree(4097);
 	writeLegacyStore(configPath, fileName, timeStamp, tree);
-	LogCapture logs;
-	LogManager::getInstance()->addListener(&logs);
 
 	{
 		HashManager::HashStore store;
@@ -416,16 +394,12 @@ TEST_F(HashStoreTest, migrates_legacy_xml_and_dat_store) {
 		ASSERT_TRUE(root);
 		EXPECT_EQ(tree.getRoot(), *root);
 	}
-	LogManager::getInstance()->removeListener(&logs);
 
 	EXPECT_TRUE(std::filesystem::exists(configPath + "HashStore.sqlite3"));
-	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml"));
-	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat"));
-	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
-	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
-	EXPECT_TRUE(logs.contains("Renamed legacy hash database file"));
-	EXPECT_TRUE(logs.contains("HashIndex.xml.migrated"));
-	EXPECT_TRUE(logs.contains("HashData.dat.migrated"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
 
 	{
 		SQLiteDB db(path("HashStore.sqlite3"));
@@ -441,6 +415,11 @@ TEST_F(HashStoreTest, migrates_legacy_xml_and_dat_store) {
 		ASSERT_TRUE(root);
 		EXPECT_EQ(tree.getRoot(), *root);
 	}
+
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
 }
 
 TEST_F(HashStoreTest, completed_empty_sqlite_store_does_not_import_later_legacy_files) {
@@ -457,10 +436,10 @@ TEST_F(HashStoreTest, completed_empty_sqlite_store_does_not_import_later_legacy_
 	HashManager::HashStore store;
 	store.load([](float) {});
 	EXPECT_FALSE(store.getTTH(fileName, tree.getFileSize(), timeStamp));
-	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml"));
-	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat"));
-	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
-	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashIndex.xml"));
+	EXPECT_TRUE(std::filesystem::exists(configPath + "HashData.dat"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashIndex.xml.migrated"));
+	EXPECT_FALSE(std::filesystem::exists(configPath + "HashData.dat.migrated"));
 
 	SQLiteDB db(path("HashStore.sqlite3"));
 	EXPECT_EQ("1", metadataValue(db, "legacy_migration_complete"));

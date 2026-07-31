@@ -701,16 +701,6 @@ string HashManager::HashStore::getIndexFile() { return Util::getPath(Util::PATH_
 string HashManager::HashStore::getDataFile() { return Util::getPath(Util::PATH_USER_CONFIG) + "HashData.dat"; }
 string HashManager::HashStore::getDbFile() { return Util::getPath(Util::PATH_USER_CONFIG) + "HashStore.sqlite3"; }
 
-string HashManager::HashStore::getMigratedFileName(const string& fileName) {
-	// Preserve the legacy files for recovery instead of deleting them. If a previous cleanup already
-	// produced a .migrated file, append a timestamp so the rename stays non-destructive.
-	auto target = fileName + ".migrated";
-	if(File::getSize(target) == -1) {
-		return target;
-	}
-	return target + "." + std::to_string(GET_TIME());
-}
-
 class HashLoader: public SimpleXMLReader::CallBack {
 public:
 	HashLoader(HashManager::HashStore& s, const CountedInputStream<false>& countedStream, uint64_t fileSize, function<void (float)> progressF) :
@@ -815,8 +805,6 @@ void HashManager::HashStore::loadDb(function<void (float)> progressF) {
 }
 
 HashManager::HashStore::LegacyLoadResult HashManager::HashStore::loadLegacy(function<void (float)> progressF) {
-	// Keep the old Util::migrate behavior for users upgrading from pre-config-path layouts.
-	Util::migrate(getIndexFile());
 	if(File::getSize(getIndexFile()) == -1) {
 		// Missing legacy files are not an error; this is the normal path for fresh SQLite installs.
 		return LegacyLoadResult::Missing;
@@ -844,7 +832,6 @@ bool HashManager::HashStore::migrateLegacy() {
 			SQLiteTransaction transaction(db);
 			markLegacyMigrationComplete(0, 0);
 			transaction.commit();
-			renameLegacyFiles();
 			return true;
 		} catch (const Exception& e) {
 			LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()));
@@ -858,8 +845,6 @@ bool HashManager::HashStore::migrateLegacy() {
 		uint64_t invalidTrees = 0;
 
 		{
-			// HashData.dat must be closed before renameLegacyFiles runs on Windows, so constrain the
-			// File handle to this validation block.
 			File dataFile(getDataFile(), File::READ, File::OPEN);
 			for(auto i = treeIndex.begin(); i != treeIndex.end();) {
 				TigerTree tree;
@@ -922,7 +907,6 @@ bool HashManager::HashStore::migrateLegacy() {
 			logHashStoreWarning(str(F_("Legacy hash database migration skipped %1% invalid trees and %2% file records without matching trees") %
 				invalidTrees % orphanFiles));
 		}
-		renameLegacyFiles();
 		return true;
 	} catch (const Exception& e) {
 		// On failure, keep the legacy files untouched and clear partial memory state; files can be
@@ -932,30 +916,6 @@ bool HashManager::HashStore::migrateLegacy() {
 		treeIndex.clear();
 		return false;
 	}
-}
-
-void HashManager::HashStore::renameLegacyFiles() noexcept {
-	auto renameLegacyFile = [](const string& fileName) {
-		if(File::getSize(fileName) == -1) {
-			// Nothing to clean up for users that never had this legacy file.
-			return;
-		}
-
-		const auto target = getMigratedFileName(fileName);
-		try {
-			// The rename is a safety marker, not data destruction. The system log gives users a clear
-			// audit trail if they later look for the old hash database files.
-			File::renameFile(fileName, target);
-			LogManager::getInstance()->message(str(F_("Renamed legacy hash database file %1% to %2% after SQLite migration") %
-				Util::addBrackets(fileName) % Util::addBrackets(target)));
-		} catch (const Exception& e) {
-			logHashStoreWarning(str(F_("Unable to rename legacy hash database file %1% after SQLite migration: %2%") %
-				Util::addBrackets(fileName) % e.getError()));
-		}
-	};
-
-	renameLegacyFile(getIndexFile());
-	renameLegacyFile(getDataFile());
 }
 
 void HashManager::HashStore::load(function<void (float)> progressF) {
@@ -973,11 +933,9 @@ void HashManager::HashStore::load(function<void (float)> progressF) {
 				markLegacyMigrationComplete(0, 0);
 				transaction.commit();
 			}
-			renameLegacyFiles();
 		} else if(isLegacyMigrationComplete()) {
-			// An empty SQLite store with a completion marker is intentional. Clean up stale legacy files
-			// if they appear later, but do not import them over the completed SQLite state.
-			renameLegacyFiles();
+			// An empty SQLite store with a completion marker is intentional. Do not import legacy files
+			// that may appear later over the completed SQLite state.
 			progressF(1);
 		} else {
 			// Only databases without rows and without a completion marker are eligible for one-time

@@ -127,9 +127,10 @@ HashData.dat
 ```
 
 `HashIndex.xml` contained file and tree metadata. `HashData.dat` contained the
-serialized tree leaf data. The SQLite migration path imports valid data from
-those two files once, then renames the legacy files to `.migrated` names instead
-of deleting them.
+serialized tree leaf data. When SQLite has no authoritative rows or completed
+migration marker, the migration path imports every valid legacy record it can.
+The legacy files remain at their original paths and are never renamed or
+deleted, regardless of whether import succeeds.
 
 ## SQLite Wrapper Behavior
 
@@ -403,8 +404,7 @@ If either `trees` or `files` contains rows:
 1. SQLite is treated as authoritative.
 2. `loadDb` loads valid rows into `treeIndex` and `fileIndex`.
 3. If the legacy migration marker is missing, it is backfilled.
-4. Old `HashIndex.xml` and `HashData.dat` files are renamed to `.migrated`
-   names if they still exist.
+4. Old `HashIndex.xml` and `HashData.dat` files are left untouched.
 
 This prevents stale legacy files from overwriting newer SQLite data.
 
@@ -413,7 +413,7 @@ This prevents stale legacy files from overwriting newer SQLite data.
 If there are no hash rows but `legacy_migration_complete=1`:
 
 1. The empty SQLite state is treated as intentional.
-2. Old legacy files are renamed if they appear.
+2. Old legacy files are left untouched if they appear.
 3. No legacy import is attempted.
 
 This avoids repeatedly importing stale XML/DAT files after the user has already
@@ -421,14 +421,15 @@ moved to SQLite.
 
 #### Case 3: SQLite Is Empty And Migration Is Not Complete
 
-If there are no rows and no completion marker:
+If there are no rows and no completion marker, including when
+`HashStore.sqlite3` did not exist before startup:
 
 1. DC++ attempts to load `HashIndex.xml`.
 2. If the legacy index is missing, migration is marked complete with zero rows.
 3. If the legacy index loads, trees are validated against `HashData.dat`.
 4. Valid trees and matching file rows are written into SQLite in one
    transaction.
-5. Legacy files are renamed to `.migrated` names after a successful import.
+5. Legacy files remain unchanged after import.
 
 If legacy loading fails, the legacy files are left in place and memory indexes
 are cleared. The user can inspect or recover the old files, and shared files can
@@ -762,19 +763,19 @@ After validation:
 5. migration metadata is written
 6. the transaction commits
 
-Only after the transaction succeeds are the legacy files renamed.
+After the transaction succeeds, the legacy source files remain unchanged.
 
-### Legacy File Renaming
+### Legacy File Preservation
 
-The old files are renamed, not deleted:
+The old files keep their original names:
 
 ```text
-HashIndex.xml -> HashIndex.xml.migrated
-HashData.dat  -> HashData.dat.migrated
+HashIndex.xml
+HashData.dat
 ```
 
-If the target already exists, a timestamp is appended. This is intentionally
-non-destructive and leaves a manual recovery trail.
+They are read only for an eligible one-time import. Hash-store startup does not
+rename, move or delete either file.
 
 ## Background Hashing
 
@@ -1190,7 +1191,6 @@ Examples:
 * failed quick check or integrity check
 * stale file row removal failure
 * failed legacy migration
-* failed legacy rename
 
 When a hash record is skipped, the file can be hashed again if it is still
 shared or needed.
@@ -1251,6 +1251,7 @@ The system depends on these invariants:
 * Legacy XML/DAT files never override non-empty SQLite data.
 * A completed migration marker prevents stale legacy files from being imported
   later.
+* Legacy XML/DAT files always remain at their original names.
 * The share cache is accepted only after schema, fingerprint and row validation.
 * Uploads during refresh must verify bytes before serving normal files.
 * Hub-specific share restrictions still apply to TTH fallback paths.
@@ -1265,8 +1266,8 @@ corrupt local store is usually:
 3. restart DC++
 4. allow the share to refresh and files to rehash as needed
 
-For hash migration issues, old `.migrated` files may still exist and can be
-inspected manually. They are not deleted by the migration path.
+For hash migration issues, the old files remain at their original names and can
+be inspected manually. The migration path never renames or deletes them.
 
 ## Test Coverage
 
@@ -1282,7 +1283,7 @@ The current unit tests cover the major SQLite hash and share-cache paths:
 * foreign-key rejection of orphan file records
 * invalid leaf blob handling
 * compact-after-rebuild behavior
-* legacy XML/DAT migration
+* legacy XML/DAT migration without renaming the source files
 * avoiding stale legacy imports after completed empty SQLite setup
 * share-cache round trips
 * merged share/search/protocol lookup behavior after cache load
