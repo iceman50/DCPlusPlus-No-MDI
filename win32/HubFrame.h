@@ -160,6 +160,11 @@ private:
 
 	CheckBoxPtr showUsers;
 
+	GridPtr loginOverlay;
+	TextBoxPtr loginNick;
+	TextBoxPtr loginPassword;
+	ButtonPtr loginSend;
+
 	UserMap userMap;
 
 	Client* client;
@@ -261,6 +266,10 @@ private:
 	void onConnected();
 	void onDisconnected();
 	void onGetPassword();
+	void showLoginOverlay();
+	void hideLoginOverlay();
+	void sendLogin();
+	bool handleLoginKeyDown(int c);
 	void onPrivateMessage(const ChatMessage& message);
 
 	// FavoriteManagerListener

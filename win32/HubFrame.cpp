@@ -35,14 +35,15 @@
 #include <dcpp/WindowInfo.h>
 
 #include <dwt/util/HoldResize.h>
+#include <dwt/widgets/Button.h>
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/Label.h>
 #include <dwt/widgets/MessageBox.h>
 #include <dwt/widgets/SplitterContainer.h>
+#include <dwt/widgets/TextBox.h>
 
 #include "MainWindow.h"
 #include "PrivateFrame.h"
-#include "ParamDlg.h"
 #include "HoldRedraw.h"
 #include "TypedTable.h"
 
@@ -177,6 +178,10 @@ users(0),
 filter(usersColumns, COLUMN_LAST, [this] { updateUserList(); }),
 filterOpts(0),
 showUsers(0),
+loginOverlay(0),
+loginNick(0),
+loginPassword(0),
+loginSend(0),
 client(0),
 url(url),
 selCount(0),
@@ -190,7 +195,9 @@ hubMenu(false),
 inTabComplete(false),
 tabIcon(IDI_HUB)
 {
-	paned = addChild(SplitterContainer::Seed(SETTING(HUB_PANED_POS)));
+	auto panedSeed = SplitterContainer::Seed(SETTING(HUB_PANED_POS));
+	panedSeed.style |= WS_CLIPSIBLINGS;
+	paned = addChild(panedSeed);
 
 	createChat(paned);
 	chat->setHelpId(IDH_HUB_CHAT);
@@ -246,6 +253,52 @@ tabIcon(IDI_HUB)
 		filter.text->onKillFocus([this](dwt::Widget* w) { hideFilterOpts(w); });
 		filter.column->onKillFocus([this](dwt::Widget* w) { hideFilterOpts(w); });
 		filter.method->onKillFocus([this](dwt::Widget* w) { hideFilterOpts(w); });
+	}
+
+	{
+		auto overlaySeed = Grid::Seed(6, 4);
+		overlaySeed.style |= WS_BORDER | WS_CLIPSIBLINGS;
+		overlaySeed.style &= ~WS_VISIBLE;
+		loginOverlay = addChild(overlaySeed);
+		loginOverlay->setSpacing(6);
+		loginOverlay->row(0).mode = GridInfo::STATIC;
+		loginOverlay->row(0).size = 6;
+		loginOverlay->row(5).mode = GridInfo::STATIC;
+		loginOverlay->row(5).size = 6;
+		loginOverlay->column(0).mode = GridInfo::STATIC;
+		loginOverlay->column(0).size = 6;
+		loginOverlay->column(1).align = GridInfo::BOTTOM_RIGHT;
+		loginOverlay->column(2).mode = GridInfo::STATIC;
+		loginOverlay->column(2).size = 220;
+		loginOverlay->column(3).mode = GridInfo::STATIC;
+		loginOverlay->column(3).size = 6;
+
+		auto title = loginOverlay->addChild(Label::Seed(T_("Login required")));
+		loginOverlay->setWidget(title, 1, 2);
+
+		auto nickLabel = loginOverlay->addChild(Label::Seed(T_("Nick")));
+		loginOverlay->setWidget(nickLabel, 2, 1);
+		loginNick = loginOverlay->addChild(WinUtil::Seeds::textBox);
+		loginOverlay->setWidget(loginNick, 2, 2);
+		WinUtil::preventSpaces(loginNick);
+		addWidget(loginNick, NO_FOCUS);
+
+		auto passwordLabel = loginOverlay->addChild(Label::Seed(T_("Password")));
+		loginOverlay->setWidget(passwordLabel, 3, 1);
+		loginPassword = loginOverlay->addChild(WinUtil::Seeds::textBox);
+		loginOverlay->setWidget(loginPassword, 3, 2);
+		loginPassword->setPassword();
+		addWidget(loginPassword, NO_FOCUS);
+
+		auto sendSeed = WinUtil::Seeds::button;
+		sendSeed.caption = T_("&Send");
+		loginSend = loginOverlay->addChild(sendSeed);
+		loginOverlay->setWidget(loginSend, 4, 2);
+		addWidget(loginSend, NO_FOCUS);
+
+		loginNick->onKeyDown([this](int c) { return handleLoginKeyDown(c); });
+		loginPassword->onKeyDown([this](int c) { return handleLoginKeyDown(c); });
+		loginSend->onClicked([this] { sendLogin(); });
 	}
 
 	initStatus();
@@ -332,13 +385,24 @@ void HubFrame::layout() {
 
 	r.size.y -= status->refresh();
 
-	dwt::util::HoldResize hr(this, 2);
+	dwt::util::HoldResize hr(this, 3);
 	int ymessage = message->getTextSize(_T("A")).y * messageLines + 10;
 	dwt::Rectangle rm(0, r.size.y - ymessage, r.width(), ymessage);
 	hr.resize(message, rm);
 
 	r.size.y -= rm.size.y + border;
 	hr.resize(paned, r);
+
+	if(loginOverlay->getVisible()) {
+		auto size = loginOverlay->getPreferredSize();
+		size.x = std::min(size.x, r.width());
+		size.y = std::min(size.y, r.height());
+		hr.resize(loginOverlay, dwt::Rectangle(
+			r.x() + (r.width() - size.x) / 2,
+			r.y() + (r.height() - size.y) / 2,
+			size.x,
+			size.y));
+	}
 
 	if(showUsers->getChecked()) {
 		userGrid->setVisible(true);
@@ -360,6 +424,9 @@ void HubFrame::layout() {
 		paned->maximize(chat);
 		userGrid->setVisible(false);
 	}
+
+	if(loginOverlay->getVisible())
+		loginOverlay->setZOrder(HWND_TOP);
 }
 
 void HubFrame::updateStatus() {
@@ -463,6 +530,7 @@ void HubFrame::enterImpl(const tstring& s) {
 			client->setPassword(Text::fromT(param));
 			client->password(Text::fromT(param));
 			waitingForPW = false;
+			hideLoginOverlay();
 		} else if( Util::stricmp(cmd.c_str(), _T("showjoins")) == 0 ) {
 			client->get(HubSettings::ShowJoins) = !client->get(HubSettings::ShowJoins);
 			if(client->get(HubSettings::ShowJoins)) {
@@ -687,6 +755,8 @@ void HubFrame::onConnected() {
 }
 
 void HubFrame::onDisconnected() {
+	waitingForPW = false;
+	hideLoginOverlay();
 	clearUserList();
 	clearTaskList();
 	setIcon(IDI_HUB_OFF);
@@ -695,26 +765,75 @@ void HubFrame::onDisconnected() {
 
 void HubFrame::onGetPassword() {
 	if(!client->getPassword().empty()) {
+		waitingForPW = false;
+		hideLoginOverlay();
 		client->password(client->getPassword());
 		addStatus(T_("Stored password sent..."));
 	} else if(!waitingForPW) {
 		waitingForPW = true;
 		if(SETTING(PROMPT_PASSWORD)) {
-			ParamDlg linePwd(this, getText(), T_("Please enter a password"), Util::emptyStringT, true);
-			auto res = linePwd.run();
-			waitingForPW = false;
-			if(res == IDOK) {
-				client->setPassword(Text::fromT(linePwd.getValue()));
-				client->password(Text::fromT(linePwd.getValue()));
-			} else {
-				disconnect(true);
-			}
+			showLoginOverlay();
 		} else {
 			message->setText(_T("/password "));
 			message->setFocus();
 			message->setSelection(10, 10);
 		}
 	}
+}
+
+void HubFrame::showLoginOverlay() {
+	loginNick->setText(Text::toT(client->get(HubSettings::Nick)));
+	loginNick->setSelection();
+	loginPassword->setText(Util::emptyStringT);
+	loginOverlay->setVisible(true);
+	loginOverlay->setZOrder(HWND_TOP);
+	layout();
+	::RedrawWindow(loginOverlay->handle(), nullptr, nullptr,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+
+	if(loginNick->getText().empty()) {
+		loginNick->setFocus();
+	} else {
+		loginPassword->setFocus();
+	}
+}
+
+void HubFrame::hideLoginOverlay() {
+	loginPassword->setText(Util::emptyStringT);
+	loginOverlay->setVisible(false);
+}
+
+void HubFrame::sendLogin() {
+	if(!waitingForPW)
+		return;
+
+	auto nick = loginNick->getText();
+	if(nick.empty()) {
+		loginNick->showPopup(T_("Nick required"), T_("Please enter a nick."), TTI_ERROR);
+		loginNick->setFocus();
+		return;
+	}
+
+	auto password = loginPassword->getText();
+	if(password.empty()) {
+		loginPassword->showPopup(T_("Password required"), T_("Please enter a password."), TTI_ERROR);
+		loginPassword->setFocus();
+		return;
+	}
+
+	client->get(HubSettings::Nick) = Text::fromT(nick);
+	client->setPassword(Text::fromT(password));
+	client->password(Text::fromT(password));
+	waitingForPW = false;
+	hideLoginOverlay();
+}
+
+bool HubFrame::handleLoginKeyDown(int c) {
+	if(c == VK_RETURN && !(WinUtil::isShift() || WinUtil::isCtrl() || WinUtil::isAlt())) {
+		sendLogin();
+		return true;
+	}
+	return false;
 }
 
 void HubFrame::onPrivateMessage(const ChatMessage& message) {
