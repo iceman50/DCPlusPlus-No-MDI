@@ -38,7 +38,7 @@ void UserInfoBase::matchQueue() {
 	try {
 		QueueManager::getInstance()->addList(user, QueueItem::FLAG_MATCH_QUEUE);
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("Queue"));
 	}
 }
 void UserInfoBase::getList(TabViewPtr parent) {
@@ -47,7 +47,7 @@ void UserInfoBase::getList(TabViewPtr parent) {
 	} catch(const QueueSelfException&) {
 		getOwnList(parent);
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("File lists"));
 	}
 }
 void UserInfoBase::browseList(TabViewPtr parent) {
@@ -58,14 +58,14 @@ void UserInfoBase::browseList(TabViewPtr parent) {
 	} catch(const QueueSelfException&) {
 		getOwnList(parent);
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("File lists"));
 	}
 }
 void UserInfoBase::getOwnList(TabViewPtr parent) {
 	try {
 		DirectoryListingFrame::openOwnList(parent);
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("File lists"));
 	}
 }
 void UserInfoBase::addFav() {

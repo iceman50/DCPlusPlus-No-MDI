@@ -250,7 +250,7 @@ private:
 	void on(HttpManagerListener::ResetStream, HttpConnection*) noexcept;
 
 	// LogManagerListener
-	void on(LogManagerListener::Message, time_t t, const string& m) noexcept;
+	void on(LogManagerListener::Message, const LogMessagePtr& message) noexcept;
 
 	// PrivateChatManagerListener
 	void on(PrivateChatManagerListener::PrivateMessage, const ChatMessage& message, const HintedUser& user,

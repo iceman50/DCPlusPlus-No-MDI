@@ -96,7 +96,8 @@ File* HttpManager::createFile(const string& file) {
 		f = new File(file, File::RW, File::OPEN | File::CREATE | File::TRUNCATE);
 	} catch(const FileException& e) {
 		if(f) delete f;
-		LogManager::getInstance()->message(str(F_("HTTP file download failed to create file %1%, error: %2%") % file % e.getError()));
+		LogManager::getInstance()->message(str(F_("HTTP file download failed to create file %1%, error: %2%") % file % e.getError()),
+			LogMessage::SEV_ERROR, _("HTTP downloads"));
 		return nullptr;
 	}
 	return f;

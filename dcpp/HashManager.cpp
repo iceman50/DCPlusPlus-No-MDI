@@ -32,7 +32,7 @@ using std::swap;
 
 namespace {
 void logHashStoreWarning(const string& message) {
-	LogManager::getInstance()->message(message);
+	LogManager::getInstance()->message(message, LogMessage::SEV_WARNING, _("Hash database"));
 }
 
 uint64_t countRows(SQLiteDB& db, const char* sql) {
@@ -158,7 +158,7 @@ void HashManager::hashDone(const string& aFileName, uint32_t aTimeStamp, const T
 		Lock l(cs);
 		store.addFile(aFileName, aTimeStamp, tth, true);
 	} catch (const Exception& e) {
-		LogManager::getInstance()->message(str(F_("Hashing failed: %1%") % e.getError()));
+		LogManager::getInstance()->message(str(F_("Hashing failed: %1%") % e.getError()), LogMessage::SEV_ERROR, _("Hashing"));
 		return;
 	}
 
@@ -166,12 +166,13 @@ void HashManager::hashDone(const string& aFileName, uint32_t aTimeStamp, const T
 
 	if(speed > 0) {
 		LogManager::getInstance()->message(str(F_("Finished hashing: %1% (%2% at %3%/s)") % Util::addBrackets(aFileName) %
-			Util::formatBytes(size) % Util::formatBytes(speed)));
+			Util::formatBytes(size) % Util::formatBytes(speed)), LogMessage::SEV_INFO, _("Hashing"));
 	} else if(size >= 0) {
 		LogManager::getInstance()->message(str(F_("Finished hashing: %1% (%2%)") % Util::addBrackets(aFileName) %
-			Util::formatBytes(size)));
+			Util::formatBytes(size)), LogMessage::SEV_INFO, _("Hashing"));
 	} else {
-		LogManager::getInstance()->message(str(F_("Finished hashing: %1%") % Util::addBrackets(aFileName)));
+		LogManager::getInstance()->message(str(F_("Finished hashing: %1%") % Util::addBrackets(aFileName)),
+			LogMessage::SEV_INFO, _("Hashing"));
 	}
 }
 
@@ -213,7 +214,8 @@ bool HashManager::HashStore::addTree(const TigerTree& tt) noexcept {
 		try {
 			saveTree(tt);
 		} catch (const Exception& e) {
-			LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()));
+			LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()),
+				LogMessage::SEV_ERROR, _("Hash database"));
 			return false;
 		}
 		treeIndex.emplace(tt.getRoot(), TreeInfo(tt.getFileSize(), tt.getLeaves().size() == 1 ? SMALL_TREE : 0, tt.getBlockSize()));
@@ -594,7 +596,8 @@ void HashManager::HashStore::rebuild() {
 			compact();
 		}
 	} catch (const Exception& e) {
-		LogManager::getInstance()->message(str(F_("Hash data rebuilding failed: %1%") % e.getError()));
+		LogManager::getInstance()->message(str(F_("Hash data rebuilding failed: %1%") % e.getError()),
+			LogMessage::SEV_ERROR, _("Hash database"));
 	}
 }
 
@@ -605,7 +608,8 @@ void HashManager::HashStore::save() {
 			db.execute("PRAGMA optimize");
 			db.execute("PRAGMA wal_checkpoint(PASSIVE)");
 		} catch (const SQLiteException& e) {
-			LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()));
+			LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()),
+				LogMessage::SEV_ERROR, _("Hash database"));
 		}
 	}
 }
@@ -627,9 +631,11 @@ bool HashManager::HashStore::verify(bool fullCheck) {
 	}
 
 	if(ok) {
-		LogManager::getInstance()->message(fullCheck ? _("Hash database integrity check passed") : _("Hash database quick check passed"));
+		LogManager::getInstance()->message(fullCheck ? _("Hash database integrity check passed") : _("Hash database quick check passed"),
+			LogMessage::SEV_INFO, _("Hash database"));
 	} else {
-		LogManager::getInstance()->message(str(F_("Hash database integrity check failed: %1%") % Util::toString(errors)));
+		LogManager::getInstance()->message(str(F_("Hash database integrity check failed: %1%") % Util::toString(errors)),
+			LogMessage::SEV_ERROR, _("Hash database"));
 	}
 	return ok;
 }
@@ -639,7 +645,7 @@ void HashManager::HashStore::optimize() {
 	flushWrites();
 	db.execute("PRAGMA optimize");
 	db.execute("PRAGMA wal_checkpoint(PASSIVE)");
-	LogManager::getInstance()->message(_("Hash database optimized"));
+	LogManager::getInstance()->message(_("Hash database optimized"), LogMessage::SEV_INFO, _("Hash database"));
 }
 
 void HashManager::HashStore::compact() {
@@ -653,7 +659,7 @@ void HashManager::HashStore::compact() {
 	});
 	db.execute("VACUUM");
 	db.execute("PRAGMA optimize");
-	LogManager::getInstance()->message(_("Hash database compacted"));
+	LogManager::getInstance()->message(_("Hash database compacted"), LogMessage::SEV_INFO, _("Hash database"));
 }
 
 void HashManager::HashStore::beginWrite() {
@@ -686,7 +692,8 @@ void HashManager::HashStore::flushWritesNoexcept() noexcept {
 	try {
 		flushWrites();
 	} catch (const Exception& e) {
-		LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()));
+		LogManager::getInstance()->message(str(F_("Error saving hash data: %1%") % e.getError()),
+			LogMessage::SEV_ERROR, _("Hash database"));
 	}
 }
 
@@ -834,7 +841,8 @@ bool HashManager::HashStore::migrateLegacy() {
 			transaction.commit();
 			return true;
 		} catch (const Exception& e) {
-			LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()));
+			LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()),
+				LogMessage::SEV_ERROR, _("Hash database"));
 			return false;
 		}
 	}
@@ -911,7 +919,8 @@ bool HashManager::HashStore::migrateLegacy() {
 	} catch (const Exception& e) {
 		// On failure, keep the legacy files untouched and clear partial memory state; files can be
 		// rehashed normally on the next sharing refresh.
-		LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()));
+		LogManager::getInstance()->message(str(F_("Hash database migration failed: %1%") % e.getError()),
+			LogMessage::SEV_ERROR, _("Hash database"));
 		fileIndex.clear();
 		treeIndex.clear();
 		return false;
@@ -922,7 +931,8 @@ void HashManager::HashStore::load(function<void (float)> progressF) {
 	try {
 		openDb();
 		if(SETTING(HASH_DB_VERIFY_STARTUP) && !verify(false)) {
-			LogManager::getInstance()->message(_("Hash database verification failed during startup; DC++ will rehash files as needed"));
+			LogManager::getInstance()->message(_("Hash database verification failed during startup; DC++ will rehash files as needed"),
+				LogMessage::SEV_WARNING, _("Hash database"));
 		}
 		if(hasDbData()) {
 			// Existing SQLite rows always win over legacy files. The metadata marker is backfilled for
@@ -946,13 +956,15 @@ void HashManager::HashStore::load(function<void (float)> progressF) {
 				treeIndex.clear();
 			} else if(migrateLegacy()) {
 				if(legacyResult == LegacyLoadResult::Missing) {
-					LogManager::getInstance()->message(_("No legacy hash database found; SQLite hash database marked as migration complete"));
+					LogManager::getInstance()->message(_("No legacy hash database found; SQLite hash database marked as migration complete"),
+						LogMessage::SEV_INFO, _("Hash database"));
 				}
 				progressF(1);
 			}
 		}
 	} catch (const Exception& e) {
-		LogManager::getInstance()->message(str(F_("Error loading hash data: %1%") % e.getError()));
+		LogManager::getInstance()->message(str(F_("Error loading hash data: %1%") % e.getError()),
+			LogMessage::SEV_ERROR, _("Hash database"));
 		fileIndex.clear();
 		treeIndex.clear();
 	}
@@ -1159,7 +1171,7 @@ void HashManager::Hasher::scheduleRebuild() {
 		}
 	}
 
-	LogManager::getInstance()->message(_("Hash database rebuild has been scheduled"));
+	LogManager::getInstance()->message(_("Hash database rebuild has been scheduled"), LogMessage::SEV_INFO, _("Hash database"));
 }
 
 int HashManager::Hasher::run() {
@@ -1174,7 +1186,7 @@ int HashManager::Hasher::run() {
 		if(rebuild) {
 			HashManager::getInstance()->doRebuild();
 			rebuild = false;
-			LogManager::getInstance()->message(_("Hash database rebuilt"));
+			LogManager::getInstance()->message(_("Hash database rebuilt"), LogMessage::SEV_INFO, _("Hash database"));
 			s.signal();
 			continue;
 		}
@@ -1251,14 +1263,17 @@ int HashManager::Hasher::run() {
 				}
 
 				if(xcrc32 && xcrc32->getValue() != sfv.getCRC()) {
-					LogManager::getInstance()->message(str(F_("%1% not shared; calculated CRC32 does not match the one found in SFV file.") % Util::addBrackets(fname)));
+					LogManager::getInstance()->message(str(F_("%1% not shared; calculated CRC32 does not match the one found in SFV file.") % Util::addBrackets(fname)),
+						LogMessage::SEV_WARNING, _("Hashing"));
 				} else if(sizeLeft != 0) {
-					LogManager::getInstance()->message(str(F_("%1% not shared; hashing did not complete.") % Util::addBrackets(fname)));
+					LogManager::getInstance()->message(str(F_("%1% not shared; hashing did not complete.") % Util::addBrackets(fname)),
+						LogMessage::SEV_WARNING, _("Hashing"));
 				} else {
 					HashManager::getInstance()->hashDone(fname, timestamp, tt, speed, size);
 				}
 			} catch(const FileException& e) {
-				LogManager::getInstance()->message(str(F_("Error hashing %1%: %2%") % Util::addBrackets(fname) % e.getError()));
+				LogManager::getInstance()->message(str(F_("Error hashing %1%: %2%") % Util::addBrackets(fname) % e.getError()),
+					LogMessage::SEV_ERROR, _("Hashing"));
 			}
 		}
 		{

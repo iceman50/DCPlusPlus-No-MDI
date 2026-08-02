@@ -19,7 +19,6 @@
 #define DCPLUSPLUS_DCPP_LOG_MANAGER_H
 
 #include <deque>
-#include <utility>
 
 #include "typedefs.h"
 
@@ -31,19 +30,18 @@
 namespace dcpp {
 
 using std::deque;
-using std::pair;
 
 class LogManager : public Singleton<LogManager>, public Speaker<LogManagerListener>
 {
 public:
-	typedef pair<time_t, string> Pair;
-	typedef deque<Pair> List;
+	typedef deque<LogMessagePtr> List;
 
 	enum Area { CHAT, PM, DOWNLOAD, FINISHED_DOWNLOAD, UPLOAD, SYSTEM, STATUS, LAST };
 	enum { FILE, FORMAT };
 
 	void log(Area area, ParamMap& params) noexcept;
-	void message(const string& msg);
+	void message(const string& msg, LogMessage::Severity severity, const string& area) noexcept;
+	static bool isInitialized() noexcept { return instance != nullptr; }
 
 	List getLastLogs();
 	string getPath(Area area, ParamMap& params) const;

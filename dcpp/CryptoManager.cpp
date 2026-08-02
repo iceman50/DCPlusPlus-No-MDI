@@ -242,7 +242,7 @@ void CryptoManager::loadCertificates() noexcept {
 	const string& key = SETTING(TLS_PRIVATE_KEY_FILE);
 
 	if(cert.empty() || key.empty()) {
-		LogManager::getInstance()->message(_("TLS disabled, no certificate file set"));
+		LogManager::getInstance()->message(_("TLS disabled, no certificate file set"), LogMessage::SEV_WARNING, _("Certificates"));
 		return;
 	}
 
@@ -251,9 +251,10 @@ void CryptoManager::loadCertificates() noexcept {
 		// Try to (re)generate them...
 		try {
 			generateCertificate();
-			LogManager::getInstance()->message(_("Generated new TLS certificate"));
+			LogManager::getInstance()->message(_("Generated new TLS certificate"), LogMessage::SEV_INFO, _("Certificates"));
 		} catch(const CryptoException& e) {
-			LogManager::getInstance()->message(str(F_("TLS disabled, failed to generate certificate: %1%") % e.getError()));
+			LogManager::getInstance()->message(str(F_("TLS disabled, failed to generate certificate: %1%") % e.getError()),
+				LogMessage::SEV_ERROR, _("Certificates"));
 			return;
 		}
 	}
@@ -262,7 +263,7 @@ void CryptoManager::loadCertificates() noexcept {
 		!ssl::SSL_CTX_use_certificate_file(serverContext, cert.c_str(), SSL_FILETYPE_PEM) ||
 		!ssl::SSL_CTX_use_certificate_file(clientContext, cert.c_str(), SSL_FILETYPE_PEM)
 	) {
-		LogManager::getInstance()->message(_("Failed to load certificate file"));
+		LogManager::getInstance()->message(_("Failed to load certificate file"), LogMessage::SEV_WARNING, _("Certificates"));
 		return;
 	}
 
@@ -270,7 +271,7 @@ void CryptoManager::loadCertificates() noexcept {
 		!ssl::SSL_CTX_use_PrivateKey_file(serverContext, key.c_str(), SSL_FILETYPE_PEM) ||
 		!ssl::SSL_CTX_use_PrivateKey_file(clientContext, key.c_str(), SSL_FILETYPE_PEM)
 	) {
-		LogManager::getInstance()->message(_("Failed to load private key"));
+		LogManager::getInstance()->message(_("Failed to load private key"), LogMessage::SEV_WARNING, _("Certificates"));
 		return;
 	}
 
@@ -283,7 +284,8 @@ void CryptoManager::loadCertificates() noexcept {
 			SSL_CTX_load_verify_locations(clientContext, i.c_str(), NULL) != SSL_SUCCESS ||
 			SSL_CTX_load_verify_locations(serverContext, i.c_str(), NULL) != SSL_SUCCESS
 		) {
-			LogManager::getInstance()->message(str(F_("Failed to load trusted certificate from %1%") % Util::addBrackets(i)));
+			LogManager::getInstance()->message(str(F_("Failed to load trusted certificate from %1%") % Util::addBrackets(i)),
+				LogMessage::SEV_WARNING, _("Certificates"));
 		}
 	}
 
@@ -481,7 +483,7 @@ int CryptoManager::verify_callback(int preverify_ok, X509_STORE_CTX *ctx) {
 
 		auto fullError = formatError(ctx, error);
 		if(!fullError.empty() && (!keyp.empty() || !allowUntrusted))
-			LogManager::getInstance()->message(fullError);
+			LogManager::getInstance()->message(fullError, LogMessage::SEV_ERROR, _("Certificates"));
 	}
 
 	// Don't allow untrusted connections on keyprint mismatch

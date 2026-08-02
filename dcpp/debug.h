@@ -20,11 +20,17 @@
 
 #include <cstdio>
 
+namespace dcpp {
+	/** Format a printf-style diagnostic and forward it to the structured system logger. */
+	void debugLog(const char* format, ...) noexcept;
+}
+
+#define dcdebug(...) dcpp::debugLog(__VA_ARGS__)
+
 #ifdef _DEBUG
 
 #include <cassert>
 
-#define dcdebug printf
 #ifdef _MSC_VER
 
 #include <crtdbg.h>
@@ -39,7 +45,6 @@ _CrtDbgBreak(); } } while(false)
 #endif
 #define dcdrun(exp) exp
 #else //_DEBUG
-#define dcdebug if (false) printf
 #define dcassert(exp)
 #define dcdrun(exp)
 #endif //_DEBUG

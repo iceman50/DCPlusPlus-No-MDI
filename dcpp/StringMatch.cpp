@@ -65,7 +65,8 @@ bool StringMatch::prepare() {
 				matcher.assign(pattern);
 				return true;
 			} catch(const std::regex_error&) {
-				LogManager::getInstance()->message(str(F_("Invalid regular expression: %1%") % pattern));
+				LogManager::getInstance()->message(str(F_("Invalid regular expression: %1%") % pattern),
+					LogMessage::SEV_ERROR, _("Application"));
 				return false;
 			}
 		}

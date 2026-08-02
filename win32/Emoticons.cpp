@@ -21,6 +21,8 @@
 
 #include <wincodec.h>
 
+#include <dwt/resources/Icon.h>
+
 using namespace dcpp;
 
 namespace {
@@ -61,6 +63,63 @@ namespace {
 		}
 	}
 
+	bool encodeSourcePng(IWICImagingFactory* factory, IWICBitmapSource* source, int targetHeight,
+		std::vector<unsigned char>& png, UINT& width, UINT& height) {
+		IWICBitmapScaler* scaler = nullptr;
+		IWICFormatConverter* converter = nullptr;
+		IWICBitmapEncoder* encoder = nullptr;
+		IWICBitmapFrameEncode* encodedFrame = nullptr;
+		IPropertyBag2* properties = nullptr;
+		IStream* stream = nullptr;
+		bool success = false;
+
+		do {
+			UINT sourceWidth = 0, sourceHeight = 0;
+			if(FAILED(source->GetSize(&sourceWidth, &sourceHeight)) || !sourceWidth || !sourceHeight) break;
+			height = static_cast<UINT>(std::max(1, targetHeight));
+			const auto scaledWidth = (static_cast<uint64_t>(sourceWidth) * height + sourceHeight / 2) / sourceHeight;
+			width = static_cast<UINT>(std::clamp<uint64_t>(scaledWidth, 1, static_cast<uint64_t>(height) * 4));
+
+			if(FAILED(factory->CreateBitmapScaler(&scaler))) break;
+			if(FAILED(scaler->Initialize(source, width, height, WICBitmapInterpolationModeFant))) break;
+
+			// RichEdit receives a full-color PNG regardless of the preferred ICO frame depth. Encoding
+			// to an indexed PNG here needlessly quantizes BMP/PNG assets and higher-depth ICO frames.
+			WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+			if(FAILED(factory->CreateFormatConverter(&converter))) break;
+			if(FAILED(converter->Initialize(scaler, format, WICBitmapDitherTypeNone,
+				nullptr, 0.0, WICBitmapPaletteTypeMedianCut))) break;
+
+			if(FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) break;
+			if(FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder))) break;
+			if(FAILED(encoder->Initialize(stream, WICBitmapEncoderNoCache))) break;
+			if(FAILED(encoder->CreateNewFrame(&encodedFrame, &properties))) break;
+			if(FAILED(encodedFrame->Initialize(properties))) break;
+			if(FAILED(encodedFrame->SetSize(width, height))) break;
+			if(FAILED(encodedFrame->SetPixelFormat(&format))) break;
+			if(FAILED(encodedFrame->WriteSource(converter, nullptr))) break;
+			if(FAILED(encodedFrame->Commit()) || FAILED(encoder->Commit())) break;
+
+			STATSTG stat = {};
+			if(FAILED(stream->Stat(&stat, STATFLAG_NONAME)) || stat.cbSize.QuadPart <= 0 ||
+				stat.cbSize.QuadPart > ULONG_MAX) break;
+			png.resize(static_cast<size_t>(stat.cbSize.QuadPart));
+			LARGE_INTEGER start = {};
+			if(FAILED(stream->Seek(start, STREAM_SEEK_SET, nullptr))) break;
+			ULONG read = 0;
+			if(FAILED(stream->Read(png.data(), static_cast<ULONG>(png.size()), &read)) || read != png.size()) break;
+			success = true;
+		} while(false);
+
+		release(properties);
+		release(encodedFrame);
+		release(encoder);
+		release(stream);
+		release(converter);
+		release(scaler);
+		return success;
+	}
+
 	bool encodePng(const string& path, int targetHeight, int preferredBitDepth,
 		std::vector<unsigned char>& png, UINT& width, UINT& height) {
 		const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -70,12 +129,6 @@ namespace {
 		IWICImagingFactory* factory = nullptr;
 		IWICBitmapDecoder* decoder = nullptr;
 		IWICBitmapFrameDecode* frame = nullptr;
-		IWICBitmapScaler* scaler = nullptr;
-		IWICFormatConverter* converter = nullptr;
-		IWICBitmapEncoder* encoder = nullptr;
-		IWICBitmapFrameEncode* encodedFrame = nullptr;
-		IPropertyBag2* properties = nullptr;
-		IStream* stream = nullptr;
 		bool success = false;
 
 		do {
@@ -113,55 +166,48 @@ namespace {
 				release(candidate);
 			}
 			if(!frame) break;
-
-			UINT sourceWidth = 0, sourceHeight = 0;
-			if(FAILED(frame->GetSize(&sourceWidth, &sourceHeight)) || !sourceWidth || !sourceHeight) break;
-			height = static_cast<UINT>(std::max(1, targetHeight));
-			const auto scaledWidth = (static_cast<uint64_t>(sourceWidth) * height + sourceHeight / 2) / sourceHeight;
-			width = static_cast<UINT>(std::clamp<uint64_t>(scaledWidth, 1, static_cast<uint64_t>(height) * 4));
-
-			if(FAILED(factory->CreateBitmapScaler(&scaler))) break;
-			if(FAILED(scaler->Initialize(frame, width, height, WICBitmapInterpolationModeFant))) break;
-
-			// RichEdit receives a full-color PNG regardless of the preferred ICO frame depth. Encoding
-			// to an indexed PNG here needlessly quantizes BMP/PNG assets and higher-depth ICO frames.
-			WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
-			if(FAILED(factory->CreateFormatConverter(&converter))) break;
-			if(FAILED(converter->Initialize(scaler, format, WICBitmapDitherTypeNone,
-				nullptr, 0.0, WICBitmapPaletteTypeMedianCut))) break;
-
-			if(FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) break;
-			if(FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder))) break;
-			if(FAILED(encoder->Initialize(stream, WICBitmapEncoderNoCache))) break;
-			if(FAILED(encoder->CreateNewFrame(&encodedFrame, &properties))) break;
-			if(FAILED(encodedFrame->Initialize(properties))) break;
-			if(FAILED(encodedFrame->SetSize(width, height))) break;
-			if(FAILED(encodedFrame->SetPixelFormat(&format))) break;
-			if(FAILED(encodedFrame->WriteSource(converter, nullptr))) break;
-			if(FAILED(encodedFrame->Commit()) || FAILED(encoder->Commit())) break;
-
-			STATSTG stat = {};
-			if(FAILED(stream->Stat(&stat, STATFLAG_NONAME)) || stat.cbSize.QuadPart <= 0 ||
-				stat.cbSize.QuadPart > ULONG_MAX) break;
-			png.resize(static_cast<size_t>(stat.cbSize.QuadPart));
-			LARGE_INTEGER start = {};
-			if(FAILED(stream->Seek(start, STREAM_SEEK_SET, nullptr))) break;
-			ULONG read = 0;
-			if(FAILED(stream->Read(png.data(), static_cast<ULONG>(png.size()), &read)) || read != png.size()) break;
-			success = true;
+			success = encodeSourcePng(factory, frame, targetHeight, png, width, height);
 		} while(false);
 
-		release(properties);
-		release(encodedFrame);
-		release(encoder);
-		release(stream);
-		release(converter);
-		release(scaler);
 		release(frame);
 		release(decoder);
 		release(factory);
 		if(uninitialize) CoUninitialize();
 		return success;
+	}
+
+	bool encodeResourcePng(unsigned resourceId, int pixels,
+		std::vector<unsigned char>& png, UINT& width, UINT& height) {
+		const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+		const bool uninitialize = comResult == S_OK || comResult == S_FALSE;
+		if(FAILED(comResult) && comResult != RPC_E_CHANGED_MODE) return false;
+
+		IWICImagingFactory* factory = nullptr;
+		IWICBitmap* bitmap = nullptr;
+		bool success = false;
+		do {
+			if(FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+				IID_IWICImagingFactory, reinterpret_cast<void**>(&factory)))) break;
+			dwt::Icon icon(resourceId, dwt::Point(pixels, pixels));
+			if(FAILED(factory->CreateBitmapFromHICON(icon.handle(), &bitmap))) break;
+			success = encodeSourcePng(factory, bitmap, pixels, png, width, height);
+		} while(false);
+
+		release(bitmap);
+		release(factory);
+		if(uninitialize) CoUninitialize();
+		return success;
+	}
+
+	tstring pngRtf(const std::vector<unsigned char>& png, UINT width, UINT height, int pixels) {
+		const int twips = MulDiv(pixels, 1440, 96);
+		const int goalWidth = std::max(1, MulDiv(twips, static_cast<int>(width), static_cast<int>(height)));
+		tstring ret = _T("{\\pict\\pngblip\\picw") + std::to_wstring(width) + _T("\\pich") + std::to_wstring(height) +
+			_T("\\picwgoal") + std::to_wstring(goalWidth) + _T("\\pichgoal") + std::to_wstring(twips) + _T("\n");
+		ret.reserve(ret.size() + png.size() * 2 + 1);
+		for(auto value: png) appendHex(ret, value);
+		ret += _T("}");
+		return ret;
 	}
 }
 
@@ -171,8 +217,6 @@ tstring Emoticons::rtf(const std::string& name, int pixels, int bitDepth) {
 	const auto revision = EmoticonManager::getRevision();
 	pixels = std::clamp(pixels, 16, 24);
 	if(bitDepth != 24 && bitDepth != 32) bitDepth = 16;
-	const int twips = MulDiv(pixels, 1440, 96);
-
 	static std::mutex mutex;
 	static std::unordered_map<std::string, tstring> cache;
 	static uint64_t cacheRevision = 0;
@@ -187,13 +231,23 @@ tstring Emoticons::rtf(const std::string& name, int pixels, int bitDepth) {
 	UINT width = 0, height = 0;
 	std::vector<unsigned char> png;
 	if(!encodePng(path, pixels, bitDepth, png, width, height)) return tstring();
-	const int goalWidth = std::max(1, MulDiv(twips, static_cast<int>(width), static_cast<int>(height)));
-
-	tstring ret = _T("{\\pict\\pngblip\\picw") + std::to_wstring(width) + _T("\\pich") + std::to_wstring(height) +
-		_T("\\picwgoal") + std::to_wstring(goalWidth) + _T("\\pichgoal") + std::to_wstring(twips) + _T("\n");
-	ret.reserve(ret.size() + png.size() * 2 + 1);
-	for(auto value: png) appendHex(ret, value);
-	ret += _T("}");
+	auto ret = pngRtf(png, width, height, pixels);
 	if(cache.size() >= 128) cache.erase(cache.begin());
+	return cache.emplace(key, std::move(ret)).first->second;
+}
+
+tstring Emoticons::resourceRtf(unsigned resourceId, int pixels) {
+	pixels = std::clamp(pixels, 16, 24);
+	static std::mutex mutex;
+	static std::unordered_map<uint64_t, tstring> cache;
+	const auto key = (static_cast<uint64_t>(resourceId) << 32) | static_cast<unsigned>(pixels);
+	std::lock_guard<std::mutex> lock(mutex);
+	if(auto i = cache.find(key); i != cache.end()) return i->second;
+
+	UINT width = 0, height = 0;
+	std::vector<unsigned char> png;
+	if(!encodeResourcePng(resourceId, pixels, png, width, height)) return tstring();
+	auto ret = pngRtf(png, width, height, pixels);
+	if(cache.size() >= 32) cache.erase(cache.begin());
 	return cache.emplace(key, std::move(ret)).first->second;
 }

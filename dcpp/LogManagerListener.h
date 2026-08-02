@@ -18,11 +18,9 @@
 #ifndef DCPLUSPLUS_DCPP_LOG_MANAGER_LISTENER_H
 #define DCPLUSPLUS_DCPP_LOG_MANAGER_LISTENER_H
 
-#include <string>
+#include "LogMessage.h"
 
 namespace dcpp {
-
-using std::string;
 
 class LogManagerListener {
 public:
@@ -30,7 +28,7 @@ public:
 	template<int I>	struct X { enum { TYPE = I }; };
 
 	typedef X<0> Message;
-	virtual void on(Message, time_t, const string&) noexcept { }
+	virtual void on(Message, const LogMessagePtr&) noexcept { }
 };
 
 } // namespace dcpp

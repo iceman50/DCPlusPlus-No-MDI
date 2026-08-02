@@ -1,4 +1,6 @@
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
+* Add structured System Log severity levels and component areas with colored RichEdit messages, embedded resource icons and configurable styles
+* Route dcdebug diagnostics through release-capable verbose logging with a persistent System Log visibility toggle and separate history quota
 * Accept hub GPA password challenges in every ADC connection state and enter VERIFY before responding
 * Enforce ADC protocol states, message contexts, command syntax and numeric bounds across hub, client-to-client, UDP, user-command and plugin send paths
 * Replace modal hub password prompts with an in-frame login overlay containing nick and masked password fields with Send and Enter submission

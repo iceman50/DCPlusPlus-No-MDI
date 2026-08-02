@@ -20,10 +20,13 @@
 
 #include <dcpp/LogManagerListener.h>
 
+#include <deque>
+
 #include "StaticFrame.h"
 
 class SystemFrame : public StaticFrame<SystemFrame>,
-	private LogManagerListener
+	private LogManagerListener,
+	private SettingsManagerListener
 {
 	typedef StaticFrame<SystemFrame> BaseType;
 public:
@@ -39,7 +42,8 @@ private:
 	friend class StaticFrame<SystemFrame>;
 	friend class MDIChildFrame<SystemFrame>;
 
-	TextBoxPtr log;
+	RichTextBoxPtr log;
+	std::deque<LogMessagePtr> messages;
 
 	SystemFrame(TabViewPtr parent);
 	virtual ~SystemFrame();
@@ -47,14 +51,18 @@ private:
 	void layout();
 	bool preClosing();
 
-	void addLine(time_t t, const tstring& msg);
+	void addLine(const LogMessagePtr& message, bool remember = true);
+	void refreshLog();
 	void openFile(const string& path) const;
 
 	bool handleContextMenu(const dwt::ScreenCoordinate& pt);
 	bool handleDoubleClick(const dwt::MouseEvent& mouseEvent);
 
 	// LogManagerListener
-	virtual void on(Message, time_t t, const string& message) noexcept;
+	virtual void on(Message, const LogMessagePtr& message) noexcept;
+
+	// SettingsManagerListener
+	virtual void on(SettingsManagerListener::Save, SimpleXML&) noexcept;
 };
 
 #endif

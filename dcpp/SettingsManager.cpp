@@ -71,6 +71,8 @@ const string SettingsManager::settingTags[] =
 	"SocksPort", "SocketInBuffer", "SocketOutBuffer",
 	"TextColor", "BackgroundColor", "UploadTextColor", "UploadBgColor", "DownloadTextColor",
 	"DownloadBgColor", "LinkColor", "LinkBgColor", "LogColor", "LogBgColor",
+	"SystemLogVerboseColor", "SystemLogInfoColor", "SystemLogWarningColor", "SystemLogErrorColor",
+	"SystemLogAreaColor",
 	"ChatTimestampColor", "ChatTimestampBgColor", "ChatNickColor", "ChatNickBgColor",
 	"ChatTextColor", "ChatTextBgColor", "ChatSystemColor", "ChatSystemBgColor",
 	"ChatOwnTimestampColor", "ChatOwnTimestampBgColor", "ChatOwnNickColor", "ChatOwnNickBgColor",
@@ -127,7 +129,7 @@ const string SettingsManager::settingTags[] =
 	"UsersFilterFavorite", "UsersFilterOnline", "UsersFilterQueue", "UsersFilterWaiting",
 	"RegisterSystemStartup", "DontLogCCPMChat", "AboutCfgDisclaimer", "EnableTaskbarPreview",
 	"EnableSUDP", "BroadDetection", "BroadDetection6", "HashDbVerifyStartup", "HashDbCompactOnRebuild",
-	"ShareCache",
+	"ShareCache", "ShowSystemLogDebug",
 	"SENTRY",
 	// Int64
 	"TotalUpload", "TotalDownload", "SharingSkiplistMinSize", "SharingSkiplistMaxSize",
@@ -237,6 +239,7 @@ SettingsManager::SettingsManager() {
 	setDefault(HASH_DB_VERIFY_STARTUP, false);
 	setDefault(HASH_DB_COMPACT_ON_REBUILD, false);
 	setDefault(SHARE_CACHE, true);
+	setDefault(SHOW_SYSTEM_LOG_DEBUG, false);
 	setDefault(LOG_DIRECTORY, Util::getPath(Util::PATH_USER_LOCAL) + "Logs" PATH_SEPARATOR_STR);
 	setDefault(LOG_UPLOADS, false);
 	setDefault(LOG_DOWNLOADS, false);
@@ -255,7 +258,7 @@ SettingsManager::SettingsManager() {
 	setDefault(LOG_FORMAT_MAIN_CHAT, "[%Y-%m-%d %H:%M] %[message]");
 	setDefault(LOG_FORMAT_PRIVATE_CHAT, "[%Y-%m-%d %H:%M] %[message]");
 	setDefault(LOG_FORMAT_STATUS, "[%Y-%m-%d %H:%M] %[message]");
-	setDefault(LOG_FORMAT_SYSTEM, "[%Y-%m-%d %H:%M] %[message]");
+	setDefault(LOG_FORMAT_SYSTEM, "[%Y-%m-%d %H:%M] [%[level]] [%[area]] %[message]");
 	setDefault(LOG_FILE_MAIN_CHAT, "%[hubURL].log");
 	setDefault(LOG_FILE_STATUS, "%[hubURL]_status.log");
 	setDefault(LOG_FILE_PRIVATE_CHAT, "%[userNI].%[userCID].log");
@@ -431,6 +434,11 @@ SettingsManager::SettingsManager() {
 	setDefault(DOWNLOAD_BG_COLOR, RGB(55, 170, 85));
 	setDefault(LINK_BG_COLOR, getDefault(BACKGROUND_COLOR));
 	setDefault(LOG_BG_COLOR, getDefault(BACKGROUND_COLOR));
+	setDefault(SYSTEM_LOG_VERBOSE_COLOR, RGB(112, 112, 112));
+	setDefault(SYSTEM_LOG_INFO_COLOR, RGB(0, 102, 204));
+	setDefault(SYSTEM_LOG_WARNING_COLOR, RGB(196, 112, 0));
+	setDefault(SYSTEM_LOG_ERROR_COLOR, RGB(204, 32, 32));
+	setDefault(SYSTEM_LOG_AREA_COLOR, RGB(96, 96, 160));
 	setDefault(CHAT_TIMESTAMP_COLOR, RGB(112, 112, 112));
 	setDefault(CHAT_TIMESTAMP_BG_COLOR, getDefault(BACKGROUND_COLOR));
 	setDefault(CHAT_NICK_COLOR, RGB(0, 102, 204));

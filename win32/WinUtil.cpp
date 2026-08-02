@@ -177,6 +177,11 @@ void WinUtil::init() {
 	// Semantic chat colors inherit the active Windows/application palette unless customized.
 	SettingsManager::getInstance()->setDefault(SettingsManager::LINK_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::LOG_BG_COLOR, bgColor);
+	SettingsManager::getInstance()->setDefault(SettingsManager::SYSTEM_LOG_VERBOSE_COLOR, SETTING(LOG_COLOR));
+	SettingsManager::getInstance()->setDefault(SettingsManager::SYSTEM_LOG_INFO_COLOR, RGB(0, 120, 215));
+	SettingsManager::getInstance()->setDefault(SettingsManager::SYSTEM_LOG_WARNING_COLOR, RGB(210, 125, 0));
+	SettingsManager::getInstance()->setDefault(SettingsManager::SYSTEM_LOG_ERROR_COLOR, RGB(210, 45, 45));
+	SettingsManager::getInstance()->setDefault(SettingsManager::SYSTEM_LOG_AREA_COLOR, SETTING(LINK_COLOR));
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TEXT_COLOR, textColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TEXT_BG_COLOR, bgColor);
 	SettingsManager::getInstance()->setDefault(SettingsManager::CHAT_TIMESTAMP_COLOR, SETTING(LOG_COLOR));
@@ -1413,7 +1418,8 @@ bool registerHandler(const tstring& name, const tstring& description, bool url, 
 	if(ret) {
 		regChanged();
 	} else {
-		LogManager::getInstance()->message(str(F_("Error registering the %1% handler") % Text::fromT(name)));
+		LogManager::getInstance()->message(str(F_("Error registering the %1% handler") % Text::fromT(name)),
+			LogMessage::SEV_ERROR, _("Integration"));
 	}
 	return ret;
 }
@@ -1473,7 +1479,8 @@ void WinUtil::setApplicationStartupRegister()
 
 		if(ret != ERROR_SUCCESS)
 		{
-			LogManager::getInstance()->message(str(F_("Error registering DC++ for automatic startup (could not find or create key)")));
+			LogManager::getInstance()->message(str(F_("Error registering DC++ for automatic startup (could not find or create key)")),
+				LogMessage::SEV_ERROR, _("Integration"));
 			return;
 		}
 	}
@@ -1483,7 +1490,8 @@ void WinUtil::setApplicationStartupRegister()
 	ret = ::RegSetValueEx(hk, _T("DC++"), 0, REG_SZ, (LPBYTE) app.c_str(), static_cast<DWORD>(sizeof(TCHAR) * (app.length() + 1)));
 	if(ret != ERROR_SUCCESS)
 	{
-		LogManager::getInstance()->message(str(F_("Error registering DC++ for automatic startup (could not set key value)")));
+		LogManager::getInstance()->message(str(F_("Error registering DC++ for automatic startup (could not set key value)")),
+			LogMessage::SEV_ERROR, _("Integration"));
 	}
 
 	::RegCloseKey(hk);
@@ -1518,7 +1526,8 @@ void WinUtil::setApplicationStartupUnregister()
 			ret = ::RegDeleteValue(hk, _T("DC++"));
 			if(ret != ERROR_SUCCESS)
 			{
-				LogManager::getInstance()->message(str(F_("Error unregistering DC++ for automatic startup (could not delete key value)")));
+				LogManager::getInstance()->message(str(F_("Error unregistering DC++ for automatic startup (could not delete key value)")),
+					LogMessage::SEV_ERROR, _("Integration"));
 			}
 		}
 	}
@@ -1616,7 +1625,7 @@ void eachUser(const HintedUserList& list, const StringList& dirs, const UserFunc
 		try {
 			f(i, (j < dirs.size()) ? dirs[j] : string());
 		} catch (const Exception& e) {
-			LogManager::getInstance()->message(e.getError());
+			LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("Integration"));
 		}
 		++j;
 	}

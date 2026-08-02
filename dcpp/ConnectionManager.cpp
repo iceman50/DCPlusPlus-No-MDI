@@ -98,7 +98,8 @@ void ConnectionManager::listen() {
 	}
 	if(CONNSETTING(TCP_PORT) != 0 && (CONNSETTING(TCP_PORT) == CONNSETTING(TLS_PORT)))
 	{
-		LogManager::getInstance()->message(_("The encrypted transfer port cannot be the same as the transfer port, encrypted transfers will be disabled"));
+		LogManager::getInstance()->message(_("The encrypted transfer port cannot be the same as the transfer port, encrypted transfers will be disabled"),
+			LogMessage::SEV_ERROR, _("Connectivity"));
 		return;
 	}
 	secureServer.reset(new Server(true, Util::toString(CONNSETTING(TLS_PORT)), CONNSETTING(BIND_ADDRESS), CONNSETTING(BIND_ADDRESS6)));
@@ -517,7 +518,7 @@ int ConnectionManager::Server::run() noexcept {
 				port = sock.listen(port);
 
 				if(failed) {
-					LogManager::getInstance()->message(_("Connectivity restored"));
+					LogManager::getInstance()->message(_("Connectivity restored"), LogMessage::SEV_INFO, _("Connectivity"));
 					failed = false;
 				}
 				break;
@@ -525,7 +526,8 @@ int ConnectionManager::Server::run() noexcept {
 				dcdebug("ConnectionManager::Server::run Stopped listening: %s\n", e.getError().c_str());
 
 				if(!failed) {
-					LogManager::getInstance()->message(str(F_("Connectivity error: %1%") % e.getError()));
+					LogManager::getInstance()->message(str(F_("Connectivity error: %1%") % e.getError()),
+						LogMessage::SEV_ERROR, _("Connectivity"));
 					failed = true;
 				}
 
@@ -612,7 +614,8 @@ void ConnectionManager::nmdcConnect(const string& aServer, const string& aPort, 
 		}
 	}
 	if(!Util::isSafePeerEndpoint(aServer, aPort, hubIp)) {
-		LogManager::getInstance()->message(str(F_("Blocked an unsafe client endpoint '%1%:%2%' requested by '%3%'") % aServer % aPort % hubUrl));
+		LogManager::getInstance()->message(str(F_("Blocked an unsafe client endpoint '%1%:%2%' requested by '%3%'") % aServer % aPort % hubUrl),
+			LogMessage::SEV_WARNING, _("Security"));
 		return;
 	}
 
@@ -640,7 +643,8 @@ void ConnectionManager::adcConnect(const OnlineUser& aUser, const string& aPort,
 
 	const auto remoteIp = CONNSTATE(INCOMING_CONNECTIONS6) ? aUser.getIdentity().getIp() : aUser.getIdentity().getIp4();
 	if(!Util::isSafePeerEndpoint(remoteIp, aPort, aUser.getClient().getIp())) {
-		LogManager::getInstance()->message(str(F_("Blocked an unsafe client endpoint '%1%:%2%' requested by '%3%'") % remoteIp % aPort % aUser.getClient().getHubUrl()));
+		LogManager::getInstance()->message(str(F_("Blocked an unsafe client endpoint '%1%:%2%' requested by '%3%'") % remoteIp % aPort % aUser.getClient().getHubUrl()),
+			LogMessage::SEV_WARNING, _("Security"));
 		return;
 	}
 
@@ -1203,7 +1207,8 @@ bool ConnectionManager::checkHubCCBlock(const string& aServer, const string& aPo
 
     if(cc_blocked)
 	{
-		LogManager::getInstance()->message(str(F_("Blocked a C-C connection to a hub ('%1%:%2%'; request from '%3%')") % aServer % aPort % aHubUrl));
+		LogManager::getInstance()->message(str(F_("Blocked a C-C connection to a hub ('%1%:%2%'; request from '%3%')") % aServer % aPort % aHubUrl),
+			LogMessage::SEV_WARNING, _("Security"));
 		return true;
 	}
 
@@ -1222,7 +1227,8 @@ void ConnectionManager::on(UserConnectionListener::ProtocolError, UserConnection
 		}
 
 		string aServerPort = aSource->getRemoteIp() + ":" + aSource->getPort();
-		LogManager::getInstance()->message(str(F_("Blocking '%1%', potential DDoS detected (originating hub '%2%')") % aServerPort % aSource->getHubUrl() ));
+		LogManager::getInstance()->message(str(F_("Blocking '%1%', potential DDoS detected (originating hub '%2%')") % aServerPort % aSource->getHubUrl() ),
+			LogMessage::SEV_WARNING, _("Security"));
 	}
 
 	failed(aSource, aError, true);

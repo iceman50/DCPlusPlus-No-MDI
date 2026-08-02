@@ -163,7 +163,8 @@ bool ConnectivityManager::detectConnection(bool v6) {
 				autoSettings[SettingsManager::INCOMING_CONNECTIONS6] = SettingsManager::INCOMING_PASSIVE;
 			}
 			autoDetected = false;
-			log(str(F_("Unable to open %1% port(s); connectivity settings must be configured manually") % e.getError()));
+			log(str(F_("Unable to open %1% port(s); connectivity settings must be configured manually") % e.getError()),
+				indeterminate, LogMessage::SEV_ERROR);
 			return false;
 		}
 	}
@@ -309,23 +310,24 @@ void ConnectivityManager::mappingFinished(const string& mapperName, bool v6) {
 			Lock l(cs);
 			autoSettings[v6 ? SettingsManager::INCOMING_CONNECTIONS6 : SettingsManager::INCOMING_CONNECTIONS] = SettingsManager::INCOMING_PASSIVE;
 		}
-		log(_("Active mode could not be achieved; a manual configuration is recommended for better connectivity"), v6 ? true : false);
+		log(_("Active mode could not be achieved; a manual configuration is recommended for better connectivity"),
+			v6 ? true : false, LogMessage::SEV_WARNING);
 	} else {
 		SettingsManager::getInstance()->set(v6 ? SettingsManager::MAPPER6 : SettingsManager::MAPPER, mapperName);
 	}
 }
 
-void ConnectivityManager::log(string&& message, tribool v6) {
+void ConnectivityManager::log(string&& message, tribool v6, LogMessage::Severity severity) {
 	if(SETTING(AUTO_DETECT_CONNECTION) && !indeterminate(v6)) {
 		auto& status = v6 ? statusV6 : statusV4;
 		status = move(message);
 		string proto = v6 ? "IPv6" : "IPv4";
 
-		LogManager::getInstance()->message(str(F_("Connectivity (%1%): %2%") % proto % status));
+		LogManager::getInstance()->message(str(F_("Connectivity (%1%): %2%") % proto % status), severity, _("Connectivity"));
 		fire(ConnectivityManagerListener::Message(), str(F_("%1%: %2%") % proto % status));
 
 	} else {
-		LogManager::getInstance()->message(message);
+		LogManager::getInstance()->message(message, severity, _("Connectivity"));
 	}
 }
 

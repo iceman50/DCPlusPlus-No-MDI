@@ -23,6 +23,9 @@ public:
 	 * reliably by RICHEDIT50W and avoids palette quantization while preserving source alpha.
 	 */
 	static dcpp::tstring rtf(const std::string& name, int pixels, int bitDepth);
+
+	/** Render an icon compiled into the application resources as a self-contained RTF PNG. */
+	static dcpp::tstring resourceRtf(unsigned resourceId, int pixels);
 };
 
 #endif

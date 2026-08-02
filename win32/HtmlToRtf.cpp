@@ -87,7 +87,7 @@ private:
 	void parseDecoration(const string& s);
 	void applyConfiguredStyle(Context& context, SettingsManager::StrSetting fontSetting,
 		SettingsManager::IntSetting textColorSetting, SettingsManager::IntSetting bgColorSetting);
-	void applySemanticStyle(Context& context, const string& id);
+	bool applySemanticStyle(Context& context, const string& id);
 	void ensureContrast(Context& context);
 	static tstring rtfEscape(const string& s);
 
@@ -118,6 +118,12 @@ Parser::Parser(dwt::RichTextBox* box) {
 
 void Parser::startTag(const string& name_, StringPairList& attribs, bool simple) {
 	auto name = trimCopy(name_);
+	if(name == "resourceicon") {
+		const auto resourceId = Util::toInt(getAttrib(attribs, "id", 0));
+		if(resourceId > 0)
+			ret += Emoticons::resourceRtf(static_cast<unsigned>(resourceId), 16);
+		return;
+	}
 
 	if(name == "emoticon") {
 		const auto emoticon = getAttrib(attribs, "name", 0);
@@ -150,7 +156,7 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 	contexts.push_back(contexts.back());
 	ScopedFunctor([this] { ret += contexts.back().getBegin(); });
 
-	applySemanticStyle(contexts.back(), getAttrib(attribs, "id", 0));
+	const auto preserveConfiguredColor = applySemanticStyle(contexts.back(), getAttrib(attribs, "id", 0));
 
 	if(name == "b") {
 		contexts.back().setFlag(Context::Bold);
@@ -196,7 +202,8 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 		}
 		begin = end + 1;
 	}
-	ensureContrast(contexts.back());
+	if(!preserveConfiguredColor)
+		ensureContrast(contexts.back());
 }
 
 tstring Parser::rtfEscape(const string& data) {
@@ -312,7 +319,7 @@ void Parser::applyConfiguredStyle(Context& context, SettingsManager::StrSetting 
 	context.bgColor = addColor(settings->get(bgColorSetting));
 }
 
-void Parser::applySemanticStyle(Context& context, const string& id) {
+bool Parser::applySemanticStyle(Context& context, const string& id) {
 	auto settings = SettingsManager::getInstance();
 	if(id == "timestamp" || id == "messageTimestamp") {
 		applyConfiguredStyle(context, SettingsManager::CHAT_TIMESTAMP_FONT,
@@ -345,7 +352,25 @@ void Parser::applySemanticStyle(Context& context, const string& id) {
 	} else if(id == "log") {
 		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
 			SettingsManager::LOG_COLOR, SettingsManager::LOG_BG_COLOR);
+	} else if(id == "systemLogVerbose") {
+		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
+			SettingsManager::SYSTEM_LOG_VERBOSE_COLOR, SettingsManager::LOG_BG_COLOR);
+	} else if(id == "systemLogInfo") {
+		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
+			SettingsManager::SYSTEM_LOG_INFO_COLOR, SettingsManager::LOG_BG_COLOR);
+	} else if(id == "systemLogWarning") {
+		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
+			SettingsManager::SYSTEM_LOG_WARNING_COLOR, SettingsManager::LOG_BG_COLOR);
+	} else if(id == "systemLogError") {
+		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
+			SettingsManager::SYSTEM_LOG_ERROR_COLOR, SettingsManager::LOG_BG_COLOR);
+	} else if(id == "systemLogArea") {
+		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
+			SettingsManager::SYSTEM_LOG_AREA_COLOR, SettingsManager::LOG_BG_COLOR);
+		context.setFlag(Context::Bold);
 	}
+	return id == "systemLogVerbose" || id == "systemLogInfo" || id == "systemLogWarning" ||
+		id == "systemLogError" || id == "systemLogArea";
 }
 
 void Parser::ensureContrast(Context& context) {

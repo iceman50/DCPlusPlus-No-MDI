@@ -168,6 +168,16 @@ showGen(0)
 		SettingsManager::LINK_FONT, SettingsManager::LINK_COLOR, SettingsManager::LINK_BG_COLOR);
 	add(T_("Logs"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
 		SettingsManager::LOG_FONT, SettingsManager::LOG_COLOR, SettingsManager::LOG_BG_COLOR);
+	add(T_("System log: verbose"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		-1, SettingsManager::SYSTEM_LOG_VERBOSE_COLOR, -1);
+	add(T_("System log: information"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		-1, SettingsManager::SYSTEM_LOG_INFO_COLOR, -1);
+	add(T_("System log: warning"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		-1, SettingsManager::SYSTEM_LOG_WARNING_COLOR, -1);
+	add(T_("System log: error"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		-1, SettingsManager::SYSTEM_LOG_ERROR_COLOR, -1);
+	add(T_("System log: area"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
+		-1, SettingsManager::SYSTEM_LOG_AREA_COLOR, -1);
 	add(T_("Chat timestamps"), IDH_SETTINGS_STYLES_LOGS, GROUP_CHAT,
 		SettingsManager::CHAT_TIMESTAMP_FONT, SettingsManager::CHAT_TIMESTAMP_COLOR, SettingsManager::CHAT_TIMESTAMP_BG_COLOR);
 	add(T_("Chat nicknames"), IDH_SETTINGS_STYLES_LINKS, GROUP_CHAT,

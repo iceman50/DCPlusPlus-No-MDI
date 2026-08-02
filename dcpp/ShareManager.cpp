@@ -864,7 +864,8 @@ ShareManager::Directory::Ptr ShareManager::buildTree(const string& realPath, opt
 		auto name = i->getFileName();
 
 		if(name.empty()) {
-			LogManager::getInstance()->message(str(F_("Invalid file name found while hashing folder %1%") % Util::addBrackets(realPath)));
+			LogManager::getInstance()->message(str(F_("Invalid file name found while hashing folder %1%") % Util::addBrackets(realPath)),
+				LogMessage::SEV_WARNING, _("Sharing"));
 			continue;
 		}
 
@@ -1083,7 +1084,8 @@ void ShareManager::updateIndices(Directory& dir, const decltype(std::declval<Dir
 		if(!SETTING(LIST_DUPES)) {
 			try {
 				LogManager::getInstance()->message(str(F_("Duplicate file will not be shared: %1% (Size: %2% B) Dupe matched against: %3%")
-					% Util::addBrackets(f.getRealPath()) % Util::toString(f.getSize()) % Util::addBrackets(j->second->getRealPath())));
+					% Util::addBrackets(f.getRealPath()) % Util::toString(f.getSize()) % Util::addBrackets(j->second->getRealPath())),
+					LogMessage::SEV_WARNING, _("Sharing"));
 				dir.files.erase(i);
 			} catch (const ShareException&) {
 			}
@@ -1165,20 +1167,23 @@ bool ShareManager::loadShareCache() noexcept {
 	// Queue duplicate removal must see the freshly scanned filesystem; a stale
 	// snapshot could otherwise remove valid queued files during startup.
 	if(SETTING(DONT_DL_ALREADY_SHARED)) {
-		LogManager::getInstance()->message(_("Share cache skipped because queued duplicate removal requires a fresh share scan"));
+		LogManager::getInstance()->message(_("Share cache skipped because queued duplicate removal requires a fresh share scan"),
+			LogMessage::SEV_INFO, _("Share cache"));
 		return false;
 	}
 	{
 		Lock l(cs);
 		if(any_of(shares.begin(), shares.end(), [](const auto& share) { return isUncPath(share.first); })) {
-			LogManager::getInstance()->message(_("Share cache skipped because UNC shares require a fresh share scan"));
+			LogManager::getInstance()->message(_("Share cache skipped because UNC shares require a fresh share scan"),
+				LogMessage::SEV_INFO, _("Share cache"));
 			return false;
 		}
 	}
 
 	const auto cacheFile = getShareCacheFile();
 	if(File::getSize(cacheFile) < 0) {
-		LogManager::getInstance()->message(_("Share cache not found; running full file list refresh"));
+		LogManager::getInstance()->message(_("Share cache not found; running full file list refresh"),
+			LogMessage::SEV_INFO, _("Share cache"));
 		return false;
 	}
 
@@ -1187,7 +1192,8 @@ bool ShareManager::loadShareCache() noexcept {
 		auto versionStmt = db.prepare("PRAGMA user_version");
 		const auto version = versionStmt.step() ? versionStmt.columnInt(0) : 0;
 		if(version != SHARE_CACHE_SCHEMA_VERSION) {
-			LogManager::getInstance()->message(_("Share cache schema version does not match; running full file list refresh"));
+			LogManager::getInstance()->message(_("Share cache schema version does not match; running full file list refresh"),
+				LogMessage::SEV_INFO, _("Share cache"));
 			return false;
 		}
 
@@ -1202,7 +1208,8 @@ bool ShareManager::loadShareCache() noexcept {
 		}
 
 		if(getMetadata(db, "fingerprint") != expectedFingerprint) {
-			LogManager::getInstance()->message(_("Share cache does not match current sharing settings; running full file list refresh"));
+			LogManager::getInstance()->message(_("Share cache does not match current sharing settings; running full file list refresh"),
+				LogMessage::SEV_INFO, _("Share cache"));
 			return false;
 		}
 
@@ -1312,14 +1319,15 @@ bool ShareManager::loadShareCache() noexcept {
 		}
 
 		LogManager::getInstance()->message(str(F_("Loaded cached share tree from %1% (%2% directories, %3% files)") %
-			Util::addBrackets(cacheFile) % std::to_string(directoryRows) % std::to_string(fileRows)));
+			Util::addBrackets(cacheFile) % std::to_string(directoryRows) % std::to_string(fileRows)),
+			LogMessage::SEV_INFO, _("Share cache"));
 		return true;
 	} catch(const Exception& e) {
 		LogManager::getInstance()->message(str(F_("Error loading share cache %1%: %2%; running full file list refresh") %
-			Util::addBrackets(cacheFile) % e.getError()));
+			Util::addBrackets(cacheFile) % e.getError()), LogMessage::SEV_WARNING, _("Share cache"));
 	} catch(const std::exception& e) {
 		LogManager::getInstance()->message(str(F_("Error loading share cache %1%: %2%; running full file list refresh") %
-			Util::addBrackets(cacheFile) % e.what()));
+			Util::addBrackets(cacheFile) % e.what()), LogMessage::SEV_WARNING, _("Share cache"));
 	}
 
 	return false;
@@ -1413,11 +1421,14 @@ void ShareManager::saveShareCache() noexcept {
 		transaction.commit();
 		db.execute("PRAGMA optimize;PRAGMA wal_checkpoint(PASSIVE);");
 		LogManager::getInstance()->message(str(F_("Saved share cache %1% (%2% directories, %3% files)") %
-			Util::addBrackets(cacheFile) % std::to_string(directoryCount) % std::to_string(fileCount)));
+			Util::addBrackets(cacheFile) % std::to_string(directoryCount) % std::to_string(fileCount)),
+			LogMessage::SEV_INFO, _("Share cache"));
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(str(F_("Error saving share cache %1%: %2%") % Util::addBrackets(cacheFile) % e.getError()));
+		LogManager::getInstance()->message(str(F_("Error saving share cache %1%: %2%") % Util::addBrackets(cacheFile) % e.getError()),
+			LogMessage::SEV_ERROR, _("Share cache"));
 	} catch(const std::exception& e) {
-		LogManager::getInstance()->message(str(F_("Error saving share cache %1%: %2%") % Util::addBrackets(cacheFile) % e.what()));
+		LogManager::getInstance()->message(str(F_("Error saving share cache %1%: %2%") % Util::addBrackets(cacheFile) % e.what()),
+			LogMessage::SEV_ERROR, _("Share cache"));
 	}
 }
 
@@ -1435,7 +1446,8 @@ void ShareManager::startupRefresh(function<void (float)> progressF) noexcept {
 
 void ShareManager::refresh(bool dirs, bool aUpdate, bool block, function<void (float)> progressF) noexcept {
 	if(refreshing.test_and_set()) {
-		LogManager::getInstance()->message(_("File list refresh in progress, please wait for it to finish before trying to refresh again"));
+		LogManager::getInstance()->message(_("File list refresh in progress, please wait for it to finish before trying to refresh again"),
+			LogMessage::SEV_WARNING, _("Sharing"));
 		return;
 	}
 	refreshActive = true;
@@ -1453,7 +1465,8 @@ void ShareManager::refresh(bool dirs, bool aUpdate, bool block, function<void (f
 			start();
 			setThreadPriority(Thread::LOW);
 		} catch(const ThreadException& e) {
-			LogManager::getInstance()->message(str(F_("File list refresh failed: %1%") % e.getError()));
+			LogManager::getInstance()->message(str(F_("File list refresh failed: %1%") % e.getError()),
+				LogMessage::SEV_ERROR, _("Sharing"));
 			refreshActive = false;
 			refreshing.clear();
 		}
@@ -1486,7 +1499,7 @@ void ShareManager::runRefresh(function<void (float)> progressF) {
 	if(refreshDirs) {
 		pauser = std::make_shared<HashManager::HashPauser>();
 
-		LogManager::getInstance()->message(_("File list refresh initiated"));
+		LogManager::getInstance()->message(_("File list refresh initiated"), LogMessage::SEV_INFO, _("Sharing"));
 
 		lastFullUpdate = GET_TICK();
 
@@ -1522,7 +1535,7 @@ void ShareManager::runRefresh(function<void (float)> progressF) {
 		refreshDirs = false;
 		refreshedDirs = true;
 
-		LogManager::getInstance()->message(_("File list refresh finished"));
+		LogManager::getInstance()->message(_("File list refresh finished"), LogMessage::SEV_INFO, _("Sharing"));
 	}
 
 	if(update) {
@@ -1614,7 +1627,8 @@ void ShareManager::generateXmlList() {
 			bzXmlRef = unique_ptr<File>(new File(newXmlName, File::READ, File::OPEN));
 			setBZXmlFile(newXmlName);
 			bzXmlListLen = File::getSize(newXmlName);
-			LogManager::getInstance()->message(str(F_("File list %1% generated") % Util::addBrackets(bzXmlFile)));
+			LogManager::getInstance()->message(str(F_("File list %1% generated") % Util::addBrackets(bzXmlFile)),
+				LogMessage::SEV_INFO, _("Sharing"));
 		} catch(const Exception&) {
 			// No new file lists...
 		}
@@ -2081,7 +2095,8 @@ SearchResultList ShareManager::search(const StringList& adcParams, size_t maxRes
 #if DCPP_TIME_SEARCHES
 	auto start = GET_TICK();
 	ScopedFunctor(([start] {
-		LogManager::getInstance()->message("The ADC search took " + Util::toString(GET_TICK() - start) + " ms");
+		LogManager::getInstance()->message("The ADC search took " + Util::toString(GET_TICK() - start) + " ms",
+			LogMessage::SEV_VERBOSE, _("Search"));
 	}));
 #endif
 
@@ -2100,7 +2115,8 @@ SearchResultList ShareManager::search(const string& nmdcString, int searchType, 
 #if DCPP_TIME_SEARCHES
 	auto start = GET_TICK();
 	ScopedFunctor(([start] {
-		LogManager::getInstance()->message("The NMDC search took " + Util::toString(GET_TICK() - start) + " ms");
+		LogManager::getInstance()->message("The NMDC search took " + Util::toString(GET_TICK() - start) + " ms",
+			LogMessage::SEV_VERBOSE, _("Search"));
 	}));
 #endif
 

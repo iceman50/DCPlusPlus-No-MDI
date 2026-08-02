@@ -465,7 +465,7 @@ void PluginApiImpl::releaseData(ConfigValuePtr val) {
 
 // Functions for DCLog
 void PluginApiImpl::log(const char* msg) {
-	LogManager::getInstance()->message(msg);
+	LogManager::getInstance()->message(msg, LogMessage::SEV_INFO, _("Plugins"));
 }
 
 // Functions for DCConnection
@@ -560,7 +560,7 @@ QueueDataPtr PluginApiImpl::addList(UserDataPtr user, Bool silent) {
 		QueueManager::getInstance()->addList(HintedUser(u, user->hubHint), silent ? 0 : QueueItem::FLAG_CLIENT_VIEW);
 		data = findDownload(QueueManager::getInstance()->getListPath(HintedUser(u, user->hubHint)).c_str());
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("Queue"));
 	}
 
 	return data;
@@ -573,7 +573,7 @@ QueueDataPtr PluginApiImpl::addDownload(const char* hash, uint64_t size, const c
 		QueueManager::getInstance()->add(sTarget, size, TTHValue(hash), HintedUser(UserPtr(), Util::emptyString));
 		data = findDownload(sTarget.c_str());
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("Queue"));
 	}
 
 	return data;
@@ -630,7 +630,7 @@ QueueDataPtr PluginApiImpl::copyData(const QueueDataPtr qi) {
 
 void PluginApiImpl::releaseData(QueueDataPtr qi) {
 	if(qi->isManaged) {
-		LogManager::getInstance()->message("Plugin trying to free a managed object !");
+		LogManager::getInstance()->message("Plugin trying to free a managed object !", LogMessage::SEV_WARNING, _("Plugins"));
 		return;
 	}
 
@@ -753,7 +753,7 @@ HubDataPtr PluginApiImpl::copyData(const HubDataPtr hub) {
 
 void PluginApiImpl::releaseData(HubDataPtr hub) {
 	if(hub->isManaged) {
-		LogManager::getInstance()->message("Plugin trying to free a managed object !");
+		LogManager::getInstance()->message("Plugin trying to free a managed object !", LogMessage::SEV_WARNING, _("Plugins"));
 		return;
 	}
 
@@ -792,7 +792,7 @@ UserDataPtr PluginApiImpl::copyData(const UserDataPtr user) {
 
 void PluginApiImpl::releaseData(UserDataPtr user) {
 	if(user->isManaged) {
-		LogManager::getInstance()->message("Plugin trying to free a managed object !");
+		LogManager::getInstance()->message("Plugin trying to free a managed object !", LogMessage::SEV_WARNING, _("Plugins"));
 		return;
 	}
 
@@ -900,7 +900,7 @@ void PluginApiImpl::getHTTPResource(const char* uri, const char* localPath) {
 		downloader->getResource(uri, localPath);
 
 	} catch(const Exception& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("Plugins"));
 	}
 }
 

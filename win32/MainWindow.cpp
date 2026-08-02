@@ -1445,7 +1445,7 @@ public:
 				int matched = QueueManager::getInstance()->matchListing(dl);
 				LogManager::getInstance()->message(str(FN_("%1%: matched %2% file", "%1%: matched %2% files", matched)
 				% Util::toString(ClientManager::getInstance()->getNicks(user))
-				% matched));
+				% matched), LogMessage::SEV_INFO, _("Queue"));
 			} catch(const Exception&) {
 			}
 		}
@@ -1462,7 +1462,7 @@ void MainWindow::handleMatchAll() {
 	try {
 		matcher->start();
 	} catch(const ThreadException& e) {
-		LogManager::getInstance()->message(e.getError());
+		LogManager::getInstance()->message(e.getError(), LogMessage::SEV_ERROR, _("Application"));
 		delete matcher;
 	}
 }
@@ -1648,11 +1648,13 @@ void MainWindow::updateGeo(bool v6) {
 	try {
 		file.reset(new File(GeoManager::getDbPath(v6) + ".gz.tmp", File::WRITE, File::CREATE | File::TRUNCATE));
 	} catch(const FileException&) {
-		LogManager::getInstance()->message(str(F_("The %1% GeoIP database could not be updated") % geoType(v6)));
+		LogManager::getInstance()->message(str(F_("The %1% GeoIP database could not be updated") % geoType(v6)),
+			LogMessage::SEV_WARNING, _("GeoIP"));
 		return;
 	}
 
-	LogManager::getInstance()->message(str(F_("Updating the %1% GeoIP database...") % geoType(v6)));
+	LogManager::getInstance()->message(str(F_("Updating the %1% GeoIP database...") % geoType(v6)),
+		LogMessage::SEV_INFO, _("GeoIP"));
 	conn = HttpManager::getInstance()->download(Text::fromT(SETTING(GEO_CITY) ?
 		(v6 ? links.geoip6_city : links.geoip4_city) : (v6 ? links.geoip6 : links.geoip4)), file.get());
 }
@@ -1677,9 +1679,11 @@ void MainWindow::completeGeoUpdate(bool v6, bool success) {
 				} catch(const FileException&) { }
 
 				GeoManager::getInstance()->update(true);
-				LogManager::getInstance()->message(str(F_("The %1% GeoIP database has been successfully updated") % geoType(true)));
+				LogManager::getInstance()->message(str(F_("The %1% GeoIP database has been successfully updated") % geoType(true)),
+					LogMessage::SEV_INFO, _("GeoIP"));
 				GeoManager::getInstance()->update(false);
-				LogManager::getInstance()->message(str(F_("The %1% GeoIP database has been successfully updated") % geoType(false)));
+				LogManager::getInstance()->message(str(F_("The %1% GeoIP database has been successfully updated") % geoType(false)),
+					LogMessage::SEV_INFO, _("GeoIP"));
 
 			} else if(geoRegion == GeoRegion_Idle) {
 
@@ -1707,7 +1711,8 @@ void MainWindow::completeGeoUpdate(bool v6, bool success) {
 
 		GeoManager::getInstance()->update(v6);
 
-		LogManager::getInstance()->message(str(F_("The %1% GeoIP database has been successfully updated") % geoType(v6)));
+		LogManager::getInstance()->message(str(F_("The %1% GeoIP database has been successfully updated") % geoType(v6)),
+			LogMessage::SEV_INFO, _("GeoIP"));
 
 	} else {
 
@@ -1718,7 +1723,8 @@ void MainWindow::completeGeoUpdate(bool v6, bool success) {
 			File::deleteFile(GeoManager::getDbPath(v6) + ".gz.tmp");
 		}
 
-		LogManager::getInstance()->message(str(F_("The %1% GeoIP database could not be updated") % geoType(v6)));
+		LogManager::getInstance()->message(str(F_("The %1% GeoIP database could not be updated") % geoType(v6)),
+			LogMessage::SEV_WARNING, _("GeoIP"));
 	}
 }
 
@@ -2097,8 +2103,9 @@ void MainWindow::on(HttpManagerListener::ResetStream, HttpConnection* c) noexcep
 	}
 }
 
-void MainWindow::on(LogManagerListener::Message, time_t t, const string& m) noexcept {
-	callAsync([=] { statusMessage(t, m); });
+void MainWindow::on(LogManagerListener::Message, const LogMessagePtr& message) noexcept {
+	if(message)
+		callAsync([=] { statusMessage(message->getTime(), message->getText()); });
 }
 
 void MainWindow::on(QueueManagerListener::Finished, QueueItem* qi, const string& dir, int64_t speed) noexcept {

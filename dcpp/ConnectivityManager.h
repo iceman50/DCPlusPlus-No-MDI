@@ -19,6 +19,7 @@
 #define DCPLUSPLUS_DCPP_CONNECTIVITY_MANAGER_H
 
 #include "CriticalSection.h"
+#include "LogMessage.h"
 #include "SettingsManager.h"
 #include "Singleton.h"
 #include "Speaker.h"
@@ -79,7 +80,7 @@ private:
 	void mappingFinished();
 	void mappingFinished(const string& mapperName, bool v6);
 	void clearAutoSettings(bool v6, bool resetDefaults);
-	void log(string&& message, tribool v6 = indeterminate);
+	void log(string&& message, tribool v6 = indeterminate, LogMessage::Severity severity = LogMessage::SEV_INFO);
 
 	void startSocket();
 	void listen();
