@@ -29,6 +29,7 @@ public:
 
 		string ip;
 		string port;
+		string bindAddress;
 		bool v6;
 		bool secure;
 	};
@@ -50,7 +51,8 @@ public:
 private:
 	class HBRISocket {
 	public:
-		HBRISocket(bool v6, bool secure, const std::atomic_bool& stopping);
+		HBRISocket(bool v6, bool secure, const string& bindAddress, const std::atomic_bool& stopping,
+			const MessageCallback& callback);
 
 		bool connect(const string& ip, const string& port);
 		void send(const string& data);
@@ -60,10 +62,11 @@ private:
 		std::unique_ptr<Socket> socket;
 		const bool v6;
 		const std::atomic_bool& stopping;
+		const MessageCallback& callback;
 	};
 
 	static bool runValidation(const ConnectInfo& connectInfo, const string& request,
-		const std::atomic_bool& stopping);
+		const std::atomic_bool& stopping, const MessageCallback& callback);
 	static void run(const ConnectInfo& connectInfo, const string& request,
 		const std::shared_ptr<std::atomic_bool>& stopping, const MessageCallback& callback) noexcept;
 

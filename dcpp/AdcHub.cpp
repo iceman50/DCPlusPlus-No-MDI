@@ -728,6 +728,7 @@ void AdcHub::handle(AdcCommand::TCP, AdcCommand& c) noexcept {
 
 	const bool v6 = !sock->isV6Valid();
 	HBRIValidator::ConnectInfo connectInfo(v6, isSecure());
+	connectInfo.bindAddress = v6 ? CONNSETTING(BIND_ADDRESS6) : CONNSETTING(BIND_ADDRESS);
 	string token;
 	if(!c.getParam("TO", 2, token) || token.empty() || token.size() > 256 ||
 		!c.getParam(v6 ? "I6" : "I4", 0, connectInfo.ip) ||
