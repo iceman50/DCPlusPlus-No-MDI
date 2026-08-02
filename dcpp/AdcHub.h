@@ -48,7 +48,7 @@ public:
 	virtual int64_t getAvailable() const;
 
 	static string escape(const string& str) { return AdcCommand::escape(str, false); }
-	void emulateCommand(const string& cmd) { dispatch(cmd); }
+	void emulateCommand(const string& cmd);
 	virtual void send(const AdcCommand& cmd);
 
 	string getMySID() { return AdcCommand::fromSID(sid); }
@@ -85,6 +85,8 @@ private:
 	virtual ~AdcHub();
 
 	bool oldPassword;
+	bool protocolNegotiated;
+	bool passwordResponseSent;
 	Socket udp;
 	unordered_map<uint32_t, OnlineUser*> users; /** Map session id to OnlineUser */
 	StringMap lastInfoMap;
@@ -131,6 +133,9 @@ private:
 	template<typename T> void handle(T, AdcCommand&) { }
 
 	void sendSearch(AdcCommand& c);
+	bool getProtocolState(AdcCommand::ProtocolState& protocolState) const noexcept;
+	bool processCommand(const string& line) noexcept;
+	void sendRawCommand(const string& command) noexcept;
 	AdcCommand getHBRIRequest(bool v6, const string& token);
 	void resetHBRI() noexcept;
 	void sendUDP(const AdcCommand& cmd) noexcept;

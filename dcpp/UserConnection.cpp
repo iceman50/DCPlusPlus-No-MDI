@@ -65,7 +65,7 @@ void UserConnection::on(BufferedSocketListener::Line, const string& aLine) noexc
 			fire(UserConnectionListener::ProtocolError(), this, _("Non-UTF-8 data in an ADC connection"));
 			return;
 		}
-		dispatch(aLine);
+		processAdcCommand(aLine, false);
 		return;
 	} else if(!isSet(FLAG_NMDC)) {
 		fire(UserConnectionListener::ProtocolError(), this, _("Invalid data"));
@@ -134,7 +134,7 @@ void UserConnection::on(BufferedSocketListener::Line, const string& aLine) noexc
 			fire(UserConnectionListener::Supports(), this, StringTokenizer<string>(param, ' ').getTokens());
 		}
 	} else if(cmd.compare(0, 4, "$ADC") == 0) {
-		dispatch(aLine, true);
+		processAdcCommand(aLine, true);
 	} else {
 		fire(UserConnectionListener::ProtocolError(), this, _("Invalid data"));
 	}
@@ -227,6 +227,90 @@ void UserConnection::pm(const string& message, bool thirdPerson) {
 
 void UserConnection::pmi(const char* name, const string& value) {
 	send(AdcCommand(AdcCommand::CMD_PMI).addParam(name, value));
+}
+
+bool UserConnection::getProtocolState(AdcCommand::ProtocolState& protocolState) const noexcept {
+	switch(getState()) {
+	case STATE_CONNECT:
+	case STATE_SUPNICK:
+		protocolState = AdcCommand::STATE_PROTOCOL;
+		return true;
+	case STATE_INF:
+		protocolState = AdcCommand::STATE_IDENTIFY;
+		return true;
+	case STATE_GET:
+	case STATE_SEND:
+	case STATE_SND:
+	case STATE_IDLE:
+	case STATE_CMD:
+		protocolState = AdcCommand::STATE_NORMAL;
+		return true;
+	case STATE_RUNNING:
+		protocolState = AdcCommand::STATE_DATA;
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool UserConnection::processAdcCommand(const string& line, bool nmdc) noexcept {
+	try {
+		AdcCommand command(line, nmdc);
+		AdcCommand::ProtocolState protocolState = AdcCommand::STATE_DATA;
+		if(!getProtocolState(protocolState) || !command.isValidFor(protocolState, AdcCommand::CONTEXT_CLIENT)) {
+			bool validInAnotherState = false;
+			for(auto candidate: { AdcCommand::STATE_PROTOCOL, AdcCommand::STATE_IDENTIFY, AdcCommand::STATE_VERIFY,
+				AdcCommand::STATE_NORMAL, AdcCommand::STATE_DATA })
+			{
+				validInAnotherState = validInAnotherState || command.isValidFor(candidate, AdcCommand::CONTEXT_CLIENT);
+			}
+
+			if(validInAnotherState) {
+				dcdebug("C-C ADC command %.4s received in invalid state %d\n", command.getFourCC().c_str(), static_cast<int>(protocolState));
+				if(protocolState != AdcCommand::STATE_DATA) {
+					AdcCommand error(AdcCommand::SEV_FATAL, AdcCommand::ERROR_BAD_STATE, "Invalid state");
+					error.addParam("FC", command.getFourCC());
+					send(error);
+				}
+				disconnect();
+			}
+			return false;
+		}
+
+		dispatch(command);
+		return true;
+	} catch(const ParseException&) {
+		dcdebug("Invalid C-C ADC command: %.50s\n", line.c_str());
+		return false;
+	}
+}
+
+void UserConnection::send(const AdcCommand& command) {
+	AdcCommand::ProtocolState protocolState;
+	if(!getProtocolState(protocolState) || !command.isValidFor(protocolState, AdcCommand::CONTEXT_CLIENT)) {
+		dcdebug("Refusing invalid or out-of-state C-C ADC command %.4s in state %d\n",
+			command.getFourCC().c_str(), static_cast<int>(getState()));
+		return;
+	}
+	send(command.toString(0, isSet(FLAG_NMDC)));
+}
+
+void UserConnection::sendRaw(const string& raw) {
+	if(isSet(FLAG_NMDC)) {
+		send(raw);
+		return;
+	}
+
+	string line = raw;
+	while(!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+		line.pop_back();
+	}
+	try {
+		AdcCommand command(line);
+		send(command);
+	} catch(const ParseException&) {
+		dcdebug("Refusing malformed raw C-C ADC command: %.50s\n", line.c_str());
+	}
 }
 
 void UserConnection::handle(AdcCommand::MSG t, const AdcCommand& c) {

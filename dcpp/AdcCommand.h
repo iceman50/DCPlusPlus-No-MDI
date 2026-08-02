@@ -34,6 +34,21 @@ STANDARD_EXCEPTION(ParseException);
 
 class AdcCommand {
 public:
+	enum ProtocolState {
+		STATE_PROTOCOL,
+		STATE_IDENTIFY,
+		STATE_VERIFY,
+		STATE_NORMAL,
+		STATE_DATA
+	};
+
+	enum ProtocolContext {
+		CONTEXT_FROM_HUB,
+		CONTEXT_TO_HUB,
+		CONTEXT_CLIENT,
+		CONTEXT_UDP
+	};
+
 	template<uint32_t T>
 	struct Type {
 		enum { CMD = T };
@@ -143,6 +158,12 @@ public:
 	string toString(const CID& aCID) const;
 	string toString(uint32_t sid, bool nmdc = false) const;
 
+	/** Validate the ADC message grammar and the bounds defined by BASE. */
+	bool isValidSyntax() const noexcept;
+	/** Validate syntax, message direction and the ADC protocol state table. */
+	bool isValidFor(ProtocolState state, ProtocolContext context) const noexcept;
+	static bool isAllowedInState(uint32_t command, ProtocolState state) noexcept;
+
 	AdcCommand& addParam(const string& name, const string& value) {
 		parameters.push_back(name);
 		parameters.back() += value;
@@ -156,7 +177,7 @@ public:
 	/** Return a named parameter where the name is a two-letter code */
 	bool getParam(const char* name, size_t start, string& ret) const;
 	bool hasFlag(const char* name, size_t start) const;
-	static uint16_t toCode(const char* x) { return static_cast<uint16_t>(static_cast<uint8_t>(x[0])) | (static_cast<uint16_t>(static_cast<uint8_t>(x[1])) << 8); }
+	static constexpr uint16_t toCode(const char* x) { return static_cast<uint16_t>(static_cast<uint8_t>(x[0])) | (static_cast<uint16_t>(static_cast<uint8_t>(x[1])) << 8); }
 
 	bool operator==(uint32_t aCmd) { return cmdInt == aCmd; }
 
@@ -195,6 +216,15 @@ public:
 	void dispatch(const string& aLine, bool nmdc, ArgT&&... args) noexcept {
 		try {
 			AdcCommand c(aLine, nmdc);
+			dispatch(c, std::forward<ArgT>(args)...);
+		} catch(const ParseException&) {
+			dcdebug("Invalid ADC command: %.50s\n", aLine.c_str());
+			return;
+		}
+	}
+
+	template<typename... ArgT>
+	void dispatch(AdcCommand& c, ArgT&&... args) noexcept {
 
 #define C(n) case AdcCommand::CMD_##n: ((T*)this)->handle(AdcCommand::n(), c, std::forward<ArgT>(args)...); break;
 			switch(c.getCommand()) {
@@ -221,15 +251,11 @@ public:
 				C(PMI);
 				C(TCP);
 			default:
-				dcdebug("Unknown ADC command: %.50s\n", aLine.c_str());
+				dcdebug("Unknown ADC command: %.4s\n", c.getFourCC().c_str());
 				break;
 #undef C
 
 			}
-		} catch(const ParseException&) {
-			dcdebug("Invalid ADC command: %.50s\n", aLine.c_str());
-			return;
-		}
 	}
 };
 

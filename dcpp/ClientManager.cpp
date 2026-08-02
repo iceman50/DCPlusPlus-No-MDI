@@ -483,6 +483,10 @@ void ClientManager::userCommand(const HintedUser& user, const UserCommand& uc, P
 
 void ClientManager::sendUDP(AdcCommand& cmd, const OnlineUser& user, const string& aKey) {
 	dcassert(cmd.getType() == AdcCommand::TYPE_UDP);
+	if(!cmd.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_UDP)) {
+		dcdebug("Refusing invalid ADC UDP command %.4s\n", cmd.getFourCC().c_str());
+		return;
+	}
 	if(!user.getIdentity().isUdpActive()) {
 		cmd.setType(AdcCommand::TYPE_DIRECT);
 		cmd.setTo(user.getIdentity().getSID());

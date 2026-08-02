@@ -722,10 +722,11 @@ void ConnectionManager::on(AdcCommand::SUP, UserConnection* aSource, const AdcCo
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ZLIB_GET);
 		}
 		aSource->sup(defFeatures);
+		aSource->setState(UserConnection::STATE_INF);
 	} else {
+		aSource->setState(UserConnection::STATE_INF);
 		aSource->inf(true, aSource->isMCN() ? std::max(1, SETTING(MAX_MCN_UPLOADS)) : 0);
 	}
-	aSource->setState(UserConnection::STATE_INF);
 }
 
 void ConnectionManager::on(AdcCommand::STA, UserConnection*, const AdcCommand& cmd) noexcept {
@@ -743,7 +744,7 @@ void ConnectionManager::on(UserConnectionListener::Connected, UserConnection* aS
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ZLIB_GET);
 		}
 		aSource->sup(defFeatures);
-		aSource->send(AdcCommand(AdcCommand::SEV_SUCCESS, AdcCommand::SUCCESS, Util::emptyString).addParam("RF", aSource->getHubUrl()));
+		aSource->send(AdcCommand(AdcCommand::SEV_SUCCESS, AdcCommand::SUCCESS, "Referrer").addParam("RF", aSource->getHubUrl()));
 	}
 	aSource->setState(UserConnection::STATE_SUPNICK);
 }

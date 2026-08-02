@@ -27,6 +27,7 @@
 #include "stdinc.h"
 #include "PluginApiImpl.h"
 
+#include "AdcCommand.h"
 #include "Client.h"
 #include "ClientManager.h"
 #include "ConnectionManager.h"
@@ -680,7 +681,21 @@ void PluginApiImpl::emulateProtocolCmd(HubDataPtr hub, const char* cmd) {
 }
 
 void PluginApiImpl::sendProtocolCmd(HubDataPtr hub, const char* cmd) {
-	reinterpret_cast<Client*>(hub->object)->send(cmd);
+	auto client = reinterpret_cast<Client*>(hub->object);
+	if(hub->protocol != PROTOCOL_ADC) {
+		client->send(cmd);
+		return;
+	}
+
+	string line(cmd);
+	while(!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+		line.pop_back();
+	}
+	try {
+		client->send(AdcCommand(line));
+	} catch(const ParseException&) {
+		dcdebug("Refusing malformed plugin ADC hub command: %.50s\n", line.c_str());
+	}
 }
 
 void PluginApiImpl::sendHubMessage(HubDataPtr hub, const char* message, Bool thirdPerson) {

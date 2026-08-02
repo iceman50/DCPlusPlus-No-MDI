@@ -56,6 +56,120 @@ TEST(testadc, test_adccommand)
 	ASSERT_TRUE(handler.tcpHandled);
 }
 
+TEST(testadc, enforces_protocol_states_and_contexts)
+{
+	AdcCommand sup(AdcCommand::CMD_SUP, AdcCommand::TYPE_HUB);
+	sup.addParam("ADBASE").addParam("ADTIGR");
+	EXPECT_TRUE(sup.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_TRUE(sup.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_FALSE(sup.isValidFor(AdcCommand::STATE_IDENTIFY, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_FALSE(sup.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_FROM_HUB));
+
+	AdcCommand inf(AdcCommand::CMD_INF, AdcCommand::TYPE_BROADCAST);
+	inf.addParam("ID", "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE");
+	EXPECT_TRUE(inf.isValidFor(AdcCommand::STATE_IDENTIFY, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_TRUE(inf.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_FALSE(inf.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_TO_HUB));
+
+	AdcCommand pas(AdcCommand::CMD_PAS, AdcCommand::TYPE_HUB);
+	pas.addParam("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE");
+	EXPECT_TRUE(pas.isValidFor(AdcCommand::STATE_VERIFY, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_FALSE(pas.isValidFor(AdcCommand::STATE_IDENTIFY, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_FALSE(pas.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
+
+	AdcCommand msg(AdcCommand::CMD_MSG);
+	msg.addParam("hello");
+	EXPECT_TRUE(msg.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_CLIENT));
+	EXPECT_FALSE(msg.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_FALSE(msg.isValidFor(AdcCommand::STATE_DATA, AdcCommand::CONTEXT_CLIENT));
+
+	AdcCommand status(AdcCommand::SEV_RECOVERABLE, AdcCommand::ERROR_FILE_NOT_AVAILABLE, "Not available");
+	EXPECT_TRUE(status.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_CLIENT));
+	EXPECT_TRUE(status.isValidFor(AdcCommand::STATE_VERIFY, AdcCommand::CONTEXT_CLIENT));
+	EXPECT_FALSE(status.isValidFor(AdcCommand::STATE_DATA, AdcCommand::CONTEXT_CLIENT));
+
+	AdcCommand extension(AdcCommand::toFourCC("XYZ"), AdcCommand::TYPE_HUB);
+	EXPECT_TRUE(extension.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
+	EXPECT_FALSE(extension.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_TO_HUB));
+
+	AdcCommand udpResult(AdcCommand::CMD_RES, AdcCommand::TYPE_UDP);
+	udpResult.addParam("FNfile.txt").addParam("SI1").addParam("SL1").addParam("TOtoken");
+	EXPECT_TRUE(udpResult.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_UDP));
+	EXPECT_FALSE(udpResult.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_UDP));
+}
+
+TEST(testadc, validates_adc_grammar_and_numeric_bounds)
+{
+	EXPECT_THROW(AdcCommand("Cmsg hello"), ParseException);
+	EXPECT_THROW(AdcCommand("BMSG ABC1 hello"), ParseException);
+
+	AdcCommand featureSearch("FSCH ABCD +TCP4-SEGA ANlinux");
+	EXPECT_EQ("+TCP4-SEGA", featureSearch.getFeatures());
+	EXPECT_TRUE(featureSearch.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_FROM_HUB));
+	featureSearch.setFeatures("TCP4");
+	EXPECT_FALSE(featureSearch.isValidSyntax());
+
+	AdcCommand badSid(AdcCommand::CMD_SID, AdcCommand::TYPE_INFO);
+	badSid.addParam("ABC1");
+	EXPECT_FALSE(badSid.isValidSyntax());
+
+	AdcCommand ctm(AdcCommand::CMD_CTM, AdcCommand::toSID("ABCD"), AdcCommand::TYPE_DIRECT);
+	ctm.addParam("ADC/1.0").addParam("65535").addParam("token");
+	EXPECT_TRUE(ctm.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
+	ctm.getParameters()[1] = "65536";
+	EXPECT_FALSE(ctm.isValidSyntax());
+	ctm.getParameters()[1] = "12x";
+	EXPECT_FALSE(ctm.isValidSyntax());
+	ctm.setTo(AdcCommand::toSID("1234"));
+	EXPECT_FALSE(ctm.isValidSyntax());
+
+	AdcCommand infPorts(AdcCommand::CMD_INF, AdcCommand::TYPE_BROADCAST);
+	infPorts.addParam("U4", "0").addParam("U6", "65535").addParam("AS", "0");
+	EXPECT_TRUE(infPorts.isValidSyntax());
+	infPorts.getParameters()[1] = "U665536";
+	EXPECT_FALSE(infPorts.isValidSyntax());
+
+	AdcCommand get(AdcCommand::CMD_GET);
+	get.addParam("file").addParam("TTH/ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE").addParam("0").addParam("-1");
+	EXPECT_TRUE(get.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_CLIENT));
+	get.getParameters()[2] = "9223372036854775807";
+	get.getParameters()[3] = "1";
+	EXPECT_FALSE(get.isValidSyntax());
+	get.getParameters()[2] = "-1";
+	EXPECT_FALSE(get.isValidSyntax());
+	get.getParameters()[2] = "0";
+	get.getParameters()[3] = "9223372036854775808";
+	EXPECT_FALSE(get.isValidSyntax());
+	get.getParameters() = { "blom", "/", "0", "1024", "BK8", "BH24" };
+	EXPECT_TRUE(get.isValidSyntax());
+	get.getParameters()[1] = "/wrong/";
+	EXPECT_FALSE(get.isValidSyntax());
+
+	AdcCommand snd(AdcCommand::CMD_SND);
+	snd.addParam("file").addParam("TTH/ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE").addParam("0").addParam("-1");
+	EXPECT_FALSE(snd.isValidSyntax());
+
+	AdcCommand shortSalt(AdcCommand::CMD_GPA, AdcCommand::TYPE_INFO);
+	shortSalt.addParam("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEF");
+	EXPECT_FALSE(shortSalt.isValidSyntax());
+	shortSalt.getParameters()[0] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFG";
+	EXPECT_TRUE(shortSalt.isValidFor(AdcCommand::STATE_VERIFY, AdcCommand::CONTEXT_FROM_HUB));
+
+	AdcCommand badStatus(AdcCommand::CMD_STA);
+	badStatus.addParam("099").addParam("Invalid success code");
+	EXPECT_FALSE(badStatus.isValidSyntax());
+
+	AdcCommand timestamped(AdcCommand::CMD_MSG);
+	timestamped.addParam("hello").addParam("TS", "9223372036854775808");
+	EXPECT_FALSE(timestamped.isValidSyntax());
+	timestamped.getParameters()[1] = "PM1234";
+	EXPECT_FALSE(timestamped.isValidSyntax());
+
+	AdcCommand userCommand(AdcCommand::CMD_CMD, AdcCommand::TYPE_INFO);
+	userCommand.addParam("Example").addParam("CT", "16");
+	EXPECT_FALSE(userCommand.isValidSyntax());
+}
+
 TEST(testadc, recognizes_plaintext_udp_before_sudp)
 {
 	const string cid(39, 'A');

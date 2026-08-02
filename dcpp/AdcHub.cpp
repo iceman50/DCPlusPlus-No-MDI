@@ -66,7 +66,7 @@ const string AdcHub::HBRI_SUPPORT("ADHBRI");
 const vector<StringList> AdcHub::searchExts;
 
 AdcHub::AdcHub(const string& aHubURL, bool secure) :
-	Client(aHubURL, '\n', secure), oldPassword(false), udp(Socket::TYPE_UDP), sid(0), supportsHBRI(false) {
+	Client(aHubURL, '\n', secure), oldPassword(false), protocolNegotiated(false), passwordResponseSent(false), udp(Socket::TYPE_UDP), sid(0), supportsHBRI(false) {
 	TimerManager::getInstance()->addListener(this);
 }
 
@@ -274,11 +274,19 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 		// Some hubs fake BASE support without TIGR support =/
 		fire(ClientListener::StatusMessage(), this, _("Hub probably uses an old version of ADC, please encourage the owner to upgrade"));
 	}
+	protocolNegotiated = true;
 }
 
 void AdcHub::handle(AdcCommand::SID, AdcCommand& c) noexcept {
-	if(state != STATE_PROTOCOL) {
+	if(state != STATE_PROTOCOL || c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID) {
 		dcdebug("Invalid state for SID\n");
+		return;
+	}
+	if(!protocolNegotiated) {
+		AdcCommand error(AdcCommand::SEV_FATAL, AdcCommand::ERROR_BAD_STATE, "SID before SUP", AdcCommand::TYPE_HUB);
+		error.addParam("FC", c.getFourCC());
+		send(error);
+		disconnect(false);
 		return;
 	}
 
@@ -323,16 +331,21 @@ void AdcHub::handle(AdcCommand::MSG, AdcCommand& c) noexcept {
 }
 
 void AdcHub::handle(AdcCommand::GPA, AdcCommand& c) noexcept {
-	if(c.getParameters().empty())
+	if(state != STATE_VERIFY || c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID ||
+		c.getParameters().empty())
+	{
 		return;
+	}
 	salt = c.getParam(0);
-	state = STATE_VERIFY;
+	passwordResponseSent = false;
 
 	fire(ClientListener::GetPassword(), this);
 }
 
 void AdcHub::handle(AdcCommand::QUI, AdcCommand& c) noexcept {
-	if(c.getParameters().empty() || c.getParam(0).size() != 4) {
+	if(c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID ||
+		c.getParameters().empty() || c.getParam(0).size() != 4)
+	{
 		return;
 	}
 	uint32_t s = AdcCommand::toSID(c.getParam(0));
@@ -450,7 +463,7 @@ void AdcHub::handle(AdcCommand::RCM, AdcCommand& c) noexcept {
 }
 
 void AdcHub::handle(AdcCommand::CMD, AdcCommand& c) noexcept {
-	if(c.getParameters().size() < 1)
+	if(c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID || c.getParameters().size() < 1)
 		return;
 	const string& name = c.getParam(0);
 	bool rem = c.hasFlag("RM", 1);
@@ -588,6 +601,10 @@ void AdcHub::handle(AdcCommand::RES, AdcCommand& c) noexcept {
 }
 
 void AdcHub::handle(AdcCommand::GET, AdcCommand& c) noexcept {
+	if(c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID) {
+		return;
+	}
+
 	if(c.getParameters().size() < 5) {
 		if(!c.getParameters().empty()) {
 			if(c.getParam(0) == "blom") {
@@ -620,6 +637,11 @@ void AdcHub::handle(AdcCommand::GET, AdcCommand& c) noexcept {
 		if(h > 64 || h < 1) {
 			send(AdcCommand(AdcCommand::SEV_FATAL, AdcCommand::ERROR_TRANSFER_GENERIC,
 				"Unsupported h", AdcCommand::TYPE_HUB));
+			return;
+		}
+		if(k > 192 / h) {
+			send(AdcCommand(AdcCommand::SEV_FATAL, AdcCommand::ERROR_TRANSFER_GENERIC,
+				"Unsupported k/h combination", AdcCommand::TYPE_HUB));
 			return;
 		}
 
@@ -763,7 +785,7 @@ AdcCommand AdcHub::getHBRIRequest(bool v6, const string& token) {
 }
 
 void AdcHub::handle(AdcCommand::ZON, AdcCommand& c) noexcept {
-	if(c.getType() == AdcCommand::TYPE_INFO) {
+	if(c.getType() == AdcCommand::TYPE_INFO && c.getFrom() == AdcCommand::HUB_SID) {
 		try {
 			sock->setMode(BufferedSocket::MODE_ZPIPE);
 		} catch (const Exception& e) {
@@ -773,7 +795,7 @@ void AdcHub::handle(AdcCommand::ZON, AdcCommand& c) noexcept {
 }
 
 void AdcHub::handle(AdcCommand::ZOF, AdcCommand& c) noexcept {
-	if(c.getType() == AdcCommand::TYPE_INFO) {
+	if(c.getType() == AdcCommand::TYPE_INFO && c.getFrom() == AdcCommand::HUB_SID) {
 		try {
 			sock->setMode(BufferedSocket::MODE_LINE);
 		} catch (const Exception& e) {
@@ -870,7 +892,7 @@ void AdcHub::sendUserCmd(const UserCommand& command, const ParamMap& params) {
 			}
 		}
 	} else {
-		send(cmd);
+		sendRawCommand(cmd);
 	}
 }
 
@@ -1043,6 +1065,7 @@ void AdcHub::password(const string& pwd) {
 		th.update(pwd.data(), pwd.length());
 		th.update(&buf[0], saltBytes);
 		send(AdcCommand(AdcCommand::CMD_PAS, AdcCommand::TYPE_HUB).addParam(Encoder::toBase32(th.finalize(), TigerHash::BYTES)));
+		passwordResponseSent = true;
 		salt.clear();
 	}
 }
@@ -1216,12 +1239,122 @@ void AdcHub::checkNick(string& nick) {
 	}
 }
 
-void AdcHub::send(const AdcCommand& cmd) {
-	if(forbiddenCommands.find(AdcCommand::toFourCC(cmd.getFourCC().c_str())) == forbiddenCommands.end()) {
-		if(cmd.getType() == AdcCommand::TYPE_UDP)
-			sendUDP(cmd);
-		send(cmd.toString(sid));
+bool AdcHub::getProtocolState(AdcCommand::ProtocolState& protocolState) const noexcept {
+	switch(state.load(std::memory_order_relaxed)) {
+	case STATE_PROTOCOL: protocolState = AdcCommand::STATE_PROTOCOL; return true;
+	case STATE_IDENTIFY: protocolState = AdcCommand::STATE_IDENTIFY; return true;
+	case STATE_VERIFY: protocolState = AdcCommand::STATE_VERIFY; return true;
+	case STATE_NORMAL: protocolState = AdcCommand::STATE_NORMAL; return true;
+	default: return false;
 	}
+}
+
+bool AdcHub::processCommand(const string& line) noexcept {
+	try {
+		AdcCommand command(line);
+		if(!command.isValidSyntax()) {
+			dcdebug("Invalid ADC command syntax: %.50s\n", line.c_str());
+			return false;
+		}
+
+		AdcCommand::ProtocolState protocolState;
+		if(!getProtocolState(protocolState)) {
+			return false;
+		}
+
+		auto nextState = protocolState;
+		if(protocolState == AdcCommand::STATE_IDENTIFY && command.getCommand() == AdcCommand::CMD_GPA &&
+			command.getType() == AdcCommand::TYPE_INFO && command.getFrom() == AdcCommand::HUB_SID)
+		{
+			nextState = AdcCommand::STATE_VERIFY;
+		} else if(protocolState == AdcCommand::STATE_IDENTIFY &&
+			!AdcCommand::isAllowedInState(command.getCommand(), protocolState) &&
+			AdcCommand::isAllowedInState(command.getCommand(), AdcCommand::STATE_NORMAL))
+		{
+			// The server controls the shared state. A command that is only valid in
+			// NORMAL is the acknowledgement that an unregistered login completed.
+			nextState = AdcCommand::STATE_NORMAL;
+		} else if(protocolState == AdcCommand::STATE_VERIFY && passwordResponseSent &&
+			!AdcCommand::isAllowedInState(command.getCommand(), protocolState) &&
+			AdcCommand::isAllowedInState(command.getCommand(), AdcCommand::STATE_NORMAL))
+		{
+			// The first successful NORMAL command after PAS acknowledges the login.
+			nextState = AdcCommand::STATE_NORMAL;
+		}
+
+		if(!command.isValidFor(nextState, AdcCommand::CONTEXT_FROM_HUB)) {
+			bool validInAnotherState = false;
+			for(auto candidate: { AdcCommand::STATE_PROTOCOL, AdcCommand::STATE_IDENTIFY, AdcCommand::STATE_VERIFY,
+				AdcCommand::STATE_NORMAL, AdcCommand::STATE_DATA })
+			{
+				validInAnotherState = validInAnotherState || command.isValidFor(candidate, AdcCommand::CONTEXT_FROM_HUB);
+			}
+
+			if(validInAnotherState) {
+				dcdebug("ADC command %.4s received in invalid state %d\n", command.getFourCC().c_str(), static_cast<int>(protocolState));
+				AdcCommand error(AdcCommand::SEV_FATAL, AdcCommand::ERROR_BAD_STATE, "Invalid state", AdcCommand::TYPE_HUB);
+				error.addParam("FC", command.getFourCC());
+				send(error);
+				disconnect(false);
+			}
+			return false;
+		}
+
+		if(nextState != protocolState) {
+			if(nextState == AdcCommand::STATE_VERIFY) {
+				state = STATE_VERIFY;
+			} else if(nextState == AdcCommand::STATE_NORMAL) {
+				state = STATE_NORMAL;
+				passwordResponseSent = false;
+			}
+		}
+
+		dispatch(command);
+		return true;
+	} catch(const ParseException&) {
+		dcdebug("Invalid ADC command: %.50s\n", line.c_str());
+		return false;
+	}
+}
+
+void AdcHub::emulateCommand(const string& cmd) {
+	processCommand(cmd);
+}
+
+void AdcHub::sendRawCommand(const string& command) noexcept {
+	string line = command;
+	while(!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+		line.pop_back();
+	}
+	try {
+		AdcCommand parsed(line);
+		send(parsed);
+	} catch(const ParseException&) {
+		dcdebug("Refusing malformed raw ADC command: %.50s\n", line.c_str());
+	}
+}
+
+void AdcHub::send(const AdcCommand& cmd) {
+	AdcCommand::ProtocolState protocolState;
+	if(!getProtocolState(protocolState)) {
+		dcdebug("Refusing ADC command %.4s without an active protocol state\n", cmd.getFourCC().c_str());
+		return;
+	}
+
+	const auto context = cmd.getType() == AdcCommand::TYPE_UDP ? AdcCommand::CONTEXT_UDP : AdcCommand::CONTEXT_TO_HUB;
+	if(!cmd.isValidFor(protocolState, context)) {
+		dcdebug("Refusing invalid or out-of-state ADC command %.4s in state %d\n", cmd.getFourCC().c_str(), static_cast<int>(protocolState));
+		return;
+	}
+
+	if(forbiddenCommands.find(AdcCommand::toFourCC(cmd.getFourCC().c_str())) != forbiddenCommands.end()) {
+		return;
+	}
+	if(cmd.getType() == AdcCommand::TYPE_UDP) {
+		sendUDP(cmd);
+		return;
+	}
+	Client::send(cmd.toString(sid));
 }
 
 void AdcHub::unknownProtocol(uint32_t target, const string& protocol, const string& token) {
@@ -1244,6 +1377,10 @@ void AdcHub::on(Connected c) noexcept {
 
 	lastInfoMap.clear();
 	sid = 0;
+	oldPassword = false;
+	protocolNegotiated = false;
+	passwordResponseSent = false;
+	salt.clear();
 	forbiddenCommands.clear();
 	supportsHBRI = false;
 
@@ -1274,7 +1411,7 @@ void AdcHub::on(Line l, const string& aLine) noexcept {
 	if(PluginManager::getInstance()->runHook(HOOK_NETWORK_HUB_IN, this, aLine))
 		return;
 
-	dispatch(aLine);
+	processCommand(aLine);
 }
 
 void AdcHub::on(Failed f, const string& aLine) noexcept {

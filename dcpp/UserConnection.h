@@ -154,12 +154,12 @@ public:
 	void snd(const string& aType, const string& aName, const int64_t aStart, const int64_t aBytes);
 	void pm(const string& message, bool thirdPerson = false);
 	void pmi(const char* name, const string& value);
-	void send(const AdcCommand& c) { send(c.toString(0, isSet(FLAG_NMDC))); }
+	void send(const AdcCommand& c);
 
 	void setDataMode(int64_t aBytes = -1) { dcassert(socket); socket->setDataMode(aBytes); }
 	void setLineMode(size_t rollback) { dcassert(socket); socket->setLineMode(rollback); }
 
-	void sendRaw(const string& raw) { send(raw); }
+	void sendRaw(const string& raw);
 	void connect(const string& aServer, const string& aPort, const string& localPort, const BufferedSocket::NatRoles natRole, UserPtr user = nullptr);
 	void accept(const Socket& aServer, bool deferHandshake = false);
 	void completeAccept() { dcassert(socket); socket->completeAccept(); }
@@ -254,6 +254,8 @@ private:
 	}
 
 	void onLine(const string& aLine) noexcept;
+	bool getProtocolState(AdcCommand::ProtocolState& protocolState) const noexcept;
+	bool processAdcCommand(const string& line, bool nmdc) noexcept;
 
 	void send(const string& aString);
 
