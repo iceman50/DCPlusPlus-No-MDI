@@ -71,8 +71,10 @@ public:
 	virtual bool waitConnected(uint32_t millis);
 	virtual bool waitAccepted(uint32_t millis);
 
+#ifdef _DEBUG
 	/** True once the underlying TCP connection has completed and TLS setup has begun. */
 	bool hasTLSState() const noexcept { return ssl != nullptr; }
+#endif
 
 private:
 	bool hasPendingRead();

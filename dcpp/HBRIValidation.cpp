@@ -87,6 +87,7 @@ namespace {
 		}
 	}
 
+#ifdef _DEBUG
 	string protocolDebugLine(const string& data) {
 		constexpr size_t MAX_DEBUG_LINE = 2048;
 		const auto lineEnd = data.find_first_of("\r\n");
@@ -117,6 +118,10 @@ namespace {
 		return v6 ? str(dcpp_fmt("[%1%]:%2%") % ip % port) :
 			str(dcpp_fmt("%1%:%2%") % ip % port);
 	}
+#define HBRI_DEBUG(callback, message) reportDebug(callback, message)
+#else
+#define HBRI_DEBUG(callback, message) do { } while(false)
+#endif
 }
 
 HBRIValidator::HBRISocket::HBRISocket(bool aV6, bool secure, const string& bindAddress,
@@ -141,9 +146,10 @@ HBRIValidator::HBRISocket::HBRISocket(bool aV6, bool secure, const string& bindA
 }
 
 bool HBRIValidator::HBRISocket::connect(const string& ip, const string& port) {
-	reportDebug(callback, str(dcpp_fmt("connecting to %1% over %2%") % formatEndpoint(ip, port, v6) %
+	HBRI_DEBUG(callback, str(dcpp_fmt("connecting to %1% over %2%") % formatEndpoint(ip, port, v6) %
 		(v6 ? "IPv6" : "IPv4")));
 
+#ifdef _DEBUG
 	auto connectionStage = [this] {
 		if(!socket->isSecure()) {
 			return string("TCP connection");
@@ -151,15 +157,16 @@ bool HBRIValidator::HBRISocket::connect(const string& ip, const string& port) {
 		return static_cast<const SSLSocket*>(socket.get())->hasTLSState() ?
 			string("TLS handshake") : string("TCP connection");
 	};
+#endif
 
 	try {
 		socket->connect(ip, port);
 	} catch(const Exception& e) {
-		reportDebug(callback, connectionStage() + " failed: " + e.getError());
+		HBRI_DEBUG(callback, connectionStage() + " failed: " + e.getError());
 		throw;
 	}
 
-	reportDebug(callback, socket->isSecure() ?
+	HBRI_DEBUG(callback, socket->isSecure() ?
 		(connectionStage() == "TLS handshake" ? "TCP connected; TLS handshake started" :
 			"TCP connection initiated; waiting for TCP and TLS completion") :
 		"TCP connection initiated; waiting for completion");
@@ -168,18 +175,18 @@ bool HBRIValidator::HBRISocket::connect(const string& ip, const string& port) {
 	while(!stopping.load(std::memory_order_relaxed)) {
 		const auto remaining = timeRemaining(deadline);
 		if(!remaining) {
-			reportDebug(callback, "connection attempt timed out");
+			HBRI_DEBUG(callback, "connection attempt timed out");
 			return false;
 		}
 		try {
 			if(socket->waitConnected(std::min<uint32_t>(remaining, 100))) {
-				reportDebug(callback, str(dcpp_fmt("connected from %1% to %2%") %
+				HBRI_DEBUG(callback, str(dcpp_fmt("connected from %1% to %2%") %
 					formatEndpoint(socket->getLocalIp(), std::to_string(socket->getLocalPort()), v6) %
 					formatEndpoint(socket->getIp(), port, v6)));
 				return true;
 			}
 		} catch(const Exception& e) {
-			reportDebug(callback, connectionStage() + " failed: " + e.getError());
+			HBRI_DEBUG(callback, connectionStage() + " failed: " + e.getError());
 			throw;
 		}
 	}
@@ -190,7 +197,7 @@ void HBRIValidator::HBRISocket::send(const string& data) {
 	if(data.empty() || data.size() > MAX_HBRI_LINE) {
 		throw Exception(invalidResponse());
 	}
-	reportDebug(callback, "[Out] " + protocolDebugLine(data));
+	HBRI_DEBUG(callback, "[Out] " + protocolDebugLine(data));
 	socket->writeAll(data.data(), static_cast<int>(data.size()), static_cast<uint32_t>(HBRI_TIMEOUT));
 }
 
@@ -202,7 +209,7 @@ bool HBRIValidator::HBRISocket::readLine(string& data) {
 	while(!stopping.load(std::memory_order_relaxed)) {
 		const auto remaining = timeRemaining(deadline);
 		if(!remaining) {
-			reportDebug(callback, "timed out waiting for the validation response");
+			HBRI_DEBUG(callback, "timed out waiting for the validation response");
 			return false;
 		}
 
@@ -212,7 +219,7 @@ bool HBRIValidator::HBRISocket::readLine(string& data) {
 
 		const auto bytesRead = socket->read(buffer.data(), static_cast<int>(buffer.size()));
 		if(bytesRead == 0) {
-			reportDebug(callback, "validation endpoint closed the connection before sending a complete response");
+			HBRI_DEBUG(callback, "validation endpoint closed the connection before sending a complete response");
 			return false;
 		}
 		if(bytesRead < 0) {
@@ -230,7 +237,7 @@ bool HBRIValidator::HBRISocket::readLine(string& data) {
 			if(!data.empty() && data.back() == '\r') {
 				data.pop_back();
 			}
-			reportDebug(callback, "[In] " + protocolDebugLine(data));
+			HBRI_DEBUG(callback, "[In] " + protocolDebugLine(data));
 			return true;
 		}
 	}
@@ -273,7 +280,7 @@ bool HBRIValidator::runValidation(const ConnectInfo& connectInfo, const string& 
 	const std::atomic_bool& stopping, const MessageCallback& callback)
 {
 	validateConnectInfo(connectInfo);
-	reportDebug(callback, str(dcpp_fmt("endpoint %1%, secure: %2%, configured bind: %3%") %
+	HBRI_DEBUG(callback, str(dcpp_fmt("endpoint %1%, secure: %2%, configured bind: %3%") %
 		formatEndpoint(connectInfo.ip, connectInfo.port, connectInfo.v6) % (connectInfo.secure ? "yes" : "no") %
 		connectInfo.bindAddress));
 	HBRISocket socket(connectInfo.v6, connectInfo.secure, connectInfo.bindAddress, stopping, callback);
@@ -347,5 +354,7 @@ void HBRIValidator::stopAndWait() noexcept {
 		worker.join();
 	}
 }
+
+#undef HBRI_DEBUG
 
 } // namespace dcpp
