@@ -184,7 +184,7 @@ void SplitterContainer::checkSplitterPos(SplitterPtr splitter) {
 
 void SplitterContainer::onMove() {
 	layout();
-	::RedrawWindow(handle(), nullptr, nullptr,
+	redrawWindow(
 		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 

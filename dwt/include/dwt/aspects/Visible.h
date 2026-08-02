@@ -116,13 +116,12 @@ bool Visible< WidgetType >::getVisible() const
 
 template<class WidgetType>
 void Visible<WidgetType>::redraw(bool now) {
-	::RedrawWindow(H(), NULL, NULL, RDW_ERASE | RDW_INVALIDATE | (now ? RDW_UPDATENOW : 0));
+	W().redrawWindow(RDW_ERASE | RDW_INVALIDATE | (now ? RDW_UPDATENOW : 0));
 }
 
 template<class WidgetType>
 void Visible<WidgetType>::redraw(const Rectangle& r, bool now) {
-	RECT rc = r;
-	::RedrawWindow(H(), &rc, NULL, RDW_ERASE | RDW_INVALIDATE | (now ? RDW_UPDATENOW : 0));
+	W().redrawWindow(r, RDW_ERASE | RDW_INVALIDATE | (now ? RDW_UPDATENOW : 0));
 }
 
 } }

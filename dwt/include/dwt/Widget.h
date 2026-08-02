@@ -89,6 +89,12 @@ public:
 
 	bool postMessage(UINT msg, WPARAM wParam = 0, LPARAM lParam = 0) const;
 
+	/** Invalidates and redraws the widget using the supplied RedrawWindow flags. */
+	bool redrawWindow(UINT flags = RDW_INVALIDATE | RDW_ERASE);
+
+	/** Invalidates and redraws a rectangle in the widget using the supplied RedrawWindow flags. */
+	bool redrawWindow(const Rectangle& rect, UINT flags = RDW_INVALIDATE | RDW_ERASE);
+
 	/// Returns the parent Widget of the Widget
 	/** Most Widgets have got a parent, this function will retrieve a pointer to the
 	  * Widgets parent, if the Widget doesn't have a parent it will return a null

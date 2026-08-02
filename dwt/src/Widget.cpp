@@ -103,6 +103,15 @@ void Widget::setHandle(HWND h) {
 	::SetWindowLongPtr(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(WindowProc::wndProc));
 }
 
+bool Widget::redrawWindow(UINT flags) {
+	return ::RedrawWindow(handle(), nullptr, nullptr, flags) != FALSE;
+}
+
+bool Widget::redrawWindow(const Rectangle& rect, UINT flags) {
+	RECT rc = rect;
+	return ::RedrawWindow(handle(), &rc, nullptr, flags) != FALSE;
+}
+
 Widget* Widget::getRoot() const {
 	return hwnd_cast<Widget*>(::GetAncestor(handle(), GA_ROOT));
 }

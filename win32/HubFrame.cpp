@@ -788,8 +788,7 @@ void HubFrame::showLoginOverlay() {
 	loginOverlay->setVisible(true);
 	loginOverlay->setZOrder(HWND_TOP);
 	layout();
-	::RedrawWindow(loginOverlay->handle(), nullptr, nullptr,
-		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	loginOverlay->redrawWindow(RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 
 	if(loginNick->getText().empty()) {
 		loginNick->setFocus();
