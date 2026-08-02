@@ -436,6 +436,7 @@ bool AdcCommand::isAllowedInState(uint32_t command, ProtocolState state) noexcep
 	case CMD_INF:
 		return state == STATE_IDENTIFY || state == STATE_NORMAL;
 	case CMD_GPA:
+		return true;
 	case CMD_PAS:
 		return state == STATE_VERIFY;
 	case CMD_QUI:

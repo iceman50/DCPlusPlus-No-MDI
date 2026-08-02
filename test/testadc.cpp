@@ -77,6 +77,15 @@ TEST(testadc, enforces_protocol_states_and_contexts)
 	EXPECT_FALSE(pas.isValidFor(AdcCommand::STATE_IDENTIFY, AdcCommand::CONTEXT_TO_HUB));
 	EXPECT_FALSE(pas.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
 
+	AdcCommand gpa(AdcCommand::CMD_GPA, AdcCommand::TYPE_INFO);
+	gpa.addParam("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFG");
+	for(auto state: { AdcCommand::STATE_PROTOCOL, AdcCommand::STATE_IDENTIFY, AdcCommand::STATE_VERIFY,
+		AdcCommand::STATE_NORMAL, AdcCommand::STATE_DATA })
+	{
+		EXPECT_TRUE(gpa.isValidFor(state, AdcCommand::CONTEXT_FROM_HUB));
+	}
+	EXPECT_FALSE(gpa.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
+
 	AdcCommand msg(AdcCommand::CMD_MSG);
 	msg.addParam("hello");
 	EXPECT_TRUE(msg.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_CLIENT));

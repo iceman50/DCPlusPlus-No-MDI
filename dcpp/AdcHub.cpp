@@ -1263,9 +1263,11 @@ bool AdcHub::processCommand(const string& line) noexcept {
 		}
 
 		auto nextState = protocolState;
-		if(protocolState == AdcCommand::STATE_IDENTIFY && command.getCommand() == AdcCommand::CMD_GPA &&
+		if(command.getCommand() == AdcCommand::CMD_GPA &&
 			command.getType() == AdcCommand::TYPE_INFO && command.getFrom() == AdcCommand::HUB_SID)
 		{
+			// Some hubs may issue or repeat an authentication challenge outside the
+			// normal login sequence. Always enter VERIFY before handling a valid IGPA.
 			nextState = AdcCommand::STATE_VERIFY;
 		} else if(protocolState == AdcCommand::STATE_IDENTIFY &&
 			!AdcCommand::isAllowedInState(command.getCommand(), protocolState) &&
