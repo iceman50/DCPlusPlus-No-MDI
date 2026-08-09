@@ -1,6 +1,10 @@
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
+* Accept shorter Base32 ADC password salts used by older hubsofts while rejecting empty and undecodable challenges
+* Add the bundled md4c library for standards-compliant CommonMark and GitHub-style table parsing
+* Add ADC RTF0 CommonMark chat over hubs and CCPM with /rtf sending, safe local rendering, allowed-scheme links, magnet-only attachments, bounded held-file inline images, standards-compliant RichEdit tables, and a globally themed route-aware Markdown builder with live preview and toggleable formatting controls
+* Add route-scoped drag-and-drop temporary shares for RTF0 hubs and CCPM chats with asynchronous hashing, inline-image magnets, exact-TTH upload verification, session limits, and active-share management
+* Consolidate RTF0, drag-and-drop temporary shares, MCN, hashing and defensive protocol controls under Sharing > Experimental with active temporary-share management
 * Add structured System Log severity levels and component areas with colored RichEdit messages, embedded resource icons and configurable styles
-* Route dcdebug diagnostics through release-capable verbose logging with a persistent System Log visibility toggle and separate history quota
 * Accept hub GPA password challenges in every ADC connection state and enter VERIFY before responding
 * Enforce ADC protocol states, message contexts, command syntax and numeric bounds across hub, client-to-client, UDP, user-command and plugin send paths
 * Replace modal hub password prompts with an in-frame login overlay containing nick and masked password fields with Send and Enter submission
