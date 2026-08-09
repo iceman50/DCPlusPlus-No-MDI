@@ -171,6 +171,7 @@ bool SettingsDialog::initDialog() {
 		{
 			HTREEITEM item = addPage(T_("Sharing"), typeid(UploadPage), [container] { return new UploadPage(container); }, IDI_UPLOAD, TVI_ROOT);
 			addPage(T_("Filtering"), typeid(UploadFilteringPage), [container] { return new UploadFilteringPage(container); }, IDI_UPLOAD_FILTERING, item);
+			addPage(T_("Experimental"), typeid(ExperimentalPage), [container] { return new ExperimentalPage(container); }, IDI_EXPERT, item);
 		}
 
 		{
@@ -191,7 +192,6 @@ bool SettingsDialog::initDialog() {
 		{
 			HTREEITEM item = addPage(T_("Advanced"), typeid(AdvancedPage), [container] { return new AdvancedPage(container); }, IDI_ADVANCED, TVI_ROOT);
 			addPage(T_("Experts only"), typeid(ExpertsPage), [container] { return new ExpertsPage(container); }, IDI_EXPERT, item);
-			addPage(T_("Experimental"), typeid(ExperimentalPage), [container] { return new ExperimentalPage(container); }, IDI_EXPERT, item);
 			addPage(T_("User commands"), typeid(UCPage), [container] { return new UCPage(container); }, IDI_USER_OP, item);
 			addPage(T_("Security & certificates"), typeid(CertificatesPage), [container] { return new CertificatesPage(container); }, IDI_SECURE, item);
 			addPage(T_("Search types"), typeid(SearchTypesPage), [container] { return new SearchTypesPage(container); }, IDI_SEARCH, item);

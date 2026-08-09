@@ -28,7 +28,6 @@
 #include <dwt/widgets/Spinner.h>
 
 #include <dcpp/format.h>
-#include <dcpp/HashManager.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/ShareManager.h>
 #include <dcpp/version.h>
@@ -49,7 +48,7 @@ static const ColumnInfo columns[] = {
 };
 
 UploadPage::UploadPage(dwt::Widget* parent) :
-PropPage(parent, 3, 1),
+PropPage(parent, 2, 1),
 directories(0),
 total(0),
 rename(0),
@@ -96,54 +95,7 @@ remove(0)
 	}
 
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Hash database")));
-
-		auto cur = group->addChild(Grid::Seed(4, 1));
-		cur->column(0).mode = GridInfo::FILL;
-		cur->setSpacing(6);
-
-		{
-			auto row = cur->addChild(Grid::Seed(1, 4));
-			row->column(1).size = 60;
-			row->column(1).mode = GridInfo::STATIC;
-			row->column(3).mode = GridInfo::FILL;
-
-			row->addChild(Label::Seed(T_("Write batch size")));
-			TextBoxPtr box = row->addChild(WinUtil::Seeds::Dialog::intTextBox);
-			items.emplace_back(box, SettingsManager::HASH_DB_WRITE_BATCH_SIZE, PropPage::T_INT_WITH_SPIN);
-			auto spin = row->addChild(Spinner::Seed(1, UD_MAXVAL, box));
-			row->setWidget(spin);
-			row->addChild(Label::Seed(T_("statements")));
-		}
-
-		{
-			auto row = cur->addChild(Grid::Seed(1, 2));
-			row->column(0).mode = GridInfo::FILL;
-			auto verify = row->addChild(CheckBox::Seed(T_("Verify hash database on startup")));
-			items.emplace_back(verify, SettingsManager::HASH_DB_VERIFY_STARTUP, PropPage::T_BOOL);
-			auto compact = row->addChild(CheckBox::Seed(T_("Compact hash database after rebuild")));
-			items.emplace_back(compact, SettingsManager::HASH_DB_COMPACT_ON_REBUILD, PropPage::T_BOOL);
-		}
-
-		{
-			auto row = cur->addChild(Grid::Seed(1, 1));
-			row->column(0).mode = GridInfo::FILL;
-			auto cache = row->addChild(CheckBox::Seed(T_("Use cached share tree on startup")));
-			items.emplace_back(cache, SettingsManager::SHARE_CACHE, PropPage::T_BOOL);
-		}
-
-		{
-			auto row = cur->addChild(Grid::Seed(1, 4));
-			row->column(3).mode = GridInfo::FILL;
-			row->addChild(Button::Seed(T_("&Verify")))->onClicked([this] { handleVerifyHashDbClicked(false); });
-			row->addChild(Button::Seed(T_("Full &check")))->onClicked([this] { handleVerifyHashDbClicked(true); });
-			row->addChild(Button::Seed(T_("&Optimize")))->onClicked([this] { handleOptimizeHashDbClicked(); });
-			row->addChild(Button::Seed(T_("&Compact")))->onClicked([this] { handleCompactHashDbClicked(); });
-		}
-	}
-
-	{
-		GridPtr cur = grid->addChild(Grid::Seed(4, 3));
+		GridPtr cur = grid->addChild(Grid::Seed(3, 3));
 		cur->column(0).mode = GridInfo::FILL;
 		cur->column(0).align = GridInfo::BOTTOM_RIGHT;
 		cur->column(1).size = 40;
@@ -156,18 +108,6 @@ remove(0)
 		box->setHelpId(IDH_SETTINGS_UPLOAD_SLOTS);
 
 		auto spin = cur->addChild(Spinner::Seed(1, UD_MAXVAL, box));
-		cur->setWidget(spin);
-		spin->setHelpId(IDH_SETTINGS_UPLOAD_SLOTS);
-
-		cur->addChild(Label::Seed(tstring()));
-
-		cur->addChild(Label::Seed(T_("Maximum connections per user (MCN)")))->setHelpId(IDH_SETTINGS_UPLOAD_SLOTS);
-
-		box = cur->addChild(WinUtil::Seeds::Dialog::intTextBox);
-		items.emplace_back(box, SettingsManager::MAX_MCN_UPLOADS, PropPage::T_INT_WITH_SPIN);
-		box->setHelpId(IDH_SETTINGS_UPLOAD_SLOTS);
-
-		spin = cur->addChild(Spinner::Seed(1, 100, box));
 		cur->setWidget(spin);
 		spin->setHelpId(IDH_SETTINGS_UPLOAD_SLOTS);
 
@@ -307,45 +247,6 @@ void UploadPage::handleRemoveClicked() {
 		ShareManager::getInstance()->removeDirectory(Text::fromT(directories->getText(i, 1)));
 		directories->erase(i);
 		refreshTotalSize();
-	}
-}
-
-void UploadPage::handleVerifyHashDbClicked(bool fullCheck) {
-	try {
-		const auto ok = HashManager::getInstance()->verifyHashStore(fullCheck);
-		dwt::MessageBox(this).show(ok ? T_("Hash database check passed") : T_("Hash database check failed; see the system log for details"),
-			_T(APPNAME) _T(" ") _T(VERSIONSTRING), dwt::MessageBox::BOX_OK,
-			ok ? dwt::MessageBox::BOX_ICONINFORMATION : dwt::MessageBox::BOX_ICONEXCLAMATION);
-	} catch(const Exception& e) {
-		dwt::MessageBox(this).show(Text::toT(e.getError()), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
-	}
-}
-
-void UploadPage::handleOptimizeHashDbClicked() {
-	try {
-		HashManager::getInstance()->optimizeHashStore();
-		dwt::MessageBox(this).show(T_("Hash database optimized"), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONINFORMATION);
-	} catch(const Exception& e) {
-		dwt::MessageBox(this).show(Text::toT(e.getError()), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
-	}
-}
-
-void UploadPage::handleCompactHashDbClicked() {
-	if(dwt::MessageBox(this).show(T_("Compact the hash database now?"), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-		dwt::MessageBox::BOX_YESNO, dwt::MessageBox::BOX_ICONQUESTION) != IDYES) {
-		return;
-	}
-
-	try {
-		HashManager::getInstance()->compactHashStore();
-		dwt::MessageBox(this).show(T_("Hash database compacted"), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONINFORMATION);
-	} catch(const Exception& e) {
-		dwt::MessageBox(this).show(Text::toT(e.getError()), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
 	}
 }
 

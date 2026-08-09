@@ -41,7 +41,6 @@ modifyWhitelistButton(nullptr)
 	grid->column(0).mode = GridInfo::FILL;
 	grid->column(1).mode = GridInfo::FILL;
 
-	addItem(T_("Max hash speed"), SettingsManager::MAX_HASH_SPEED, true, IDH_SETTINGS_EXPERT_MAX_HASH_SPEED, T_("MiB/s"));
 	addItem(T_("Write buffer size"), SettingsManager::BUFFER_SIZE, true, IDH_SETTINGS_EXPERT_BUFFERSIZE, T_("KiB"));
 	addItem(T_("Auto-search limit"), SettingsManager::AUTO_SEARCH_LIMIT, true, IDH_SETTINGS_EXPERT_AUTO_SEARCH_LIMIT);
 	addItem(T_("Auto-search interval"), SettingsManager::AUTO_SEARCH_INTERVAL, true, IDH_SETTINGS_EXPERT_AUTO_SEARCH_INTERVAL, T_("seconds"));

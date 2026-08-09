@@ -47,10 +47,6 @@ private:
 	void handleAddClicked();
 	void handleRenameClicked();
 	void handleRemoveClicked();
-	void handleVerifyHashDbClicked(bool fullCheck);
-	void handleOptimizeHashDbClicked();
-	void handleCompactHashDbClicked();
-
 	void addRow(const string& virtualPath, const string& realPath);
 	void fillList();
 	void refreshTotalSize();

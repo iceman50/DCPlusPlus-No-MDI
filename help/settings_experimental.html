@@ -7,6 +7,52 @@
 </head>
 <body>
 <h1>Experimental</h1>
+<p>This page is located under <em>Sharing</em> and collects experimental sharing, transfer,
+hashing, RTF0, and defensive protocol controls.</p>
+
+<h2>RTF0 and dropped files</h2>
+<dl style="margin-left: 40px;">
+  <dt>Enable ADC RTF0 CommonMark chat</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_ENABLE_RICH_TEXT">Advertise ADC RTF0 support on hubs and direct CCPM connections and render its safe CommonMark dialect. Supporting chats provide the RTF0 editor and drag-and-drop attachments.</dd>
+  <dt>Enable drag-and-drop temporary sharing</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_ENABLE_TEMP_SHARES">Allow files dropped on an RTF0-capable hub or CCPM window to be hashed and exposed by exact TTH for that route. Disabling this prevents new drops and makes existing temporary entries unavailable to transfer while retaining them in the management list until removed or the application exits.</dd>
+  <dt>Insert dropped image files as inline media</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_DROPPED_IMAGES_INLINE">Use RTF0 inline-image syntax for recognized image extensions. When disabled, dropped images are inserted as ordinary attachment links.</dd>
+  <dt>Rich text message size limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_RICH_TEXT_MAX_SIZE">Maximum UTF-8 byte size of an incoming or outgoing ADC RTF0 rich text message. Larger incoming messages are replaced with an omission notice; larger editor drafts cannot be inserted into chat. Minimum: 1024 bytes. Default: 65536 bytes.</dd>
+  <dt>Clickable chat link length limit</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_CHAT_LINK_MAX_LENGTH">Maximum URL or magnet URI length that will be turned into a clickable chat link. Longer links remain visible as plain text. Minimum: 1 character. Default: 256 characters.</dd>
+  <dt>Maximum temporary shares</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARE_LIMIT">Maximum number of drag-and-drop attachments retained for the current application session. Adding another entry removes the oldest entries first. Minimum: 1. Default: 256.</dd>
+  <dt>Active temporary shares</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES">Lists the session-only files currently addressable by exact TTH, including their route and local path. These files never appear in file lists, searches, or share totals. Remove selected entries, clear the full list, or refresh file availability from here.</dd>
+</dl>
+
+<h2>Multi-connection transfers (MCN)</h2>
+<dl style="margin-left: 40px;">
+  <dt>Maximum download connections per user</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MCN_DOWNLOADS">Limits simultaneous ADC MCN1 download connections opened to one user. The remote limit is also respected, and segmented downloading plus MCN1 support are required.</dd>
+  <dt>Maximum upload connections per user</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MCN_UPLOADS">Limits simultaneous ADC MCN1 upload connections accepted from one user. This value is advertised to MCN1-capable peers and does not increase upload slots.</dd>
+</dl>
+
+<h2>Hashing and share database</h2>
+<dl style="margin-left: 40px;">
+  <dt>Maximum hash speed</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_HASH_SPEED">Limits file hashing speed in MiB/s. Zero means unlimited.</dd>
+  <dt>Hash database write batch size</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_HASH_BATCH_SIZE">Number of SQLite hash database row changes grouped into one transaction. Larger values improve bulk hashing throughput; smaller values commit newly hashed files sooner.</dd>
+  <dt>Verify hash database on startup</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_HASH_VERIFY_STARTUP">Runs a quick SQLite integrity check when the hash database opens.</dd>
+  <dt>Compact hash database after rebuild</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_HASH_COMPACT_REBUILD">Compacts SQLite storage after a hash database rebuild.</dd>
+  <dt>Use cached share tree on startup</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_SHARE_CACHE">Loads a validated cached share tree before the background filesystem refresh completes.</dd>
+  <dt>Verify / Full check / Optimize / Compact</dt>
+  <dd>Runs hash database maintenance immediately. Verify uses SQLite quick_check, Full check uses integrity_check, Optimize updates query planning hints, and Compact checkpoints the WAL and reclaims unused space.</dd>
+</dl>
+
+<h2>Protocol resource limits</h2>
 <p>These limits protect DC++ from excessive memory, connection, and packet use. The defaults are
 recommended for normal use. Lower values can reject legitimate traffic; higher values increase
 resource usage and exposure to denial-of-service traffic. Changes apply to new operations without
@@ -34,8 +80,6 @@ restarting DC++.</p>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_SUDP_KEYS">Maximum recent search encryption keys retained for decrypting SUDP results. Oldest keys are discarded first. Minimum: 1. Default: 64.</dd>
   <dt>Generated partial file list limit</dt>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES">Maximum uncompressed XML size generated in response to a partial file-list request. Minimum: 1024 bytes. Default: 67108864 bytes.</dd>
-  <dt>Clickable chat link length limit</dt>
-  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_CHAT_LINK_MAX_LENGTH">Maximum URL or magnet URI length that will be turned into a clickable chat link. Longer links remain visible as plain text. Minimum: 1 character. Default: 256 characters.</dd>
 </dl>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -12,21 +12,32 @@
 
 #include "PropPage.h"
 
-/** Runtime controls for defensive limits that would otherwise require a rebuild.
- * Defaults retain the original constexpr values; deliberately low values may reject
- * legitimate traffic and high values weaken resource-exhaustion protection. */
+/** Experimental sharing, hashing, MCN, RTF0 and defensive protocol controls. */
 class ExperimentalPage : public PropPage
 {
 public:
 	explicit ExperimentalPage(dwt::Widget* parent);
 	virtual ~ExperimentalPage();
 
+	virtual void layout();
 	virtual void write();
 
 private:
-	void addItem(const tstring& text, int setting, unsigned helpId, const tstring& unit);
-
 	ItemList items;
+	TablePtr tempShares;
+	LabelPtr tempSummary;
+	ButtonPtr removeTemp;
+	ButtonPtr clearTemps;
+
+	void addIntItem(GridPtr target, const tstring& text, int setting, unsigned helpId,
+		const tstring& unit, int minimum, int maximum);
+	void fillTempShares();
+	void handleTempSelectionChanged();
+	void handleRemoveTemps();
+	void handleClearTemps();
+	void handleVerifyHashDb(bool fullCheck);
+	void handleOptimizeHashDb();
+	void handleCompactHashDb();
 };
 
-#endif
+#endif // !defined(DCPLUSPLUS_WIN32_EXPERIMENTAL_PAGE_H)
