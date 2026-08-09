@@ -159,10 +159,14 @@ TEST(testadc, validates_adc_grammar_and_numeric_bounds)
 	EXPECT_FALSE(snd.isValidSyntax());
 
 	AdcCommand shortSalt(AdcCommand::CMD_GPA, AdcCommand::TYPE_INFO);
-	shortSalt.addParam("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEF");
-	EXPECT_FALSE(shortSalt.isValidSyntax());
-	shortSalt.getParameters()[0] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFG";
+	shortSalt.addParam("JJWEPPPLCA3PF2ZCRRYO3333");
 	EXPECT_TRUE(shortSalt.isValidFor(AdcCommand::STATE_VERIFY, AdcCommand::CONTEXT_FROM_HUB));
+	shortSalt.getParameters()[0] = "AB";
+	EXPECT_TRUE(shortSalt.isValidSyntax());
+	shortSalt.getParameters()[0] = "A";
+	EXPECT_FALSE(shortSalt.isValidSyntax());
+	shortSalt.getParameters()[0] = "A1";
+	EXPECT_FALSE(shortSalt.isValidSyntax());
 
 	AdcCommand badStatus(AdcCommand::CMD_STA);
 	badStatus.addParam("099").addParam("Invalid success code");

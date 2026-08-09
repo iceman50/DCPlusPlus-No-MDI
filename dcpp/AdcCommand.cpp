@@ -548,7 +548,10 @@ bool AdcCommand::isValidSyntax() const noexcept {
 		return parameters.size() >= 2 && isProtocolName(parameters[0]) && !parameters[1].empty() &&
 			areNamedParams(parameters, 2);
 	case CMD_GPA:
-		return parameters.size() == 1 && parameters[0].size() >= 39 && isBase32(parameters[0]);
+		// The ADC specification calls for at least 24 random bytes, but older
+		// hubsofts (and the specification's own example) use shorter challenges.
+		// Two Base32 characters are the smallest value that decodes to one byte.
+		return parameters.size() == 1 && parameters[0].size() >= 2 && isBase32(parameters[0]);
 	case CMD_PAS:
 		return parameters.size() == 1 && isBase32(parameters[0]);
 	case CMD_QUI:

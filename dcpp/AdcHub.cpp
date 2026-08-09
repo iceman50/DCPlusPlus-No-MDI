@@ -1055,16 +1055,19 @@ void AdcHub::password(const string& pwd) {
 	if(state != STATE_VERIFY)
 		return;
 	if(!salt.empty()) {
-		size_t saltBytes = salt.size() * 5 / 8;
-		std::unique_ptr<uint8_t[]> buf(new uint8_t[saltBytes]);
-		Encoder::fromBase32(salt.c_str(), &buf[0], saltBytes);
+		const size_t saltBytes = salt.size() * 5 / 8;
+		if(saltBytes == 0) {
+			return;
+		}
+		ByteVector buf(saltBytes);
+		Encoder::fromBase32(salt.c_str(), buf.data(), saltBytes);
 		TigerHash th;
 		if(oldPassword) {
 			CID cid = getMyIdentity().getUser()->getCID();
 			th.update(cid.data(), CID::SIZE);
 		}
 		th.update(pwd.data(), pwd.length());
-		th.update(&buf[0], saltBytes);
+		th.update(buf.data(), saltBytes);
 		send(AdcCommand(AdcCommand::CMD_PAS, AdcCommand::TYPE_HUB).addParam(Encoder::toBase32(th.finalize(), TigerHash::BYTES)));
 		passwordResponseSent = true;
 		salt.clear();
