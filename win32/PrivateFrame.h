@@ -84,7 +84,9 @@ public:
 	static void parseWindowParams(TabViewPtr parent, const WindowParams& params);
 	static bool isFavorite(const WindowParams& params);
 
-	void sendMessage(const tstring& msg, bool thirdPerson = false);
+	/** Send a message using the active route. Returns false only when an explicit
+	 * RTF0 message cannot be sent without degrading it to plain markup. */
+	bool sendMessage(const tstring& msg, bool thirdPerson = false, bool explicitRichText = false);
 
 private:
 	enum { TIMER_CPMI_TYPING = 1 };
@@ -134,6 +136,7 @@ private:
 	bool sendPMI(const char* name, const string& value);
 	void updateOnlineStatus(bool newChannel = false);
 	void updateChannel();
+	void updateRichTextAvailability();
 	void startCC(bool silent = false);
 	void closeCC(bool silent = false);
 	void changeHub(const string& hubHint);

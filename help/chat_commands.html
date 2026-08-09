@@ -45,12 +45,17 @@ the message, if one was specified.</dd>
   chat messages from the specified user.</dd>
   <dt><untranslated>/topic</untranslated></dt>
   <dd>Prints the current hub's topic. Useful if you want to copy the topic or it contains a link you'd like to easily open.</dd>
+  <dt><untranslated>/rtf &lt;message&gt;</untranslated></dt>
+  <dd>Sends &lt;message&gt; as CommonMark rich text when the hub has negotiated ADC RTF0. In supporting hubs, the <untranslated>RTF...</untranslated> button opens a Markdown builder with a separate live preview. Links may use HTTP(S), ADC(S), DCHub, or magnet URIs. Attachments and inline media must use an ADC magnet URI containing a TTH and exact size, and the matching file must be available in the share exposed to that hub. Dropping files on the message input hashes them into a session-only, exact-TTH temporary share for that route and inserts their magnet links; recognized image files are inserted as inline media and use their file names as the magnet display name.</dd>
 </dl>
 <h2>Private Message</h2>
 <dl style="margin-left: 40px;">
   <dt><untranslated>/direct</untranslated></dt>
   <dt><untranslated>/encrypted</untranslated></dt>
   <dd>Starts a direct encrypted communication channel to avoid spying on your private messages.</dd>
+  <dt><untranslated>/rtf &lt;message&gt;</untranslated></dt>
+  <dd>Sends &lt;message&gt; as CommonMark ADC RTF0 rich text only when the active hub or direct CCPM connection and the recipient support it. Supporting private-message views show an <untranslated>RTF...</untranslated> button for the live-preview Markdown builder. If RTF0 was not negotiated, the message is left unsent instead of exposing its markup as plain text. Dropping a file on the message input hashes it into a session-only, exact-TTH temporary share for the active route and inserts an attachment or inline-image magnet using the file name as <untranslated>dn</untranslated>. Attachments and inline media must use an ADC magnet URI containing <untranslated>xt=urn:tree:tiger</untranslated> and <untranslated>xl</untranslated>, and the matching file must be available in the share exposed to that hub, for example:<br/>
+  <untranslated>/rtf Look: ![cat](magnet:?xt=urn:tree:tiger:VN6PLQ7ZQGKD3NDBK6ZTZG5PYQXSNMFYVJH4TXA&amp;dn=cat.jpg&amp;xl=204800)</untranslated></dd>
   <dt><untranslated>/getlist</untranslated></dt>
   <dd>Adds the current user's list to the Download Queue.</dd>
   <dt><untranslated>/grant</untranslated></dt>

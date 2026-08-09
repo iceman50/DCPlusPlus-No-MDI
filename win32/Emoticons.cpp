@@ -64,7 +64,8 @@ namespace {
 	}
 
 	bool encodeSourcePng(IWICImagingFactory* factory, IWICBitmapSource* source, int targetHeight,
-		std::vector<unsigned char>& png, UINT& width, UINT& height) {
+		std::vector<unsigned char>& png, UINT& width, UINT& height, int maxWidth = 0,
+		bool allowUpscale = true) {
 		IWICBitmapScaler* scaler = nullptr;
 		IWICFormatConverter* converter = nullptr;
 		IWICBitmapEncoder* encoder = nullptr;
@@ -76,9 +77,21 @@ namespace {
 		do {
 			UINT sourceWidth = 0, sourceHeight = 0;
 			if(FAILED(source->GetSize(&sourceWidth, &sourceHeight)) || !sourceWidth || !sourceHeight) break;
-			height = static_cast<UINT>(std::max(1, targetHeight));
+			// Bound decoder work before asking WIC to materialize pixels. Files outside this envelope stay
+			// as clickable attachments instead of becoming an inline bitmap.
+			if(sourceWidth > 4096 || sourceHeight > 4096 ||
+				static_cast<uint64_t>(sourceWidth) * sourceHeight > 16ULL * 1024 * 1024) break;
+			height = static_cast<UINT>(std::max(1, allowUpscale ? targetHeight :
+				std::min(targetHeight, static_cast<int>(sourceHeight))));
 			const auto scaledWidth = (static_cast<uint64_t>(sourceWidth) * height + sourceHeight / 2) / sourceHeight;
-			width = static_cast<UINT>(std::clamp<uint64_t>(scaledWidth, 1, static_cast<uint64_t>(height) * 4));
+			const auto widthLimit = static_cast<uint64_t>(maxWidth > 0 ? maxWidth : height * 4);
+			if(scaledWidth > widthLimit) {
+				width = static_cast<UINT>(std::max<uint64_t>(1, widthLimit));
+				height = static_cast<UINT>(std::max<uint64_t>(1,
+					(static_cast<uint64_t>(sourceHeight) * width + sourceWidth / 2) / sourceWidth));
+			} else {
+				width = static_cast<UINT>(std::max<uint64_t>(1, scaledWidth));
+			}
 
 			if(FAILED(factory->CreateBitmapScaler(&scaler))) break;
 			if(FAILED(scaler->Initialize(source, width, height, WICBitmapInterpolationModeFant))) break;
@@ -121,7 +134,8 @@ namespace {
 	}
 
 	bool encodePng(const string& path, int targetHeight, int preferredBitDepth,
-		std::vector<unsigned char>& png, UINT& width, UINT& height) {
+		std::vector<unsigned char>& png, UINT& width, UINT& height, int maxWidth = 0,
+		bool allowUpscale = true, bool selectBestFrame = true) {
 		const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 		const bool uninitialize = comResult == S_OK || comResult == S_FALSE;
 		if(FAILED(comResult) && comResult != RPC_E_CHANGED_MODE) return false;
@@ -138,9 +152,10 @@ namespace {
 				WICDecodeMetadataCacheOnLoad, &decoder))) break;
 			UINT frameCount = 0;
 			if(FAILED(decoder->GetFrameCount(&frameCount)) || !frameCount) break;
-			const auto iconDepths = readIconBitDepths(path);
+			const auto iconDepths = selectBestFrame ? readIconBitDepths(path) : std::vector<unsigned>();
 			uint64_t bestScore = UINT64_MAX;
-			for(UINT index = 0; index < frameCount; ++index) {
+			const auto framesToInspect = selectBestFrame ? frameCount : 1U;
+			for(UINT index = 0; index < framesToInspect; ++index) {
 				IWICBitmapFrameDecode* candidate = nullptr;
 				if(FAILED(decoder->GetFrame(index, &candidate))) continue;
 				UINT candidateWidth = 0, candidateHeight = 0;
@@ -166,7 +181,8 @@ namespace {
 				release(candidate);
 			}
 			if(!frame) break;
-			success = encodeSourcePng(factory, frame, targetHeight, png, width, height);
+			success = encodeSourcePng(factory, frame, targetHeight, png, width, height,
+				maxWidth, allowUpscale);
 		} while(false);
 
 		release(frame);
@@ -249,5 +265,34 @@ tstring Emoticons::resourceRtf(unsigned resourceId, int pixels) {
 	if(!encodeResourcePng(resourceId, pixels, png, width, height)) return tstring();
 	auto ret = pngRtf(png, width, height, pixels);
 	if(cache.size() >= 32) cache.erase(cache.begin());
+	return cache.emplace(key, std::move(ret)).first->second;
+}
+
+tstring Emoticons::fileRtf(const std::string& path, int maxPixels) {
+	constexpr int64_t maxEncodedBytes = 8LL * 1024 * 1024;
+	const auto fileSize = File::getSize(path);
+	if(fileSize <= 0 || fileSize > maxEncodedBytes) return tstring();
+	maxPixels = std::clamp(maxPixels, 32, 256);
+
+	uint32_t modified = 0;
+	try {
+		File file(path, File::READ, File::OPEN | File::SHARED);
+		modified = file.getLastModified();
+	} catch(const Exception&) {
+		return tstring();
+	}
+
+	static std::mutex mutex;
+	static std::unordered_map<std::string, tstring> cache;
+	const auto key = path + ':' + std::to_string(fileSize) + ':' + std::to_string(modified) + ':' +
+		std::to_string(maxPixels);
+	std::lock_guard<std::mutex> lock(mutex);
+	if(auto i = cache.find(key); i != cache.end()) return i->second;
+
+	UINT width = 0, height = 0;
+	std::vector<unsigned char> png;
+	if(!encodePng(path, maxPixels, 32, png, width, height, maxPixels, false, false)) return tstring();
+	auto ret = pngRtf(png, width, height, static_cast<int>(height));
+	if(cache.size() >= 16) cache.erase(cache.begin());
 	return cache.emplace(key, std::move(ret)).first->second;
 }

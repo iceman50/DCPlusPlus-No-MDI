@@ -51,8 +51,12 @@ public:
 	virtual void disconnect(bool graceless);
 
 	virtual void connect(const OnlineUser& user, const string& token, ConnectionType type) = 0;
-	virtual void hubMessage(const string& aMessage, bool thirdPerson = false) = 0;
-	virtual void privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson = false, bool echo = true) = 0;
+	virtual void hubMessage(const string& aMessage, bool thirdPerson = false,
+		bool explicitRichText = false) = 0;
+	virtual void privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson = false,
+		bool echo = true, bool explicitRichText = false) = 0;
+	/** Whether this hub route has negotiated support for ADC RTF0 messages. */
+	virtual bool supportsRichText() const noexcept { return false; }
 	virtual void sendUserCmd(const UserCommand& command, const ParamMap& params) = 0;
 	virtual void search(int aSizeMode, int64_t aSize, int aFileType, const string& aString, const string& aToken, const StringList& aExtList, const string& aKey) = 0;
 	virtual void password(const string& pwd) = 0;

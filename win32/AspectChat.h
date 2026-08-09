@@ -20,23 +20,28 @@
 
 #include <dcpp/ChatMessage.h>
 #include <dcpp/File.h>
+#include <dcpp/HashManager.h>
+#include <dcpp/RichText.h>
+#include <dcpp/ShareManager.h>
 #include <dcpp/SimpleXML.h>
 #include <dcpp/Tagger.h>
 #include <dcpp/PluginManager.h>
 #include <dcpp/User.h>
 
 #include <dwt/WidgetCreator.h>
+#include <dwt/widgets/Button.h>
 
 #include <deque>
 #include <memory>
 
 #include "HoldRedraw.h"
 #include "HtmlToRtf.h"
+#include "RichTextEditorDlg.h"
 #include "RichTextBox.h"
 #include "WinUtil.h"
 
 template<typename T>
-class AspectChat {
+class AspectChat : private HashManagerListener {
 	typedef AspectChat<T> ThisType;
 
 	const T& t() const { return *static_cast<const T*>(this); }
@@ -46,11 +51,14 @@ protected:
 	AspectChat() :
 		chat(0),
 		message(0),
+		richTextButton(0),
 		messageLines(1),
 		chatFlushScheduled(false),
 		chatAlive(std::make_shared<bool>(true)),
+		richTextAvailable(false),
 		curCommandPosition(0)
 	{
+		HashManager::getInstance()->addListener(this);
 	}
 
 	void createChat(dwt::Widget *parent) {
@@ -67,6 +75,18 @@ protected:
 			cs.style |= WS_VSCROLL | ES_AUTOVSCROLL | ES_MULTILINE | ES_NOHIDESEL;
 			message = t().addChild(cs);
 			message->onUpdated([this] { this->handleMessageUpdated(); });
+			message->onDragDrop([this](const TStringList& files, dwt::Point) { this->handleDroppedFiles(files); });
+			message->setDragAcceptFiles(false);
+		}
+		t().onDragDrop([this](const TStringList& files, dwt::Point) { this->handleDroppedFiles(files); });
+		t().setDragAcceptFiles(false);
+
+		{
+			auto cs = WinUtil::Seeds::button;
+			cs.caption = T_("RTF...");
+			richTextButton = t().addChild(cs);
+			richTextButton->setVisible(false);
+			richTextButton->onClicked([this] { this->openRichTextEditor(); });
 		}
 
 		t().addAccel(FALT, 'C', [this] { this->chat->setFocus(); });
@@ -77,7 +97,22 @@ protected:
 		t().addAccel(0, VK_F3, [this] { this->findText(true); });
 	}
 
-	virtual ~AspectChat() { *chatAlive = false; }
+	virtual ~AspectChat() {
+		HashManager::getInstance()->removeListener(this);
+		*chatAlive = false;
+	}
+
+	void setRichTextAvailable(bool available, const string& hubUrl) {
+		richTextHubUrl = hubUrl;
+		available = available && SETTING(ENABLE_RICH_TEXT);
+		const auto acceptTempFiles = available && SETTING(ENABLE_RTF_TEMP_SHARES);
+		message->setDragAcceptFiles(acceptTempFiles);
+		t().setDragAcceptFiles(acceptTempFiles);
+		if(richTextAvailable == available) return;
+		richTextAvailable = available;
+		richTextButton->setVisible(available);
+		t().layout();
+	}
 
 	/// add a chat message with some formatting and call addedChat.
 	void addChat(const tstring& message) {
@@ -297,10 +332,134 @@ protected:
 
 	RichTextBox* chat;
 	dwt::TextBoxPtr message;
+	dwt::ButtonPtr richTextButton;
 
 	unsigned messageLines;
 
 private:
+	struct PendingDrop {
+		string realPath;
+		string hubUrl;
+		string name;
+		int64_t size;
+		uint32_t timestamp;
+		bool inlineMedia;
+	};
+
+	static bool isInlineImage(const string& path) {
+		const auto ext = Text::toLower(Util::getFileExt(path));
+		return ext == ".bmp" || ext == ".gif" || ext == ".jpg" || ext == ".jpeg" ||
+			ext == ".png" || ext == ".tif" || ext == ".tiff" || ext == ".webp";
+	}
+
+	void handleDroppedFiles(const TStringList& files) {
+		if(!richTextAvailable || !SETTING(ENABLE_RTF_TEMP_SHARES) || richTextHubUrl.empty()) return;
+
+		for(const auto& fileName: files) {
+			const auto realPath = Text::fromT(fileName);
+			try {
+				File file(realPath, File::READ, File::OPEN | File::SHARED);
+				PendingDrop pending { realPath, richTextHubUrl, Util::getFileName(realPath),
+					file.getSize(), file.getLastModified(),
+					SETTING(RTF_DROPPED_IMAGES_INLINE) && isInlineImage(realPath) };
+				file.close();
+				if(pending.size < 0 || pending.name.empty()) throw FileException("Invalid file");
+
+				{
+					Lock l(pendingDropsCs);
+					pendingDrops.push_back(pending);
+				}
+				const auto tth = HashManager::getInstance()->getTTH(realPath, pending.size, pending.timestamp);
+				if(tth) {
+					completeDroppedFiles(realPath, *tth);
+				} else {
+					t().addStatus(T_("Hashing dropped attachment: ") + Text::toT(pending.name));
+				}
+			} catch(const Exception& e) {
+				t().addStatus(T_("Unable to prepare dropped attachment: ") + Text::toT(e.getError()));
+			}
+		}
+	}
+
+	void on(HashManagerListener::TTHDone, const string& realPath, const TTHValue& tth) noexcept override {
+		try {
+			completeDroppedFiles(realPath, tth);
+		} catch(...) {
+			// Hash notifications must not unwind through the worker thread.
+		}
+	}
+
+	void completeDroppedFiles(const string& realPath, const TTHValue& tth) {
+		vector<PendingDrop> completed;
+		{
+			Lock l(pendingDropsCs);
+			for(auto i = pendingDrops.begin(); i != pendingDrops.end();) {
+				if(Util::stricmp(i->realPath, realPath) == 0) {
+					completed.push_back(std::move(*i));
+					i = pendingDrops.erase(i);
+				} else {
+					++i;
+				}
+			}
+		}
+
+		for(const auto& pending: completed) {
+			const auto shared = ShareManager::getInstance()->addTempShare(pending.realPath,
+				pending.size, pending.timestamp, tth, pending.hubUrl);
+			const auto markdown = shared ? RichText::makeAttachmentMarkdown(
+				pending.name, tth.toBase32(), pending.size, pending.inlineMedia) : string();
+			auto alive = chatAlive;
+			t().callAsync([this, alive, pending, markdown] {
+				if(!*alive) return;
+				if(markdown.empty()) {
+					t().addStatus(T_("The dropped attachment changed or could not be added to the temporary share: ") +
+						Text::toT(pending.name));
+					return;
+				}
+				if(!richTextAvailable || Util::stricmp(richTextHubUrl, pending.hubUrl) != 0) return;
+				insertDroppedAttachment(Text::toT(markdown));
+			});
+		}
+	}
+
+	void insertDroppedAttachment(const tstring& markdown) {
+		auto text = message->getText();
+		const auto text8 = Text::fromT(text);
+		const auto hasCommand = text8.size() >= 4 && Util::strnicmp(text8.c_str(), "/rtf", 4) == 0 &&
+			(text8.size() == 4 || text8[4] == ' ' || text8[4] == '\t' || text8[4] == '\r' || text8[4] == '\n');
+		if(!hasCommand) text = _T("/rtf ") + text;
+		else if(text.size() == 4) text += _T(' ');
+
+		if(text.size() > 5 && !iswspace(text.back())) text += _T("\r\n");
+		text += markdown;
+		message->setText(text);
+		const auto end = static_cast<int>(message->length());
+		message->setSelection(end, end);
+		message->setFocus();
+	}
+
+	void openRichTextEditor() {
+		if(!richTextAvailable) return;
+
+		auto initial = message->getText();
+		const auto initial8 = Text::fromT(initial);
+		if(initial8.size() >= 4 && Util::strnicmp(initial8.c_str(), "/rtf", 4) == 0 &&
+			(initial8.size() == 4 || initial8[4] == ' ' || initial8[4] == '\t'))
+		{
+			size_t content = 4;
+			while(content < initial.size() && (initial[content] == _T(' ') || initial[content] == _T('\t'))) ++content;
+			initial.erase(0, content);
+		}
+
+		RichTextEditorDlg editor(&t(), richTextHubUrl, initial);
+		if(editor.run() != IDOK) return;
+
+		message->setText(_T("/rtf ") + editor.getText());
+		const auto end = static_cast<int>(message->length());
+		message->setSelection(end, end);
+		message->setFocus();
+	}
+
 	void flushChat() {
 		constexpr size_t maxBatchSize = 128;
 		std::vector<RichTextBox::RenderedMessage> batch;
@@ -324,6 +483,10 @@ private:
 	std::deque<RichTextBox::RenderedMessage> pendingChat;
 	bool chatFlushScheduled;
 	std::shared_ptr<bool> chatAlive;
+	bool richTextAvailable;
+	string richTextHubUrl;
+	CriticalSection pendingDropsCs;
+	vector<PendingDrop> pendingDrops;
 
 	TStringList prevCommands;
 	tstring currentCommand;

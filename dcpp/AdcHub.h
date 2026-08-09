@@ -37,8 +37,11 @@ public:
 	virtual void connect(const OnlineUser& user, const string& token, ConnectionType type);
 	void connect(const OnlineUser& user, const string& token, ConnectionType type, bool secure);
 
-	virtual void hubMessage(const string& aMessage, bool thirdPerson = false);
-	virtual void privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson = false, bool echo = true);
+	virtual void hubMessage(const string& aMessage, bool thirdPerson = false,
+		bool explicitRichText = false);
+	virtual void privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson = false,
+		bool echo = true, bool explicitRichText = false);
+	bool supportsRichText() const noexcept override { return supportsRTF0; }
 	virtual void sendUserCmd(const UserCommand& command, const ParamMap& params);
 	virtual void search(int aSizeMode, int64_t aSize, int aFileType, const string& aString, const string& aToken, const StringList& aExtList, const string& aKey = Util::emptyString);
 	virtual void password(const string& pwd);
@@ -74,6 +77,7 @@ public:
 	static const string BLO0_SUPPORT;
 	static const string ZLIF_SUPPORT;
 	static const string HBRI_SUPPORT;
+	static const string RTF0_SUPPORT;
 	static const string SUDP_FEATURE;
 
 private:
@@ -97,6 +101,7 @@ private:
 
 	std::unordered_set<uint32_t> forbiddenCommands;
 	bool supportsHBRI;
+	bool supportsRTF0;
 	std::unique_ptr<HBRIValidator> hbriValidator;
 
 	static const vector<StringList> searchExts;

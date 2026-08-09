@@ -24,6 +24,7 @@
 #include "Magnet.h"
 #include "OnlineUser.h"
 #include "PluginManager.h"
+#include "RichText.h"
 #include "SettingsManager.h"
 #include "SimpleXML.h"
 #include "Tagger.h"
@@ -33,7 +34,7 @@ namespace dcpp {
 
 ChatMessage::ChatMessage(const string& text, OnlineUser* from,
 	const OnlineUser* to, const OnlineUser* replyTo,
-	bool thirdPerson, time_t messageTimestamp) :
+	bool thirdPerson, time_t messageTimestamp, bool richText) :
 from(from->getUser()),
 to(to ? to->getUser() : nullptr),
 replyTo(replyTo ? replyTo->getUser() : nullptr),
@@ -85,20 +86,39 @@ messageTimestamp(messageTimestamp)
 	// The configured own-nickname color intentionally takes precedence over user-match text color.
 	htmlMessage += addSpan(ownMessage ? "ownNick" : "nick", tmp, styleAttr) + " ";
 
-	// Check all '<' and '[' after newlines as they're probably pastes...
+	// Check all '<' and '[' after newlines in plain messages as they're probably
+	// pastes. RTF0 whitespace and markers must reach the CommonMark parser
+	// byte-for-byte after ADC unescaping.
 	tmp = text;
-	size_t i = 0;
-	while((i = tmp.find('\n', i)) != string::npos) {
-		++i;
-		if(i < tmp.size()) {
-			if(tmp[i] == '[' || tmp[i] == '<') {
-				tmp.insert(i, "- ");
-				i += 2;
+	if(!richText) {
+		size_t i = 0;
+		while((i = tmp.find('\n', i)) != string::npos) {
+			++i;
+			if(i < tmp.size()) {
+				if(tmp[i] == '[' || tmp[i] == '<') {
+					tmp.insert(i, "- ");
+					i += 2;
+				}
 			}
 		}
 	}
 
 	message += tmp;
+
+	/* RTF0 is parsed by the client into a trusted semantic vocabulary. Raw
+	HTML and unsafe link targets remain visible text and never reach the display
+	layer as markup. Protocol formatting also takes precedence over local
+	emoticon, mention, link and plugin tag decoration. */
+	if(richText) {
+		auto rich = RichText::parse(tmp,
+			static_cast<size_t>(std::max(1, SETTING(CHAT_LINK_MAX_LENGTH))));
+		if(rich.valid) {
+			htmlMessage += "<span id=\"" + string(ownMessage ? "ownText" : "text") + "\">" +
+				std::move(rich.html) + "</span></span>";
+			PluginManager::getInstance()->onChatDisplay(htmlMessage, from);
+			return;
+		}
+	}
 
 	/* format the message; this will involve adding custom tags. use the Tagger class to that end. */
 	Tagger tags(move(tmp));

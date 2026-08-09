@@ -204,6 +204,7 @@ void FinishedManager::onComplete(Transfer* t, bool upload, bool crc32Checked) {
 					upload ? File::getSize(file) : size,
 					t->getActual(),
 					crc32Checked,
+					t->getTTH().toBase32(),
 					user
 					);
 				map[file] = p;
@@ -215,6 +216,7 @@ void FinishedManager::onComplete(Transfer* t, bool upload, bool crc32Checked) {
 					time,
 					t->getActual(),
 					crc32Checked,
+					t->getTTH().toBase32(),
 					user
 					);
 				// we still dispatch a FinishedFileItem pointer in case previous ones were ignored

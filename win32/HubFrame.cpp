@@ -29,6 +29,7 @@
 #include <dcpp/SearchManager.h>
 #include <dcpp/PluginManager.h>
 #include <dcpp/CryptoManager.h>
+#include <dcpp/RichText.h>
 #include <dcpp/User.h>
 #include <dcpp/UserMatch.h>
 #include <dcpp/version.h>
@@ -207,6 +208,7 @@ tabIcon(IDI_HUB)
 
 	message->setHelpId(IDH_HUB_MESSAGE);
 	addWidget(message, ALWAYS_FOCUS, false);
+	addWidget(richTextButton, AUTO_FOCUS, false);
 	message->onKeyDown([this](int c) { return handleMessageKeyDown(c); });
 	message->onSysKeyDown([this](int c) { return handleMessageKeyDown(c); });
 	message->onChar([this] (int c) { return handleMessageChar(c); });
@@ -331,6 +333,7 @@ tabIcon(IDI_HUB)
 
 	client = ClientManager::getInstance()->getClient(url);
 	client->addListener(this);
+	updateRichTextAvailability();
 	if(connect)
 		client->connect();
 
@@ -385,10 +388,21 @@ void HubFrame::layout() {
 
 	r.size.y -= status->refresh();
 
-	dwt::util::HoldResize hr(this, 3);
+	dwt::util::HoldResize hr(this, 4);
 	int ymessage = message->getTextSize(_T("A")).y * messageLines + 10;
 	dwt::Rectangle rm(0, r.size.y - ymessage, r.width(), ymessage);
-	hr.resize(message, rm);
+	if(richTextButton->getVisible()) {
+		const auto preferred = richTextButton->getPreferredSize();
+		const auto buttonWidth = std::min(preferred.x, std::max(0L, rm.width() / 3));
+		auto messageRect = rm;
+		messageRect.size.x = std::max(0L, rm.width() - buttonWidth - border);
+		hr.resize(message, messageRect);
+		const auto buttonHeight = std::min(preferred.y, rm.height());
+		hr.resize(richTextButton, dwt::Rectangle(messageRect.width() + border,
+			rm.y() + (rm.height() - buttonHeight) / 2, buttonWidth, buttonHeight));
+	} else {
+		hr.resize(message, rm);
+	}
 
 	r.size.y -= rm.size.y + border;
 	hr.resize(paned, r);
@@ -456,6 +470,11 @@ void HubFrame::updateSecureStatus() {
 	status->setToolTip(STATUS_SECURE, text);
 }
 
+void HubFrame::updateRichTextAvailability() {
+	setRichTextAvailable(client && client->isConnected() && client->supportsRichText(),
+		client ? client->getHubUrl() : url);
+}
+
 void HubFrame::initTimer() {
 	setTimer([this] { return runTimer(); }, 500);
 }
@@ -500,6 +519,20 @@ void HubFrame::enterImpl(const tstring& s) {
 		} else if(ChatType::checkCommand(cmd, param, status)) {
 			if(!status.empty()) {
 				addStatus(status);
+			}
+		} else if(Util::stricmp(cmd.c_str(), _T("rtf")) == 0) {
+			if(param.empty()) {
+				addStatus(T_("Usage: /rtf <message>"));
+			} else if(!client->supportsRichText()) {
+				addStatus(T_("RTF0 is disabled or unsupported by this hub. The message was not sent."));
+			} else {
+				auto richMessage = Text::fromT(param);
+				if(!RichText::prepareOutgoingMessage(richMessage, true, client->getHubUrl())) {
+					addStatus(T_("The RTF0 message has no formatting, exceeds the size limit, contains non-magnet inline media, or references an attachment that is not available in this hub's share. It was not sent."));
+					resetText = false;
+				} else {
+					client->hubMessage(richMessage, false, true);
+				}
 			}
 		} else if(Util::stricmp(cmd.c_str(), _T("info")) == 0) {
 			map<tstring, string> info;
@@ -594,7 +627,7 @@ void HubFrame::enterImpl(const tstring& s) {
 						_T(", /join <hub-ip>, /showjoins, /favshowjoins, /close, /userlist, ")
 						_T("/conn[ection], /fav[orite], /removefav[orite], /info, ")
 						_T("/pm <user> [message], /getlist <user>, /ignore <user>, /unignore <user>, ")
-						_T("/log <status, system, downloads, uploads>, /topic")
+						_T("/log <status, system, downloads, uploads>, /rtf <message>, /topic")
 					   );
 			}
 			else
@@ -628,6 +661,8 @@ void HubFrame::enterImpl(const tstring& s) {
 						+ _T("\r\n\t") + T_("Adds a user matching definition (or modifies an existing one, if possible) to stop ignoring chat messages from the specified user.")
 						+ _T("\r\n") _T("/topic")
 						+ _T("\r\n\t") + T_("Prints the current hub's topic. Useful if you want to copy the topic or it contains a link you'd like to easily open.")
+						+ _T("\r\n") _T("/rtf <message>")
+						+ _T("\r\n\t") + T_("Sends CommonMark rich text when this hub has negotiated ADC RTF0. Attachments and inline media must use ADC magnet URIs.")
 
 					);
 			}
@@ -752,6 +787,7 @@ void HubFrame::onConnected() {
 	addStatus(T_("Connected"));
 	setIcon(IDI_HUB);
 	updateSecureStatus();
+	updateRichTextAvailability();
 }
 
 void HubFrame::onDisconnected() {
@@ -761,6 +797,7 @@ void HubFrame::onDisconnected() {
 	clearTaskList();
 	setIcon(IDI_HUB_OFF);
 	updateSecureStatus();
+	updateRichTextAvailability();
 }
 
 void HubFrame::onGetPassword() {
@@ -1188,7 +1225,10 @@ void HubFrame::on(HubUpdated, Client*) noexcept {
 	}
 #endif
 	tstring hubNameT = Text::toT(hubName);
-	callAsync([this, hubNameT] { setText(hubNameT); });
+	callAsync([this, hubNameT] {
+		setText(hubNameT);
+		updateRichTextAvailability();
+	});
 }
 
 void HubFrame::on(Message, Client*, const ChatMessage& message) noexcept {

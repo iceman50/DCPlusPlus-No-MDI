@@ -112,6 +112,8 @@ public:
 	}
 
 	bool isOp(const UserPtr& aUser, const string& aHubUrl) const;
+	/** Whether both the hinted user's hub route and identity advertise RTF0. */
+	bool supportsRichText(const HintedUser& user) const;
 
 	/** Constructs a synthetic, hopefully unique CID */
 	CID makeCid(const string& nick, const string& hubUrl) const noexcept;
@@ -126,7 +128,8 @@ public:
 	void sendUDP(AdcCommand& cmd, const OnlineUser& user, const string& aKey = Util::emptyString);
 
 	void connect(const HintedUser& user, const string& token, ConnectionType type = CONNECTION_TYPE_LAST);
-	void privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo = true);
+	void privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo = true,
+		bool explicitRichText = false);
 	void userCommand(const HintedUser& user, const UserCommand& uc, ParamMap& params, bool compatibility);
 	bool isActive() const;
 

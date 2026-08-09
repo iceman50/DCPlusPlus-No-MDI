@@ -245,3 +245,38 @@ TEST_F(ShareCacheTest, skips_cache_for_unc_share_roots) {
 	EXPECT_FALSE(ShareManager::getInstance()->loadShareCache());
 	EXPECT_EQ(ShareManager::getInstance()->getSharedFiles(), 0U);
 }
+
+TEST_F(ShareCacheTest, temp_shares_are_tth_only_route_scoped_and_not_advertised) {
+	auto sm = ShareManager::getInstance();
+	const auto path = configPath + "dropped photo.jpg";
+	const string contents = "temporary attachment";
+	std::ofstream(path, std::ios::binary) << contents;
+	TigerTree tree(HashManager::MIN_BLOCK_SIZE);
+	tree.update(contents.data(), contents.size());
+	tree.finalize();
+	File file(path, File::READ, File::OPEN | File::SHARED);
+	const auto timestamp = file.getLastModified();
+	file.close();
+	ASSERT_TRUE(HashManager::getInstance()->verifyFileTTH(path, contents.size(), tree.getRoot()));
+	ASSERT_TRUE(sm->addTempShare(path, contents.size(), timestamp, tree.getRoot(), "adc://example.invalid"));
+
+	EXPECT_EQ(sm->getSharedFiles(), 0U);
+	EXPECT_EQ(sm->getShareSize(), 0);
+	EXPECT_TRUE(sm->search("dropped", SearchManager::SIZE_DONTCARE, 0,
+		SearchManager::TYPE_ANY, 10).empty());
+	EXPECT_EQ(sm->toRealWithSize("TTH/" + tree.getRoot().toBase32()),
+		std::make_pair(path, static_cast<int64_t>(contents.size())));
+
+	const string matchingRoute = "ADC://EXAMPLE.INVALID";
+	const string otherRoute = "adc://other.invalid";
+	ASSERT_NE(sm->findTempShare(tree.getRoot(), &matchingRoute), nullptr);
+	EXPECT_EQ(sm->findTempShare(tree.getRoot(), &otherRoute), nullptr);
+	EXPECT_TRUE(sm->isTempShare(tree.getRoot(), path, matchingRoute));
+	EXPECT_FALSE(sm->isTempShare(tree.getRoot(), path, otherRoute));
+	const auto tempShares = sm->getTempShares();
+	ASSERT_EQ(tempShares.size(), 1U);
+	EXPECT_EQ(tempShares.front().realPath, path);
+	EXPECT_FALSE(sm->removeTempShare(path, tree.getRoot(), otherRoute));
+	EXPECT_TRUE(sm->removeTempShare(path, tree.getRoot(), matchingRoute));
+	EXPECT_TRUE(sm->getTempShares().empty());
+}

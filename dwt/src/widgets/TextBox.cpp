@@ -63,7 +63,7 @@ the caret moves inside the box to show where the drop will occur. */
 
 class TextBoxBase::Dropper : public IDropTarget {
 public:
-	Dropper(TextBoxBase* const w) : IDropTarget(), w(w), ref(0), dragging(false) { }
+	Dropper(TextBoxBase* const w) : IDropTarget(), w(w), ref(0), dragging(DROP_NONE) { }
 	virtual ~Dropper() { }
 
 	virtual HRESULT STDMETHODCALLTYPE QueryInterface(
@@ -97,9 +97,12 @@ public:
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
 		if(w->hasStyle(ES_READONLY)) { return S_OK; }
-		FORMATETC formatetc { CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-		dragging = pDataObj->QueryGetData(&formatetc) == S_OK;
-		if(dragging) {
+		FORMATETC files { CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+		FORMATETC text { CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+		const auto acceptsFiles = (::GetWindowLongPtr(w->handle(), GWL_EXSTYLE) & WS_EX_ACCEPTFILES) != 0;
+		dragging = acceptsFiles && pDataObj->QueryGetData(&files) == S_OK ? DROP_FILES :
+			(pDataObj->QueryGetData(&text) == S_OK ? DROP_TEXT : DROP_NONE);
+		if(dragging != DROP_NONE) {
 			w->setFocus(); // focus to display the caret
 			*pdwEffect = DROPEFFECT_COPY;
 		} else {
@@ -113,7 +116,7 @@ public:
 		/* [in] */ POINTL pt,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
-		if(dragging) {
+		if(dragging != DROP_NONE) {
 			moveCaret(pt);
 			*pdwEffect = DROPEFFECT_COPY;
 		} else {
@@ -124,7 +127,7 @@ public:
 
 	virtual HRESULT STDMETHODCALLTYPE DragLeave( void)
 	{
-		dragging = false;
+		dragging = DROP_NONE;
 		return S_OK;
 	}
 
@@ -134,7 +137,32 @@ public:
 		/* [in] */ POINTL pt,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
-		if(dragging) {
+		if(dragging == DROP_FILES) {
+			FORMATETC formatetc { CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+			STGMEDIUM stgmedium;
+			if(pDataObj->GetData(&formatetc, &stgmedium) == S_OK) {
+				if(stgmedium.tymed == TYMED_HGLOBAL && stgmedium.hGlobal) {
+					const auto bytes = ::GlobalSize(stgmedium.hGlobal);
+					auto copy = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+					auto source = ::GlobalLock(stgmedium.hGlobal);
+					auto target = copy ? ::GlobalLock(copy) : nullptr;
+					if(source && target) memcpy(target, source, bytes);
+					if(target) ::GlobalUnlock(copy);
+					if(source) ::GlobalUnlock(stgmedium.hGlobal);
+					::ReleaseStgMedium(&stgmedium);
+					if(source && target) {
+						moveCaret(pt);
+						// The WM_DROPFILES aspect takes ownership of this independent copy.
+						w->sendMessage(WM_DROPFILES, reinterpret_cast<WPARAM>(copy));
+					} else if(copy) {
+						::GlobalFree(copy);
+					}
+				} else {
+					::ReleaseStgMedium(&stgmedium);
+				}
+			}
+			*pdwEffect = DROPEFFECT_COPY;
+		} else if(dragging == DROP_TEXT) {
 			FORMATETC formatetc { CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
 			STGMEDIUM stgmedium;
 			if(pDataObj->GetData(&formatetc, &stgmedium) == S_OK) {
@@ -161,6 +189,8 @@ public:
 	}
 
 private:
+	enum DropType { DROP_NONE, DROP_TEXT, DROP_FILES };
+
 	inline void moveCaret(const POINTL& pt) {
 		auto pos = w->charFromPos(ScreenCoordinate(Point(pt.x, pt.y)));
 		w->setSelection(pos, pos);
@@ -168,7 +198,7 @@ private:
 
 	TextBoxBase* const w;
 	ULONG ref;
-	bool dragging;
+	DropType dragging;
 };
 
 void TextBoxBase::create(const Seed& cs) {

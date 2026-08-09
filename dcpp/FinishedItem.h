@@ -59,6 +59,7 @@ public:
 		int64_t fileSize_,
 		int64_t actual_,
 		bool crc32Checked_,
+		const string& tth_,
 		const HintedUser& user
 		);
 
@@ -68,6 +69,7 @@ public:
 		time_t time_,
 		int64_t actual_,
 		bool crc32Checked_,
+		const string& tth_,
 		const HintedUser& user
 		);
 
@@ -78,6 +80,7 @@ public:
 	GETSET(int64_t, fileSize, FileSize);
 	GETSET(int64_t, actual, Actual);
 	GETSET(bool, crc32Checked, Crc32Checked);
+	GETSET(string, tth, TTH);
 };
 
 class FinishedUserItem : public FinishedItemBase, public intrusive_ptr_base<FinishedUserItem> {

@@ -39,7 +39,7 @@ processing. */
 struct ChatMessage {
 	ChatMessage(const string& text, OnlineUser* from,
 		const OnlineUser* to = nullptr, const OnlineUser* replyTo = nullptr,
-		bool thirdPerson = false, time_t messageTimestamp = 0);
+		bool thirdPerson = false, time_t messageTimestamp = 0, bool richText = false);
 
 	/** Plain text message. */
 	string message;
@@ -59,7 +59,6 @@ struct ChatMessage {
 	bool thirdPerson;
 	/** [ADC only] Time when the message was initially sent. */
 	time_t messageTimestamp;
-
 	/** Store context-agnostic formattings that can be applied to the given message in the tagger.
 	Note that the string may be modified. */
 	static void format(Tagger& tags, string& tmp);

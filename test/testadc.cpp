@@ -39,6 +39,13 @@ TEST(testadc, test_adccommand)
 		AdcCommand(AdcCommand::CMD_CTM, sid2, AdcCommand::TYPE_DIRECT).addParam("param1").addParam("param2").toString(sid));
 	ASSERT_EQ("CPMI TP1\n", AdcCommand(AdcCommand::CMD_PMI).addParam("TP", "1").toString(0));
 
+	const string markdown = "2 \\* 3  \n\nnext";
+	const auto wire = AdcCommand(AdcCommand::CMD_MSG).addParam(markdown).addParam("RT", "1").toString(0);
+	EXPECT_EQ("CMSG 2\\s\\\\*\\s3\\s\\s\\n\\nnext RT1\n", wire);
+	AdcCommand decoded(wire.substr(0, wire.size() - 1));
+	EXPECT_EQ(markdown, decoded.getParam(0));
+	EXPECT_TRUE(decoded.hasFlag("RT", 1));
+
 	AdcCommand pmi("CPMI SN1");
 	ASSERT_TRUE(pmi == AdcCommand::CMD_PMI);
 	ASSERT_TRUE(pmi.hasFlag("SN", 0));
@@ -64,6 +71,9 @@ TEST(testadc, enforces_protocol_states_and_contexts)
 	EXPECT_TRUE(sup.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
 	EXPECT_FALSE(sup.isValidFor(AdcCommand::STATE_IDENTIFY, AdcCommand::CONTEXT_TO_HUB));
 	EXPECT_FALSE(sup.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_FROM_HUB));
+	AdcCommand clientSup(AdcCommand::CMD_SUP);
+	clientSup.addParam("ADBAS0").addParam("ADRTF0");
+	EXPECT_TRUE(clientSup.isValidFor(AdcCommand::STATE_PROTOCOL, AdcCommand::CONTEXT_CLIENT));
 
 	AdcCommand inf(AdcCommand::CMD_INF, AdcCommand::TYPE_BROADCAST);
 	inf.addParam("ID", "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDE");
@@ -87,7 +97,7 @@ TEST(testadc, enforces_protocol_states_and_contexts)
 	EXPECT_FALSE(gpa.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
 
 	AdcCommand msg(AdcCommand::CMD_MSG);
-	msg.addParam("hello");
+	msg.addParam("hello").addParam("RT", "1");
 	EXPECT_TRUE(msg.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_CLIENT));
 	EXPECT_FALSE(msg.isValidFor(AdcCommand::STATE_NORMAL, AdcCommand::CONTEXT_TO_HUB));
 	EXPECT_FALSE(msg.isValidFor(AdcCommand::STATE_DATA, AdcCommand::CONTEXT_CLIENT));
@@ -177,6 +187,10 @@ TEST(testadc, validates_adc_grammar_and_numeric_bounds)
 	EXPECT_FALSE(timestamped.isValidSyntax());
 	timestamped.getParameters()[1] = "PM1234";
 	EXPECT_FALSE(timestamped.isValidSyntax());
+	timestamped.getParameters()[1] = "RT1";
+	EXPECT_TRUE(timestamped.isValidSyntax());
+	timestamped.getParameters()[1] = "RT2";
+	EXPECT_TRUE(timestamped.isValidSyntax());
 
 	AdcCommand userCommand(AdcCommand::CMD_CMD, AdcCommand::TYPE_INFO);
 	userCommand.addParam("Example").addParam("CT", "16");

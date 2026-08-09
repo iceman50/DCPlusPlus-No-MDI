@@ -782,7 +782,7 @@ void NmdcHub::revConnectToMe(const OnlineUser& aUser) {
 	send("$RevConnectToMe " + fromUtf8(getMyNick()) + " " + fromUtf8(aUser.getIdentity().getNick()) + "|");
 }
 
-void NmdcHub::hubMessage(const string& aMessage, bool thirdPerson) {
+void NmdcHub::hubMessage(const string& aMessage, bool thirdPerson, bool /*explicitRichText*/) {
 	checkstate();
 	if(!PluginManager::getInstance()->runHook(HOOK_CHAT_OUT, this, aMessage))
 		send(fromUtf8( "<" + getMyNick() + "> " + escape(thirdPerson ? "/me " + aMessage : aMessage) + "|" ) );
@@ -913,7 +913,9 @@ void NmdcHub::privateMessage(const string& nick, const string& message) {
 	send("$To: " + fromUtf8(nick) + " From: " + fromUtf8(getMyNick()) + " $" + fromUtf8(escape("<" + getMyNick() + "> " + message)) + "|");
 }
 
-void NmdcHub::privateMessage(const OnlineUser& aUser, const string& aMessage, bool /*thirdPerson*/, bool echo) {
+void NmdcHub::privateMessage(const OnlineUser& aUser, const string& aMessage, bool /*thirdPerson*/, bool echo,
+	bool /*explicitRichText*/)
+{
 	checkstate();
 
 	privateMessage(aUser.getIdentity().getNick(), aMessage);

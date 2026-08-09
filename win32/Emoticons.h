@@ -26,6 +26,9 @@ public:
 
 	/** Render an icon compiled into the application resources as a self-contained RTF PNG. */
 	static dcpp::tstring resourceRtf(unsigned resourceId, int pixels);
+
+	/** Decode a local raster image, scale it into a square bounding box and return RTF PNG data. */
+	static dcpp::tstring fileRtf(const std::string& path, int maxPixels);
 };
 
 #endif

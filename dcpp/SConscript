@@ -11,6 +11,8 @@ dev.add_dcpp(env)
 dev.add_intl(env)
 dev.add_openssl(env)
 
+env.Append(CPPPATH=["#/md4c"])
+
 env.Append(CPPDEFINES=["BUILDING_DCPP=1"])
 
 headers = dev.get_sources(source_path, "*.h")

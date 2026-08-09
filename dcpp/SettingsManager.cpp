@@ -100,7 +100,7 @@ const string SettingsManager::settingTags[] =
 	"MaxQueuedProtocolData", "MaxConcurrentConnections", "FloodWindow",
 	"GlobalWindow", "GlobalLimit", "PeerLimit", "PeerWindow", "MaxTrackedPeers",
 	"MaxSUDPPacket", "MaxSUDPKeys", "MaxPartialListBytes", "HashDbWriteBatchSize",
-	"ChatLinkMaxLength",
+	"ChatLinkMaxLength", "RichTextMaxSize", "RTFTempShareLimit",
 	"SENTRY",
 	// Bools
 	"AddFinishedInstantly", "AdlsBreakOnFirst",
@@ -109,7 +109,7 @@ const string SettingsManager::settingTags[] =
 	"AutoSearchAutoMatch", "AutoDropAll", "AutoDropDisconnect", "AutoDropFilelists",
 	"AwayCompLock", "AwayTimeStamp", "BoldFinishedDownloads", "BoldFinishedUploads", "BoldFL",
 	"BoldHub", "BoldPm", "BoldQueue", "BoldSearch", "BoldSystemLog", "ClearSearch",
-	"ClickableChatLinks", "EnableEmoticons",
+	"ClickableChatLinks", "EnableRichText", "EnableEmoticons",
 	"CompressTransfers", "ConfirmADLSRemoval", "ConfirmExit", "ConfirmHubClosing",
 	"ConfirmHubRemoval", "ConfirmItemRemoval", "ConfirmUserRemoval", "DcextRegister",
 	"DontDlAlreadyQueued", "DontDLAlreadyShared", "EnableCCPM", "FavShowJoins",
@@ -129,7 +129,7 @@ const string SettingsManager::settingTags[] =
 	"UsersFilterFavorite", "UsersFilterOnline", "UsersFilterQueue", "UsersFilterWaiting",
 	"RegisterSystemStartup", "DontLogCCPMChat", "AboutCfgDisclaimer", "EnableTaskbarPreview",
 	"EnableSUDP", "BroadDetection", "BroadDetection6", "HashDbVerifyStartup", "HashDbCompactOnRebuild",
-	"ShareCache", "ShowSystemLogDebug",
+	"ShareCache", "EnableRTFTempShares", "RTFDroppedImagesInline",
 	"SENTRY",
 	// Int64
 	"TotalUpload", "TotalDownload", "SharingSkiplistMinSize", "SharingSkiplistMaxSize",
@@ -199,6 +199,7 @@ SettingsManager::SettingsManager() {
 	setDefault(AUTO_FOLLOW, true);
 	setDefault(CLEAR_SEARCH, true);
 	setDefault(CLICKABLE_CHAT_LINKS, true);
+	setDefault(ENABLE_RICH_TEXT, true);
 	setDefault(ENABLE_EMOTICONS, true);
 	setDefault(EMOTICON_PACK, Util::emptyString);
 	setDefault(EMOTICON_SIZE, 16);
@@ -235,11 +236,14 @@ SettingsManager::SettingsManager() {
 	setDefault(MAX_PARTIAL_LIST_BYTES, 64 * 1024 * 1024);
 	setDefault(HASH_DB_WRITE_BATCH_SIZE, 256);
 	setDefault(CHAT_LINK_MAX_LENGTH, 256);
+	setDefault(RICH_TEXT_MAX_SIZE, 64 * 1024);
+	setDefault(RTF_TEMP_SHARE_LIMIT, 256);
 	setDefault(MAX_DOWNLOAD_SPEED, 0);
 	setDefault(HASH_DB_VERIFY_STARTUP, false);
 	setDefault(HASH_DB_COMPACT_ON_REBUILD, false);
 	setDefault(SHARE_CACHE, true);
-	setDefault(SHOW_SYSTEM_LOG_DEBUG, false);
+	setDefault(ENABLE_RTF_TEMP_SHARES, true);
+	setDefault(RTF_DROPPED_IMAGES_INLINE, true);
 	setDefault(LOG_DIRECTORY, Util::getPath(Util::PATH_USER_LOCAL) + "Logs" PATH_SEPARATOR_STR);
 	setDefault(LOG_UPLOADS, false);
 	setDefault(LOG_DOWNLOADS, false);

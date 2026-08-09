@@ -68,6 +68,14 @@ class ShareManager : public Singleton<ShareManager>, private SettingsManagerList
 	private HashManagerListener, private QueueManagerListener
 {
 public:
+	struct TempShareInfo {
+		string realPath;
+		string hubUrl;
+		TTHValue tth;
+		int64_t size;
+		uint32_t timestamp;
+	};
+
 	/**
 	 * @param aDirectory Physical directory location
 	 * @param aName Virtual name
@@ -79,6 +87,14 @@ public:
 	string toVirtual(const TTHValue& tth) const;
 	string toVirtual(const TTHValue& tth, const string& hubUrl) const;
 	optional<TTHValue> getTTHFromReal(const string& realPath) noexcept;
+	/** Register a transient, TTH-only file for one chat route. Temporary files
+	 * are uploadable by exact TTH but never appear in file lists or searches. */
+	bool addTempShare(const string& realPath, int64_t size, uint32_t timestamp,
+		const TTHValue& tth, const string& hubUrl) noexcept;
+	bool isTempShare(const TTHValue& tth, const string& realPath, const string& hubUrl) const noexcept;
+	vector<TempShareInfo> getTempShares() const;
+	bool removeTempShare(const string& realPath, const TTHValue& tth, const string& hubUrl) noexcept;
+	size_t clearTempShares() noexcept;
 	string toReal(const string& virtualFile);
 	string toReal(const string& virtualFile, const string& hubUrl);
 	/** @return Actual file path & size. Returns 0 for file lists. */
@@ -302,6 +318,8 @@ private:
 
 	unordered_map<TTHValue, const Directory::File*> tthIndex;
 
+	vector<TempShareInfo> tempShares;
+
 	BloomFilter<5> bloom;
 
 	std::list<StringMatch> cachedFilterSkiplistRegEx;
@@ -309,6 +327,7 @@ private:
 	std::list<StringMatch> cachedFilterSkiplistPaths;
 
 	const Directory::File& findFile(const string& virtualFile) const;
+	const TempShareInfo* findTempShare(const TTHValue& tth, const string* hubUrl = nullptr) const noexcept;
 	ShareAccess getShareAccess(const string& hubUrl) const;
 	bool isVirtualAllowed(const string& virtualName, const ShareAccess& access) const;
 	bool isFileAllowed(const Directory::File& file, const ShareAccess& access) const;

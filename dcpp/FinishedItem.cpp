@@ -56,12 +56,14 @@ FinishedFileItem::FinishedFileItem(
 	int64_t fileSize_,
 	int64_t actual_,
 	bool crc32Checked_,
+	const string& tth_,
 	const HintedUser& user
 	) :
 FinishedItemBase(transferred_, milliSeconds_, time_),
 fileSize(fileSize_),
 actual(actual_),
-crc32Checked(crc32Checked_)
+crc32Checked(crc32Checked_),
+tth(tth_)
 {
 	users.push_back(user);
 }
@@ -72,6 +74,7 @@ void FinishedFileItem::update(
 	time_t time_,
 	int64_t actual_,
 	bool crc32Checked_,
+	const string& tth_,
 	const HintedUser& user
 	)
 {
@@ -81,6 +84,7 @@ void FinishedFileItem::update(
 	
 	if(crc32Checked_)
 		crc32Checked = true;
+	tth = tth_;
 
 	auto i = find(users.begin(), users.end(), user);
 	if(i == users.end())

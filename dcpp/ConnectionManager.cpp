@@ -710,6 +710,8 @@ void ConnectionManager::on(AdcCommand::SUP, UserConnection* aSource, const AdcCo
 				aSource->setFlag(UserConnection::FLAG_SUPPORTS_CPMI);
 			} else if(feat == UserConnection::FEATURE_ADC_MCN1) {
 				aSource->setFlag(UserConnection::FLAG_SUPPORTS_MCN1);
+			} else if(feat == UserConnection::FEATURE_ADC_RTF0) {
+				aSource->setFlag(UserConnection::FLAG_SUPPORTS_RTF0);
 			}
 		}
 	}
@@ -724,6 +726,9 @@ void ConnectionManager::on(AdcCommand::SUP, UserConnection* aSource, const AdcCo
 		StringList defFeatures = adcFeatures;
 		if(SETTING(COMPRESS_TRANSFERS)) {
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ZLIB_GET);
+		}
+		if(SETTING(ENABLE_RICH_TEXT)) {
+			defFeatures.push_back("AD" + UserConnection::FEATURE_ADC_RTF0);
 		}
 		aSource->sup(defFeatures);
 		aSource->setState(UserConnection::STATE_INF);
@@ -746,6 +751,9 @@ void ConnectionManager::on(UserConnectionListener::Connected, UserConnection* aS
 		StringList defFeatures = adcFeatures;
 		if(SETTING(COMPRESS_TRANSFERS)) {
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ZLIB_GET);
+		}
+		if(SETTING(ENABLE_RICH_TEXT)) {
+			defFeatures.push_back("AD" + UserConnection::FEATURE_ADC_RTF0);
 		}
 		aSource->sup(defFeatures);
 		aSource->send(AdcCommand(AdcCommand::SEV_SUCCESS, AdcCommand::SUCCESS, "Referrer").addParam("RF", aSource->getHubUrl()));

@@ -211,6 +211,8 @@ string ShareManager::toVirtual(const TTHValue& tth) const {
 	auto i = tthIndex.find(tth);
 	if(i != tthIndex.end()) {
 		return i->second->getADCPath();
+	} else if(findTempShare(tth)) {
+		return "TTH/" + tth.toBase32();
 	} else {
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
@@ -270,6 +272,7 @@ string ShareManager::toVirtual(const TTHValue& tth, const string& hubUrl) const 
 	if(i != tthIndex.end() && isFileAllowed(*i->second, access)) {
 		return i->second->getADCPath();
 	}
+	if(findTempShare(tth, &hubUrl)) return "TTH/" + tth.toBase32();
 	throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 }
 
@@ -292,7 +295,15 @@ pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile) {
 		return make_pair(getBZXmlFile(), 0);
 	}
 
-	auto f = findFile(virtualFile);
+	if(virtualFile.compare(0, 4, "TTH/") == 0) {
+		const TTHValue tth(virtualFile.substr(4));
+		auto i = tthIndex.find(tth);
+		if(i != tthIndex.end()) return make_pair(i->second->getRealPath(), i->second->getSize());
+		if(const auto temp = findTempShare(tth)) return make_pair(temp->realPath, temp->size);
+		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+	}
+
+	auto& f = findFile(virtualFile);
 	return make_pair(f.getRealPath(), f.getSize());
 }
 
@@ -304,10 +315,18 @@ pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile, co
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
 
-	auto& f = findFile(virtualFile);
-	if(!isFileAllowed(f, access)) {
+	if(virtualFile.compare(0, 4, "TTH/") == 0) {
+		const TTHValue tth(virtualFile.substr(4));
+		auto i = tthIndex.find(tth);
+		if(i != tthIndex.end() && isFileAllowed(*i->second, access)) {
+			return make_pair(i->second->getRealPath(), i->second->getSize());
+		}
+		if(const auto temp = findTempShare(tth, &hubUrl)) return make_pair(temp->realPath, temp->size);
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
+
+	auto& f = findFile(virtualFile);
+	if(!isFileAllowed(f, access)) throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	return make_pair(f.getRealPath(), f.getSize());
 }
 
@@ -368,6 +387,15 @@ StringList ShareManager::getRealPaths(const TTHValue& tth, const string& hubUrl)
 	for(const auto& dir: directories) {
 		collect(*dir.second);
 	}
+	for(const auto& temp: tempShares) {
+		if(temp.tth == tth && Util::stricmp(temp.hubUrl, hubUrl) == 0 &&
+			std::none_of(ret.begin(), ret.end(), [&temp](const string& path) {
+				return Util::stricmp(path, temp.realPath) == 0;
+			}))
+		{
+			ret.push_back(temp.realPath);
+		}
+	}
 
 	return ret;
 }
@@ -381,6 +409,68 @@ optional<TTHValue> ShareManager::getTTHFromReal(const string& realPath) noexcept
 	return nullopt;
 }
 
+bool ShareManager::addTempShare(const string& realPath, int64_t size, uint32_t timestamp,
+	const TTHValue& tth, const string& hubUrl) noexcept
+{
+	if(!SETTING(ENABLE_RTF_TEMP_SHARES) || realPath.empty() || hubUrl.empty() || size < 0) return false;
+	try {
+		File file(realPath, File::READ, File::OPEN | File::SHARED);
+		if(file.getSize() != size || file.getLastModified() != timestamp) return false;
+		file.close();
+		const auto current = HashManager::getInstance()->getTTH(realPath, size, timestamp);
+		if(!current || *current != tth) return false;
+	} catch(...) {
+		return false;
+	}
+
+	Lock l(cs);
+	auto existing = std::find_if(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
+		return item.tth == tth && Util::stricmp(item.hubUrl, hubUrl) == 0;
+	});
+	if(existing != tempShares.end()) {
+		*existing = { realPath, hubUrl, tth, size, timestamp };
+	} else {
+		const auto maxTempShares = static_cast<size_t>(std::max(1, SETTING(RTF_TEMP_SHARE_LIMIT)));
+		while(tempShares.size() >= maxTempShares) tempShares.erase(tempShares.begin());
+		tempShares.push_back({ realPath, hubUrl, tth, size, timestamp });
+	}
+	return true;
+}
+
+bool ShareManager::isTempShare(const TTHValue& tth, const string& realPath,
+	const string& hubUrl) const noexcept
+{
+	Lock l(cs);
+	return std::any_of(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
+		return item.tth == tth && Util::stricmp(item.realPath, realPath) == 0 &&
+			Util::stricmp(item.hubUrl, hubUrl) == 0;
+	});
+}
+
+vector<ShareManager::TempShareInfo> ShareManager::getTempShares() const {
+	Lock l(cs);
+	return tempShares;
+}
+
+bool ShareManager::removeTempShare(const string& realPath, const TTHValue& tth,
+	const string& hubUrl) noexcept
+{
+	Lock l(cs);
+	const auto oldSize = tempShares.size();
+	tempShares.erase(std::remove_if(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
+		return item.tth == tth && Util::stricmp(item.realPath, realPath) == 0 &&
+			Util::stricmp(item.hubUrl, hubUrl) == 0;
+	}), tempShares.end());
+	return tempShares.size() != oldSize;
+}
+
+size_t ShareManager::clearTempShares() noexcept {
+	Lock l(cs);
+	const auto count = tempShares.size();
+	tempShares.clear();
+	return count;
+}
+
 optional<TTHValue> ShareManager::getTTH(const string& virtualFile) const {
 	Lock l(cs);
 	if(virtualFile == Transfer::USER_LIST_NAME_BZ) {
@@ -389,16 +479,25 @@ optional<TTHValue> ShareManager::getTTH(const string& virtualFile) const {
 		return xmlRoot;
 	}
 
+	if(virtualFile.compare(0, 4, "TTH/") == 0) {
+		const TTHValue tth(virtualFile.substr(4));
+		if(tthIndex.find(tth) != tthIndex.end() || findTempShare(tth)) return tth;
+		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
+	}
 	return findFile(virtualFile).tth;
 }
 
 optional<TTHValue> ShareManager::getTTH(const string& virtualFile, const string& hubUrl) const {
 	auto access = getShareAccess(hubUrl);
 	Lock l(cs);
-	auto& file = findFile(virtualFile);
-	if(!isFileAllowed(file, access)) {
+	if(virtualFile.compare(0, 4, "TTH/") == 0) {
+		const TTHValue tth(virtualFile.substr(4));
+		auto i = tthIndex.find(tth);
+		if((i != tthIndex.end() && isFileAllowed(*i->second, access)) || findTempShare(tth, &hubUrl)) return tth;
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
+	auto& file = findFile(virtualFile);
+	if(!isFileAllowed(file, access)) throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	return file.tth;
 }
 
@@ -470,6 +569,13 @@ AdcCommand ShareManager::getFileInfo(const string& aFile) {
 	Lock l(cs);
 	auto i = tthIndex.find(val);
 	if(i == tthIndex.end()) {
+		if(const auto temp = findTempShare(val)) {
+			AdcCommand cmd(AdcCommand::CMD_RES);
+			cmd.addParam("FN", aFile);
+			cmd.addParam("SI", Util::toString(temp->size));
+			cmd.addParam("TR", val.toBase32());
+			return cmd;
+		}
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
 
@@ -508,6 +614,13 @@ AdcCommand ShareManager::getFileInfo(const string& aFile, const string& hubUrl) 
 	Lock l(cs);
 	auto i = tthIndex.find(val);
 	if(i == tthIndex.end() || !isFileAllowed(*i->second, access)) {
+		if(const auto temp = findTempShare(val, &hubUrl)) {
+			AdcCommand cmd(AdcCommand::CMD_RES);
+			cmd.addParam("FN", aFile);
+			cmd.addParam("SI", Util::toString(temp->size));
+			cmd.addParam("TR", val.toBase32());
+			return cmd;
+		}
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
 
@@ -563,6 +676,16 @@ const ShareManager::Directory::File& ShareManager::findFile(const string& virtua
 	if(it == v.first->files.end())
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	return *it;
+}
+
+const ShareManager::TempShareInfo* ShareManager::findTempShare(const TTHValue& tth,
+	const string* hubUrl) const noexcept
+{
+	if(!SETTING(ENABLE_RTF_TEMP_SHARES)) return nullptr;
+	for(auto i = tempShares.rbegin(); i != tempShares.rend(); ++i) {
+		if(i->tth == tth && (!hubUrl || Util::stricmp(i->hubUrl, *hubUrl) == 0)) return &*i;
+	}
+	return nullptr;
 }
 
 string ShareManager::validateVirtual(const string& aVirt) const noexcept {

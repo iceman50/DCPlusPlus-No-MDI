@@ -206,6 +206,7 @@ private:
 	pair<tstring, tstring> getStatusShared() const;
 	void updateStatus();
 	void updateSecureStatus();
+	void updateRichTextAvailability();
 
 	void initTimer();
 	bool runTimer();

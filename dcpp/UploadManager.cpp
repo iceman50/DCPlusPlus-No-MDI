@@ -73,6 +73,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	std::unique_ptr<MemoryInputStream> preparedList;
 	optional<TTHValue> requestedRoot;
 	int64_t expectedFileSize = -1;
+	bool verifyTempShare = false;
 
 	try {
 		if(aType == Transfer::names[Transfer::TYPE_FILE]) {
@@ -98,6 +99,8 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				// active, the path is treated as a candidate until its bytes prove the TTH.
 				if(aFile.compare(0, 4, "TTH/") == 0) {
 					requestedRoot = TTHValue(aFile.substr(4));
+					verifyTempShare = ShareManager::getInstance()->isTempShare(
+						*requestedRoot, sourceFile, aSource.getHubUrl());
 				} else {
 					requestedRoot = ShareManager::getInstance()->getTTH(aFile, aSource.getHubUrl());
 				}
@@ -215,10 +218,13 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 		switch(type) {
 		case Transfer::TYPE_FILE:
 			{
-				// While refreshing, cached share paths may be stale; verify bytes before serving.
-				if(ShareManager::getInstance()->isRefreshing()) {
+				// Refresh candidates and session-only attachments must prove their TTH before serving.
+				const auto refreshing = ShareManager::getInstance()->isRefreshing();
+				if(refreshing || verifyTempShare) {
 					if(!verifyUploadPath()) {
-						return queueRefreshRetry();
+						if(refreshing) return queueRefreshRetry();
+						aSource.fileNotAvail("Temporary attachment is no longer available");
+						return false;
 					}
 				}
 

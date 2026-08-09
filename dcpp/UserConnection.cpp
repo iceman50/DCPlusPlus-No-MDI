@@ -23,6 +23,7 @@
 #include "ClientManager.h"
 #include "format.h"
 #include "PluginManager.h"
+#include "RichText.h"
 #include "SettingsManager.h"
 #include "StringTokenizer.h"
 #include "Transfer.h"
@@ -41,6 +42,7 @@ const string UserConnection::FEATURE_ADC_BZIP = "BZIP";
 const string UserConnection::FEATURE_ADC_TIGR = "TIGR";
 const string UserConnection::FEATURE_ADC_CPMI = "CPMI";
 const string UserConnection::FEATURE_ADC_MCN1 = "MCN1";
+const string UserConnection::FEATURE_ADC_RTF0 = "RTF0";
 
 const string UserConnection::FILE_NOT_AVAILABLE = "File Not Available";
 
@@ -206,7 +208,7 @@ void UserConnection::snd(const string& aType, const string& aName, const int64_t
 	send(AdcCommand(AdcCommand::CMD_SND).addParam(aType).addParam(aName).addParam(Util::toString(aStart)).addParam(Util::toString(aBytes)));
 }
 
-void UserConnection::pm(const string& message, bool thirdPerson) {
+void UserConnection::pm(const string& message, bool thirdPerson, bool explicitRichText) {
 	{
 		auto lock = ClientManager::getInstance()->lock();
 		auto ou = ClientManager::getInstance()->findOnlineUserHint(getHintedUser());
@@ -215,10 +217,18 @@ void UserConnection::pm(const string& message, bool thirdPerson) {
 			return;
 	}
 
+	string preparedMessage = message;
+	const bool richText = supportsRTF0() &&
+		RichText::prepareOutgoingMessage(preparedMessage, explicitRichText, getHubUrl());
+	if(explicitRichText && !richText)
+		return;
+
 	AdcCommand c(AdcCommand::CMD_MSG);
-	c.addParam(message);
+	c.addParam(preparedMessage);
 	if(thirdPerson)
 		c.addParam("ME", "1");
+	if(richText)
+		c.addParam("RT", "1");
 	send(c);
 
 	// simulate an echo message.
@@ -347,6 +357,8 @@ void UserConnection::handle(AdcCommand::STA t, const AdcCommand& c) {
 
 void UserConnection::handlePM(const AdcCommand& c, bool echo) noexcept {
 	auto message = c.getParam(0);
+	const bool richText = RichText::prepareIncomingMessage(message,
+		supportsRTF0() && c.hasFlag("RT", 1));
 
 	auto cm = ClientManager::getInstance();
 	auto lock = cm->lock();
@@ -366,7 +378,7 @@ void UserConnection::handlePM(const AdcCommand& c, bool echo) noexcept {
 
 	string tmp;
 	fire(UserConnectionListener::PrivateMessage(), this, ChatMessage(message, peer, me, peer,
-		c.hasFlag("ME", 1), c.getParam("TS", 1, tmp) ? Util::toInt64(tmp) : 0));
+		c.hasFlag("ME", 1), c.getParam("TS", 1, tmp) ? Util::toInt64(tmp) : 0, richText));
 }
 
 void UserConnection::on(Connected) noexcept {

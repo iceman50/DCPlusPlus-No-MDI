@@ -34,6 +34,7 @@
 #include "ThrottleManager.h"
 #include "UploadManager.h"
 #include "PluginManager.h"
+#include "RichText.h"
 #include "UserCommand.h"
 #include "Util.h"
 #include "version.h"
@@ -62,11 +63,12 @@ const string AdcHub::UCM0_SUPPORT("ADUCM0");
 const string AdcHub::BLO0_SUPPORT("ADBLO0");
 const string AdcHub::ZLIF_SUPPORT("ADZLIF");
 const string AdcHub::HBRI_SUPPORT("ADHBRI");
+const string AdcHub::RTF0_SUPPORT("ADRTF0");
 
 const vector<StringList> AdcHub::searchExts;
 
 AdcHub::AdcHub(const string& aHubURL, bool secure) :
-	Client(aHubURL, '\n', secure), oldPassword(false), protocolNegotiated(false), passwordResponseSent(false), udp(Socket::TYPE_UDP), sid(0), supportsHBRI(false) {
+	Client(aHubURL, '\n', secure), oldPassword(false), protocolNegotiated(false), passwordResponseSent(false), udp(Socket::TYPE_UDP), sid(0), supportsHBRI(false), supportsRTF0(false) {
 	TimerManager::getInstance()->addListener(this);
 }
 
@@ -240,6 +242,7 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 	bool baseOk = false;
 	bool tigrOk = false;
 	bool hbriChanged = false;
+	bool rtfChanged = false;
 	for(auto& i: c.getParameters()) {
 		if(i == BAS0_SUPPORT) {
 			baseOk = true;
@@ -254,12 +257,21 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 		} else if(i == "RMHBRI") {
 			hbriChanged = hbriChanged || supportsHBRI;
 			supportsHBRI = false;
+		} else if(i == RTF0_SUPPORT) {
+			const auto enabled = SETTING(ENABLE_RICH_TEXT);
+			rtfChanged = rtfChanged || supportsRTF0 != enabled;
+			supportsRTF0 = enabled;
+		} else if(i == "RMRTF0") {
+			rtfChanged = rtfChanged || supportsRTF0;
+			supportsRTF0 = false;
 		}
 	}
 
 	if(!protocolNegotiation) {
 		if(hbriChanged) {
 			infoImpl();
+		}
+		if(hbriChanged || rtfChanged) {
 			fire(ClientListener::HubUpdated(), this);
 		}
 		return;
@@ -311,6 +323,8 @@ void AdcHub::handle(AdcCommand::MSG, AdcCommand& c) noexcept {
 
 	string temp;
 	string chatMessage = c.getParam(0);
+	const bool richText = RichText::prepareIncomingMessage(chatMessage,
+		supportsRTF0 && c.hasFlag("RT", 1));
 	if(c.getParam("PM", 1, temp)) { // add PM<group-cid> as well
 
 		to = findUser(c.getTo());
@@ -327,7 +341,7 @@ void AdcHub::handle(AdcCommand::MSG, AdcCommand& c) noexcept {
 		return;
 
 	fire(ClientListener::Message(), this, ChatMessage(chatMessage, from, to, replyTo, c.hasFlag("ME", 1),
-		c.getParam("TS", 1, temp) ? Util::toInt64(temp) : 0));
+		c.getParam("TS", 1, temp) ? Util::toInt64(temp) : 0, richText));
 }
 
 void AdcHub::handle(AdcCommand::GPA, AdcCommand& c) noexcept {
@@ -843,34 +857,50 @@ void AdcHub::connect(const OnlineUser& user, const string& token, ConnectionType
 	}
 }
 
-void AdcHub::hubMessage(const string& aMessage, bool thirdPerson) {
+void AdcHub::hubMessage(const string& aMessage, bool thirdPerson, bool explicitRichText) {
 	if(state != STATE_NORMAL)
 		return;
 
-	if(PluginManager::getInstance()->runHook(HOOK_CHAT_OUT, this, aMessage))
+	string message = aMessage;
+	if(PluginManager::getInstance()->runHook(HOOK_CHAT_OUT, this, message))
+		return;
+	const bool richText = supportsRTF0 && RichText::prepareOutgoingMessage(message, explicitRichText, getHubUrl());
+	if(explicitRichText && !richText)
 		return;
 
 	AdcCommand c(AdcCommand::CMD_MSG, AdcCommand::TYPE_BROADCAST);
-	c.addParam(aMessage);
+	c.addParam(message);
 	if(thirdPerson)
 		c.addParam("ME", "1");
+	if(richText)
+		c.addParam("RT", "1");
 	send(c);
 }
 
-void AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson, bool echo) {
+void AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson, bool echo,
+	bool explicitRichText)
+{
 	if(state != STATE_NORMAL)
 		return;
+	string message = aMessage;
+	const bool richText = supportsRTF0 && user.getIdentity().supports("RTF0") &&
+		RichText::prepareOutgoingMessage(message, explicitRichText, getHubUrl());
+	if(explicitRichText && !richText)
+		return;
+
 	AdcCommand c(AdcCommand::CMD_MSG, user.getIdentity().getSID(), echo ? AdcCommand::TYPE_ECHO : AdcCommand::TYPE_DIRECT);
-	c.addParam(aMessage);
+	c.addParam(message);
 	if(thirdPerson)
 		c.addParam("ME", "1");
+	if(richText)
+		c.addParam("RT", "1");
 	c.addParam("PM", getMySID());
 	send(c);
 
 	if(!echo) {
 		auto me = findUser(sid);
-		if(me && !PluginManager::getInstance()->runHook(HOOK_CHAT_PM_IN, me, aMessage)) {
-			fire(ClientListener::Message(), this, ChatMessage(aMessage, me, &user, me, thirdPerson));
+		if(me && !PluginManager::getInstance()->runHook(HOOK_CHAT_PM_IN, me, message)) {
+			fire(ClientListener::Message(), this, ChatMessage(message, me, &user, me, thirdPerson, 0, richText));
 		}
 	}
 }
@@ -1194,6 +1224,9 @@ void AdcHub::infoImpl() {
 	if(SETTING(ENABLE_SUDP) && isSecure()) {
 		su += "," + SUDP_FEATURE;
 	}
+	if(SETTING(ENABLE_RICH_TEXT)) {
+		su += ",RTF0";
+	}
 
 	const auto connectivity = getAdvertisedConnectivity(sock->isV6Valid(),
 		get(HubSettings::Connection) != SettingsManager::INCOMING_DISABLED,
@@ -1389,6 +1422,7 @@ void AdcHub::on(Connected c) noexcept {
 	salt.clear();
 	forbiddenCommands.clear();
 	supportsHBRI = false;
+	supportsRTF0 = false;
 
 	AdcCommand cmd(AdcCommand::CMD_SUP, AdcCommand::TYPE_HUB);
 	cmd.addParam(BAS0_SUPPORT).addParam(BASE_SUPPORT).addParam(TIGR_SUPPORT);
@@ -1402,6 +1436,9 @@ void AdcHub::on(Connected c) noexcept {
 	
 	cmd.addParam(ZLIF_SUPPORT);
 	cmd.addParam(HBRI_SUPPORT);
+	if(SETTING(ENABLE_RICH_TEXT)) {
+		cmd.addParam(RTF0_SUPPORT);
+	}
 	
 	send(cmd);
 }

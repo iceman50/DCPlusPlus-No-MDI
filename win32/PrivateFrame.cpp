@@ -30,6 +30,7 @@
 #include <dcpp/LogManager.h>
 #include <dcpp/PluginManager.h>
 #include <dcpp/PrivateChatManager.h>
+#include <dcpp/RichText.h>
 #include <dcpp/User.h>
 #include <dcpp/UserConnection.h>
 #include <dcpp/WindowInfo.h>
@@ -312,6 +313,7 @@ lastMessageTime(time(NULL))
 
 	message->setHelpId(IDH_PM_MESSAGE);
 	addWidget(message, ALWAYS_FOCUS);
+	addWidget(richTextButton, AUTO_FOCUS, false);
 	message->onKeyDown([this](int c) { return handleMessageKeyDown(c); });
 	message->onSysKeyDown([this](int c) { return handleMessageKeyDown(c); });
 	message->onChar([this](int c) { return handleMessageChar(c); });
@@ -495,7 +497,18 @@ void PrivateFrame::layout() {
 
 	int ymessage = message->getTextSize(_T("A")).y * messageLines + 10;
 	dwt::Rectangle rm(0, r.size.y - ymessage, r.width(), ymessage);
-	message->resize(rm);
+	if(richTextButton->getVisible()) {
+		const auto preferred = richTextButton->getPreferredSize();
+		const auto buttonWidth = std::min(preferred.x, std::max(0L, rm.width() / 3));
+		auto messageRect = rm;
+		messageRect.size.x = std::max(0L, rm.width() - buttonWidth - border);
+		message->resize(messageRect);
+		const auto buttonHeight = std::min(preferred.y, rm.height());
+		richTextButton->resize(dwt::Rectangle(messageRect.width() + border,
+			rm.y() + (rm.height() - buttonHeight) / 2, buttonWidth, buttonHeight));
+	} else {
+		message->resize(rm);
+	}
 
 	r.size.y -= rm.size.y + border;
 	chat->resize(r);
@@ -538,12 +551,37 @@ void PrivateFrame::updateOnlineStatus(bool newChannel) {
 			startCC(true);
 		}
 	}
+
+	updateRichTextAvailability();
 }
 
 void PrivateFrame::updateChannel() {
 	auto channel = ccReady() ? T_("Direct encrypted channel") : WinUtil::getHubName(replyTo.getUser());
 	dwt::util::cutStr(channel, 26);
 	status->setText(STATUS_CHANNEL, channel, true);
+}
+
+void PrivateFrame::updateRichTextAvailability() {
+	bool directRoute = false;
+	bool available = false;
+	auto routeHubUrl = replyTo.getUser().hint;
+	{
+		Lock lifetimeLock(connLifetimeMutex);
+		UserConnection* activeConn;
+		{
+			Lock l(mutex);
+			activeConn = conn.load();
+		}
+		if(activeConn && activeConn->getState() == UserConnection::STATE_CMD && activeConn->isSecure()) {
+			directRoute = true;
+			available = activeConn->supportsRTF0();
+			routeHubUrl = activeConn->getHubUrl();
+		}
+	}
+	if(!directRoute) {
+		available = ClientManager::getInstance()->supportsRichText(replyTo.getUser());
+	}
+	setRichTextAvailable(available, routeHubUrl);
 }
 
 void PrivateFrame::startCC(bool silent) {
@@ -799,6 +837,18 @@ void PrivateFrame::enterImpl(const tstring& s) {
 			if(!status.empty()) {
 				addStatus(status);
 			}
+		} else if(Util::stricmp(cmd.c_str(), _T("rtf")) == 0) {
+			if(param.empty()) {
+				addStatus(T_("Usage: /rtf <message>"));
+			} else if(online || ccReady()) {
+				if(!sendMessage(param, false, true)) {
+					addStatus(T_("RTF0 is unsupported or invalid, contains non-magnet inline media, or references an attachment that is not available in this hub's share. The message was not sent."));
+					resetText = false;
+				}
+			} else {
+				this->message->showPopup(T_("User offline"), T_("The message cannot be delivered because the user is offline."), TTI_ERROR);
+				resetText = false;
+			}
 		} else if(Util::stricmp(cmd.c_str(), _T("grant")) == 0) {
 			handleGrantSlot();
 			addStatus(T_("Slot granted"));
@@ -826,7 +876,7 @@ void PrivateFrame::enterImpl(const tstring& s) {
 			{
 				addChat(T_("*** Keyboard commands:") + _T("\r\n") + 
 						WinUtil::commands + 
-						_T(", /direct, /encrypted, /getlist, /grant, /close, /favorite, /ignore, /unignore, /log <system, downloads, uploads>, /lastmessage")
+						_T(", /direct, /encrypted, /rtf <message>, /getlist, /grant, /close, /favorite, /ignore, /unignore, /log <system, downloads, uploads>, /lastmessage")
 						);
 			}
 			else
@@ -836,6 +886,8 @@ void PrivateFrame::enterImpl(const tstring& s) {
 						+ _T("\r\n") _T("/direct")
 						+ _T("\r\n") _T("/encrypted")
 						+ _T("\r\n\t") + T_("Starts a direct encrypted communication channel to avoid spying on your private messages.")
+						+ _T("\r\n") _T("/rtf <message>")
+						+ _T("\r\n\t") + T_("Sends a CommonMark ADC RTF0 message only when the active route and recipient support it. Unsupported messages are left unsent. Attachments and inline media must use an ADC magnet URI containing a TTH and exact size, and the matching file must be available in the share exposed to that hub.")
 						+ _T("\r\n") _T("/getlist")
 						+ _T("\r\n\t") + T_("Adds the current user's list to the Download Queue.")
 						+ _T("\r\n") _T("/grant")
@@ -875,8 +927,15 @@ void PrivateFrame::enterImpl(const tstring& s) {
 	}
 }
 
-void PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson) {
+bool PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson, bool explicitRichText) {
 	auto msg8 = Text::fromT(msg);
+	if(explicitRichText && !SETTING(ENABLE_RICH_TEXT)) {
+		return false;
+	}
+	if(explicitRichText) {
+		auto checked = msg8;
+		if(!RichText::prepareOutgoingMessage(checked, true, replyTo.getUser().hint)) return false;
+	}
 
 	{
 		Lock lifetimeLock(connLifetimeMutex);
@@ -886,12 +945,20 @@ void PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson) {
 			activeConn = conn.load();
 		}
 		if(activeConn && activeConn->getState() == UserConnection::STATE_CMD && activeConn->isSecure()) {
-			activeConn->pm(msg8, thirdPerson);
-			return;
+			if(explicitRichText && !activeConn->supportsRTF0()) {
+				return false;
+			}
+			activeConn->pm(msg8, thirdPerson, explicitRichText);
+			return true;
 		}
 	}
 
-	ClientManager::getInstance()->privateMessage(replyTo.getUser(), msg8, thirdPerson, replyTo.getUser().user->isNMDC());
+	if(explicitRichText && !ClientManager::getInstance()->supportsRichText(replyTo.getUser())) {
+		return false;
+	}
+	ClientManager::getInstance()->privateMessage(replyTo.getUser(), msg8, thirdPerson,
+		replyTo.getUser().user->isNMDC(), explicitRichText);
+	return true;
 }
 
 PrivateFrame::UserInfoList PrivateFrame::selectedUsersImpl() {

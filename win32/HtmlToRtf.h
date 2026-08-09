@@ -23,8 +23,7 @@
 #include <dwt/forward.h>
 
 /** Convert an HTML string to an RTF string, suitable for insertion within a Rich Edit control.
-Only simple HTML tags (those that are marked as "phrasing content" in the HTML5 spec) are
-supported. */
+Simple HTML phrasing content and the trusted semantic elements generated for RTF0 are supported. */
 class HtmlToRtf {
 public:
 	static tstring convert(const string& html, dwt::RichTextBox* box);

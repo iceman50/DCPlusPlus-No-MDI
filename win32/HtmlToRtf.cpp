@@ -28,9 +28,16 @@
 #include <unordered_map>
 
 #include <dcpp/debug.h>
+#include <dcpp/File.h>
+#include <dcpp/FinishedItem.h>
+#include <dcpp/FinishedManager.h>
 #include <dcpp/Flags.h>
+#include <dcpp/MerkleTree.h>
+#include <dcpp/QueueManager.h>
+#include <dcpp/RichText.h>
 #include <dcpp/ScopedFunctor.h>
 #include <dcpp/SettingsManager.h>
+#include <dcpp/ShareManager.h>
 #include <dcpp/SimpleXML.h>
 #include <dcpp/StringTokenizer.h>
 #include <dcpp/Text.h>
@@ -54,6 +61,40 @@ namespace {
 		trimInPlace(s);
 		return s;
 	}
+
+	tstring inlineMediaRtf(const string& uri) {
+		RichText::Attachment attachment;
+		if(!RichText::parseMagnetUri(uri,
+			static_cast<size_t>(std::max(1, SETTING(CHAT_LINK_MAX_LENGTH))), attachment)) return tstring();
+
+		StringList paths;
+		try {
+			const auto shared = ShareManager::getInstance()->toRealWithSize("TTH/" + attachment.tth);
+			if(shared.second == attachment.size) paths.push_back(shared.first);
+		} catch(const Exception&) {
+		}
+
+		const TTHValue tth(attachment.tth);
+		for(auto& target: QueueManager::getInstance()->getTargets(tth)) {
+			if(File::getSize(target) == attachment.size &&
+				std::find(paths.begin(), paths.end(), target) == paths.end()) paths.push_back(std::move(target));
+		}
+		{
+			auto lock = FinishedManager::getInstance()->lock();
+			for(const auto& item: FinishedManager::getInstance()->getMapByFile(false)) {
+				if(item.second->isFull() && item.second->getFileSize() == attachment.size &&
+					item.second->getTTH() == attachment.tth &&
+					std::find(paths.begin(), paths.end(), item.first) == paths.end()) paths.push_back(item.first);
+			}
+		}
+
+		for(const auto& path: paths) {
+			if(File::getSize(path) != attachment.size) continue;
+			auto image = Emoticons::fileRtf(path, 256);
+			if(!image.empty()) return image;
+		}
+		return tstring();
+	}
 }
 
 struct Parser : SimpleXMLReader::CallBack {
@@ -65,12 +106,15 @@ struct Parser : SimpleXMLReader::CallBack {
 
 private:
 	struct Context : Flags {
-		enum { Bold = 1 << 0, Italic = 1 << 1, Underlined = 1 << 2 };
+		enum { Bold = 1 << 0, Italic = 1 << 1, Underlined = 1 << 2, Strike = 1 << 3 };
 		size_t font; // index in the "fonts" table
 		int fontSize;
 		size_t textColor; // index in the "colors" table
 		size_t bgColor; // index in the "colors" table
 		string link;
+		string semanticId;
+
+		int alignment; // 0 = inherited, 1 = left, 2 = center, 3 = right
 
 		Context(dwt::RichTextBox* box, Parser& parser);
 
@@ -100,8 +144,11 @@ private:
 	vector<COLORREF> colorValues;
 
 	vector<Context> contexts;
+	size_t tableColumns = 0;
+	int tableWidthTwips = 0;
 	unsigned suppressDepth = 0;
 	vector<bool> emoticonSuppressions;
+	vector<bool> inlineMediaSuppressions;
 };
 
 tstring HtmlToRtf::convert(const string& html, dwt::RichTextBox* box) {
@@ -114,10 +161,23 @@ tstring HtmlToRtf::convert(const string& html, dwt::RichTextBox* box) {
 Parser::Parser(dwt::RichTextBox* box) {
 	// create a default context with the Rich Edit control's current formatting.
 	contexts.emplace_back(box, *this);
+	const auto width = std::max(1L, box->getClientSize().x);
+	tableWidthTwips = std::clamp(static_cast<int>(width * 15.0 / dwt::util::dpiFactor()), 1440, 30000);
 }
 
 void Parser::startTag(const string& name_, StringPairList& attribs, bool simple) {
 	auto name = trimCopy(name_);
+	if(name == "rtfimage") {
+		auto image = inlineMediaRtf(getAttrib(attribs, "src", 0));
+		const bool rendered = !image.empty();
+		if(rendered) ret += std::move(image);
+		if(!simple) {
+			inlineMediaSuppressions.push_back(rendered);
+			if(rendered) ++suppressDepth;
+		}
+		return;
+	}
+
 	if(name == "resourceicon") {
 		const auto resourceId = Util::toInt(getAttrib(attribs, "id", 0));
 		if(resourceId > 0)
@@ -154,9 +214,30 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 	}
 
 	contexts.push_back(contexts.back());
+	// The outer anchor owns the RTF field. Child formatting groups inherit its underline/color,
+	// but opening nested HYPERLINK fields makes RichEdit split punctuation at group boundaries.
+	contexts.back().link.clear();
+	const auto semanticId = getAttrib(attribs, "id", 0);
+	contexts.back().semanticId = semanticId;
 	ScopedFunctor([this] { ret += contexts.back().getBegin(); });
 
-	const auto preserveConfiguredColor = applySemanticStyle(contexts.back(), getAttrib(attribs, "id", 0));
+	const auto preserveConfiguredColor = applySemanticStyle(contexts.back(), semanticId);
+
+	if(semanticId == "rtfTable") {
+		tableColumns = std::clamp(static_cast<size_t>(std::max(1, Util::toInt(getAttrib(attribs, "columns", 0)))),
+			static_cast<size_t>(1), static_cast<size_t>(32));
+		if(!ret.empty()) ret += _T("\\par\n");
+	} else if(semanticId == "rtfTableRow") {
+		const auto columns = std::max<size_t>(1, tableColumns);
+		string row = "\\trowd\\trgaph60\\trleft0";
+		for(size_t i = 0; i < columns; ++i) {
+			row += "\\cellx" + std::to_string(tableWidthTwips * static_cast<int>(i + 1) /
+				static_cast<int>(columns));
+		}
+		ret += Text::toT(row + "\n");
+	} else if(semanticId == "rtfTableHeader" || semanticId == "rtfTableCell") {
+		ret += _T("\\pard\\intbl ");
+	}
 
 	if(name == "b") {
 		contexts.back().setFlag(Context::Bold);
@@ -199,6 +280,9 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 			else if(property == "text-decoration") parseDecoration(value);
 			else if(property == "font-weight" && (value == "bold" || Util::toInt(value) >= FW_BOLD)) contexts.back().setFlag(Context::Bold);
 			else if(property == "font-style" && value == "italic") contexts.back().setFlag(Context::Italic);
+			else if(property == "text-align") {
+				contexts.back().alignment = value == "right" ? 3 : value == "center" ? 2 : 1;
+			}
 		}
 		begin = end + 1;
 	}
@@ -215,7 +299,15 @@ void Parser::data(const string& data) {
 }
 
 void Parser::endTag(const string& name) {
-	if(trimCopy(name) == "emoticon") {
+	const auto trimmedName = trimCopy(name);
+	if(trimmedName == "rtfimage") {
+		if(!inlineMediaSuppressions.empty()) {
+			if(inlineMediaSuppressions.back() && suppressDepth) --suppressDepth;
+			inlineMediaSuppressions.pop_back();
+		}
+		return;
+	}
+	if(trimmedName == "emoticon") {
 		if(!emoticonSuppressions.empty()) {
 			if(emoticonSuppressions.back() && suppressDepth) --suppressDepth;
 			emoticonSuppressions.pop_back();
@@ -223,8 +315,17 @@ void Parser::endTag(const string& name) {
 		return;
 	}
 	if(contexts.size() <= 1) return;
+	const auto semanticId = contexts.back().semanticId;
 	ret += contexts.back().getEnd();
 	contexts.pop_back();
+	if(semanticId == "rtfTableHeader" || semanticId == "rtfTableCell") {
+		ret += _T("\\cell\n");
+	} else if(semanticId == "rtfTableRow") {
+		ret += _T("\\row\n");
+	} else if(semanticId == "rtfTable") {
+		ret += _T("\\pard\\par\n");
+		tableColumns = 0;
+	}
 }
 
 tstring Parser::finalize() {
@@ -242,6 +343,7 @@ Parser::Context::Context(dwt::RichTextBox* box, Parser& parser) {
 
 	textColor = parser.addColor(box->getTextColor());
 	bgColor = parser.addColor(box->getBgColor());
+	alignment = 0;
 }
 
 tstring Parser::Context::getBegin() const {
@@ -260,9 +362,13 @@ tstring Parser::Context::getBegin() const {
 
 	ret += "\\f" + std::to_string(font) + "\\fs" + std::to_string(fontSize) +
 		"\\cf" + std::to_string(textColor) + "\\highlight" + std::to_string(bgColor);
+	if(alignment == 1) { ret += "\\ql"; }
+	else if(alignment == 2) { ret += "\\qc"; }
+	else if(alignment == 3) { ret += "\\qr"; }
 	if(isSet(Bold)) { ret += "\\b"; }
 	if(isSet(Italic)) { ret += "\\i"; }
 	if(isSet(Underlined)) { ret += "\\ul"; }
+	if(isSet(Strike)) { ret += "\\strike"; }
 
 	ret += " ";
 
@@ -271,7 +377,7 @@ tstring Parser::Context::getBegin() const {
 		ret += "{\\v  }";
 
 		// Throw the link before its label when in the Wine workaround...
-		if(!SETTING(CLICKABLE_CHAT_LINKS)) { ret += "<" + link + "> "; }
+		if(!SETTING(CLICKABLE_CHAT_LINKS)) { ret += "<" + Text::fromT(rtfEscape(link)) + "> "; }
 	}
 
 	return Text::toT(ret);
@@ -368,6 +474,20 @@ bool Parser::applySemanticStyle(Context& context, const string& id) {
 		applyConfiguredStyle(context, SettingsManager::LOG_FONT,
 			SettingsManager::SYSTEM_LOG_AREA_COLOR, SettingsManager::LOG_BG_COLOR);
 		context.setFlag(Context::Bold);
+	} else if(id == "rtfStrike") {
+		context.setFlag(Context::Strike);
+	} else if(id == "rtfCode") {
+		context.font = addFont("\\fmodern Consolas");
+	} else if(id == "rtfQuote") {
+		context.setFlag(Context::Italic);
+	} else if(id == "rtfTableHeader") {
+		context.setFlag(Context::Bold);
+	} else if(id.compare(0, 10, "rtfHeading") == 0 && id.size() == 11 &&
+		id[10] >= '1' && id[10] <= '6')
+	{
+		context.setFlag(Context::Bold);
+		const int percentages[] = { 0, 160, 145, 130, 120, 110, 100 };
+		context.fontSize = std::max(1, context.fontSize * percentages[id[10] - '0'] / 100);
 	}
 	return id == "systemLogVerbose" || id == "systemLogInfo" || id == "systemLogWarning" ||
 		id == "systemLogError" || id == "systemLogArea";

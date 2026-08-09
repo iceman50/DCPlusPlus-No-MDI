@@ -77,11 +77,12 @@ public:
 			HDROP handle = reinterpret_cast<HDROP>(msg.wParam);
 			if(handle) {
 				UINT iFiles = ::DragQueryFile(handle, 0xFFFFFFFF, 0, 0);
-				TCHAR pFilename[MAX_PATH];
 				for(UINT i = 0; i < iFiles; ++i) {
-					memset(pFilename, 0, MAX_PATH * sizeof(TCHAR));
-					::DragQueryFile(handle, i, pFilename, MAX_PATH);
-					files.push_back(pFilename);
+					const auto length = ::DragQueryFile(handle, i, nullptr, 0);
+					std::vector<TCHAR> fileName(static_cast<size_t>(length) + 1, 0);
+					if(::DragQueryFile(handle, i, fileName.data(), length + 1)) {
+						files.emplace_back(fileName.data(), length);
+					}
 				}
 				::DragQueryPoint(handle, &pt);
 				::DragFinish(handle);

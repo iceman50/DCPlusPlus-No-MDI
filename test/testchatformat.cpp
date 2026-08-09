@@ -4,6 +4,7 @@
 #include <dcpp/EmoticonManager.h>
 #include <dcpp/File.h>
 #include <dcpp/SettingsManager.h>
+#include <dcpp/RichText.h>
 #include <dcpp/Tagger.h>
 #include <dcpp/Util.h>
 #include <dcpp/version.h>
@@ -98,6 +99,106 @@ TEST_F(testchatformat, overlong_chat_links_are_not_clickable)
 	EXPECT_NE(string::npos, html.find("http://example.invalid/abcdefghijklmnopqrstuvwxyz"));
 }
 
+TEST_F(testchatformat, rich_text_parses_the_complete_safe_dialect)
+{
+	const auto parsed = RichText::parse(
+		"# Heading\n\n**strong** and _emphasis_ and ~strike~.\n\n"
+		"> quote\n\n1. first\n2. second\n\n```\ncode <tag>\n```\n\n"
+		"| left | right |\n|:-----|------:|\n| a | b |\n\n"
+		"<b>**inside**</b> &copy; <https://example.org>", 512);
+
+	ASSERT_TRUE(parsed.valid);
+	EXPECT_TRUE(parsed.formatted);
+	EXPECT_NE(string::npos, parsed.html.find("id=\"rtfHeading1\""));
+	EXPECT_NE(string::npos, parsed.html.find("<b>strong</b>"));
+	EXPECT_NE(string::npos, parsed.html.find("<i>emphasis</i>"));
+	EXPECT_NE(string::npos, parsed.html.find("id=\"rtfStrike\""));
+	EXPECT_NE(string::npos, parsed.html.find("1. "));
+	EXPECT_NE(string::npos, parsed.html.find("id=\"rtfCode\""));
+	EXPECT_NE(string::npos, parsed.html.find("id=\"rtfTable\" columns=\"2\""));
+	EXPECT_NE(string::npos, parsed.html.find("id=\"rtfTableRow\""));
+	EXPECT_NE(string::npos, parsed.html.find("text-align: right"));
+	EXPECT_EQ(string::npos, parsed.html.find('\t'));
+	EXPECT_NE(string::npos, parsed.html.find("&lt;b&gt;<b>inside</b>&lt;/b&gt;"));
+	EXPECT_NE(string::npos, parsed.html.find("\xc2\xa9"));
+	EXPECT_NE(string::npos, parsed.html.find("href=\"https://example.org\""));
+
+	const auto formattedLink = RichText::parse(
+		"[release (**candidate**)](https://example.org/download)", 512);
+	ASSERT_TRUE(formattedLink.valid);
+	EXPECT_NE(string::npos, formattedLink.html.find(
+		"<a href=\"https://example.org/download\">release (<b>candidate</b>)</a>"));
+}
+
+TEST_F(testchatformat, rich_text_uses_magnets_for_attachments_and_inline_media)
+{
+	const string hash = "VN6PLQ7ZQGKD3NDBK6ZTZG5PYQXSNMFYVJH4TXA";
+	const string magnet = "magnet:?xt=urn:tree:tiger:" + hash + "&dn=cat.jpg&xl=204800";
+	auto parsed = RichText::parse("[file](" + magnet + ") ![cat](" + magnet +
+		") ![tracked](https://example.invalid/cat.png)", 512);
+
+	ASSERT_TRUE(parsed.valid);
+	ASSERT_EQ(size_t(2), parsed.attachments.size());
+	EXPECT_FALSE(parsed.attachments[0].inlineMedia);
+	EXPECT_TRUE(parsed.attachments[1].inlineMedia);
+	EXPECT_EQ(hash, parsed.attachments[1].tth);
+	EXPECT_EQ("cat.jpg", parsed.attachments[1].name);
+	EXPECT_EQ(204800, parsed.attachments[1].size);
+	EXPECT_NE(string::npos, parsed.html.find("<rtfimage src=\"magnet:?xt=urn:tree:tiger:" + hash));
+	EXPECT_NE(string::npos, parsed.html.find("[image] cat</rtfimage>"));
+	EXPECT_NE(string::npos, parsed.html.find("tracked"));
+	EXPECT_EQ(string::npos, parsed.html.find("https://example.invalid/cat.png"));
+	EXPECT_FALSE(parsed.safeToSend);
+	string invalidInline = "![tracked](https://example.invalid/cat.png)";
+	EXPECT_FALSE(RichText::prepareOutgoingMessage(invalidInline, true));
+
+	RichText::Attachment attachment;
+	EXPECT_TRUE(RichText::parseMagnetUri(magnet, 512, attachment));
+	EXPECT_FALSE(RichText::parseMagnetUri(
+		"magnet:?xt=urn:tree:tiger:" + hash + "&dn=no-size", 512, attachment));
+	EXPECT_FALSE(RichText::parseMagnetUri(
+		"magnet:?xt=urn:tree:tiger:vn6plq7zqgkd3ndbk6ztzg5pyqxsnmfyvjh4txa&xl=1", 512, attachment));
+	EXPECT_TRUE(RichText::isSafeLink("https://example.org/path", 256));
+	EXPECT_FALSE(RichText::isSafeLink("javascript:alert(1)", 256));
+	EXPECT_FALSE(RichText::isSafeLink("file:///tmp/private", 256));
+
+	const auto built = RichText::makeAttachmentMarkdown(
+		"photo (final) [1].jpg", hash, 204800, true);
+	EXPECT_NE(string::npos, built.find("&dn=photo+%28final%29+%5B1%5D.jpg"));
+	const auto builtParsed = RichText::parse(built, 512);
+	ASSERT_TRUE(builtParsed.valid);
+	ASSERT_EQ(size_t(1), builtParsed.attachments.size());
+	EXPECT_TRUE(builtParsed.attachments[0].inlineMedia);
+	EXPECT_EQ("photo (final) [1].jpg", builtParsed.attachments[0].name);
+}
+
+TEST_F(testchatformat, rich_text_message_policy_is_protocol_independent)
+{
+	auto settings = SettingsManager::getInstance();
+	settings->set(SettingsManager::ENABLE_RICH_TEXT, true);
+	settings->set(SettingsManager::RICH_TEXT_MAX_SIZE, 1024);
+	settings->set(SettingsManager::CHAT_LINK_MAX_LENGTH, 256);
+
+	const char incomingRaw[] = "safe\0text\t  \nnext";
+	string incoming(incomingRaw, sizeof(incomingRaw) - 1);
+	const auto incomingCopy = incoming;
+	EXPECT_TRUE(RichText::prepareIncomingMessage(incoming, true));
+	EXPECT_EQ(incomingCopy, incoming);
+
+	string outgoing = "**formatted**";
+	EXPECT_FALSE(RichText::prepareOutgoingMessage(outgoing));
+	EXPECT_TRUE(RichText::prepareOutgoingMessage(outgoing, true));
+	string windowsLines = "**first**\r\n\r\n_second_\rthird";
+	EXPECT_TRUE(RichText::prepareOutgoingMessage(windowsLines, true));
+	EXPECT_EQ("**first**\n\n_second_\nthird", windowsLines);
+	string plain = "plain text";
+	EXPECT_FALSE(RichText::prepareOutgoingMessage(plain, true));
+
+	string oversized(1025, 'x');
+	EXPECT_FALSE(RichText::prepareIncomingMessage(oversized, true));
+	EXPECT_FALSE(oversized.empty());
+}
+
 TEST_F(testchatformat, semantic_chat_styles_round_trip)
 {
 	const SettingsManager::StrSetting fonts[] = {
@@ -152,5 +253,30 @@ TEST_F(testchatformat, mcn_connection_limits_round_trip)
 
 	EXPECT_EQ(3, settings->get(SettingsManager::MAX_MCN_DOWNLOADS));
 	EXPECT_EQ(4, settings->get(SettingsManager::MAX_MCN_UPLOADS));
+	File::deleteFile(path);
+}
+
+TEST_F(testchatformat, rich_text_limits_round_trip)
+{
+	auto settings = SettingsManager::getInstance();
+	settings->set(SettingsManager::ENABLE_RICH_TEXT, false);
+	settings->set(SettingsManager::RICH_TEXT_MAX_SIZE, 32768);
+	settings->set(SettingsManager::ENABLE_RTF_TEMP_SHARES, false);
+	settings->set(SettingsManager::RTF_DROPPED_IMAGES_INLINE, false);
+	settings->set(SettingsManager::RTF_TEMP_SHARE_LIMIT, 42);
+
+	const auto path = Util::getTempPath() + "dcpp-test-rich-text-settings.xml";
+	File::deleteFile(path);
+	settings->save(path);
+	SettingsManager::deleteInstance();
+	SettingsManager::newInstance();
+	settings = SettingsManager::getInstance();
+	settings->load(path);
+
+	EXPECT_FALSE(settings->get(SettingsManager::ENABLE_RICH_TEXT));
+	EXPECT_EQ(32768, settings->get(SettingsManager::RICH_TEXT_MAX_SIZE));
+	EXPECT_FALSE(settings->get(SettingsManager::ENABLE_RTF_TEMP_SHARES));
+	EXPECT_FALSE(settings->get(SettingsManager::RTF_DROPPED_IMAGES_INLINE));
+	EXPECT_EQ(42, settings->get(SettingsManager::RTF_TEMP_SHARE_LIMIT));
 	File::deleteFile(path);
 }
