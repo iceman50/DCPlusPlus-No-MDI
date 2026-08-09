@@ -41,7 +41,6 @@ public:
 
 	void log(Area area, ParamMap& params) noexcept;
 	void message(const string& msg, LogMessage::Severity severity, const string& area) noexcept;
-	static bool isInitialized() noexcept { return instance != nullptr; }
 
 	List getLastLogs();
 	string getPath(Area area, ParamMap& params) const;

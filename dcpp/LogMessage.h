@@ -35,7 +35,6 @@ public:
 	const std::string& getText() const noexcept { return text; }
 	Severity getSeverity() const noexcept { return severity; }
 	const std::string& getArea() const noexcept { return area; }
-	bool isDebug() const noexcept { return severity == SEV_VERBOSE && area == "Debug"; }
 
 	static const char* getSeverityName(Severity severity) noexcept {
 		switch(severity) {

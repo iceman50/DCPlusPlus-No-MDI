@@ -21,49 +21,7 @@
 #include "File.h"
 #include "TimerManager.h"
 
-#include <cstdarg>
-#include <vector>
-
 namespace dcpp {
-
-void debugLog(const char* format, ...) noexcept {
-	if(!format)
-		return;
-
-	try {
-		va_list args;
-		va_start(args, format);
-		va_list countArgs;
-		va_copy(countArgs, args);
-		const auto length = std::vsnprintf(nullptr, 0, format, countArgs);
-		va_end(countArgs);
-		va_end(args);
-		if(length < 0) {
-			return;
-		}
-
-		std::vector<char> buffer(static_cast<size_t>(length) + 1);
-		va_start(args, format);
-		std::vsnprintf(buffer.data(), buffer.size(), format, args);
-		va_end(args);
-		string text(buffer.data(), static_cast<size_t>(length));
-
-#ifdef _DEBUG
-		std::fputs(text.c_str(), stdout);
-#endif
-
-		while(!text.empty() && (text.back() == '\r' || text.back() == '\n'))
-			text.pop_back();
-		static thread_local bool forwarding = false;
-		if(!text.empty() && LogManager::isInitialized() && !forwarding) {
-			forwarding = true;
-			LogManager::getInstance()->message(text, LogMessage::SEV_VERBOSE, "Debug");
-			forwarding = false;
-		}
-	} catch(...) {
-		// Diagnostics must never interfere with the operation being diagnosed.
-	}
-}
 
 void LogManager::log(Area area, ParamMap& params) noexcept {
 	log(getPath(area, params), Util::formatParams(getSetting(area, FORMAT), params));
@@ -80,12 +38,9 @@ void LogManager::message(const string& msg, LogMessage::Severity severity, const
 	}
 	{
 		Lock l(cs);
-		// Debug traffic has its own quota so it can't evict warnings and errors from history.
-		const auto matchingType = [debug = messageData->isDebug()](const LogMessagePtr& item) {
-			return item && item->isDebug() == debug;
-		};
-		if(std::count_if(lastLogs.begin(), lastLogs.end(), matchingType) >= 100)
-			lastLogs.erase(std::find_if(lastLogs.begin(), lastLogs.end(), matchingType));
+		// Keep the last 100 messages (completely arbitrary number...)
+		while(lastLogs.size() >= 100)
+			lastLogs.pop_front();
 		lastLogs.push_back(messageData);
 	}
 	fire(LogManagerListener::Message(), messageData);

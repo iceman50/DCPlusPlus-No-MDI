@@ -79,15 +79,10 @@ void SystemFrame::addLine(const LogMessagePtr& message, bool remember) {
 	if(remember) {
 		if(std::find(messages.begin(), messages.end(), message) != messages.end())
 			return;
-		const auto matchingType = [debug = message->isDebug()](const LogMessagePtr& item) {
-			return item && item->isDebug() == debug;
-		};
-		if(std::count_if(messages.begin(), messages.end(), matchingType) >= 100)
-			messages.erase(std::find_if(messages.begin(), messages.end(), matchingType));
+		while(messages.size() >= 100)
+			messages.pop_front();
 		messages.push_back(message);
 	}
-	if(message->isDebug() && !SETTING(SHOW_SYSTEM_LOG_DEBUG))
-		return;
 
 	const char* style = "log";
 	unsigned icon = IDI_HELP;
@@ -185,16 +180,6 @@ bool SystemFrame::preClosing() {
 }
 
 bool SystemFrame::handleContextMenu(const dwt::ScreenCoordinate& pt) {
-	auto appendDebugToggle = [this](Menu* menu) {
-		menu->appendSeparator();
-		const auto pos = menu->appendItem(T_("Show debug messages"), [this] {
-			SettingsManager::getInstance()->set(SettingsManager::SHOW_SYSTEM_LOG_DEBUG,
-				!SETTING(SHOW_SYSTEM_LOG_DEBUG));
-			refreshLog();
-		});
-		menu->checkItem(pos, SETTING(SHOW_SYSTEM_LOG_DEBUG));
-	};
-
 	tstring text = log->textUnderCursor(pt, true);
 	string path_a = Text::fromT(text);
 	if(File::getSize(path_a) != -1) {
@@ -210,13 +195,11 @@ bool SystemFrame::handleContextMenu(const dwt::ScreenCoordinate& pt) {
 		menu->appendItem(T_("Open &folder"), [text] { WinUtil::openFolder(text); });
 		
 		menu->appendShellMenu(StringList(1, path_a));
-		appendDebugToggle(menu.get());
 		menu->open(pt);
 	} else {
 		WinUtil::getChatSelText(log, text, pt);
 		auto menu = log->getMenu();
 		WinUtil::addSearchMenu(menu.get(), text);
-		appendDebugToggle(menu.get());
 		menu->open(pt);
 	}
 	
