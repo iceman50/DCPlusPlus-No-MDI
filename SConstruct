@@ -444,6 +444,7 @@ dev.geoip = dev.build("geoip/")
 dev.intl = dev.build("intl/") if dev.is_win32() else []
 dev.miniupnpc = dev.build("miniupnpc/")
 dev.natpmp = dev.build("natpmp/")
+dev.md4c = dev.build("md4c/")
 dev.client = dev.build("dcpp/")
 
 dev.dwt = dev.build("dwt/src/") if dev.is_win32() else []

@@ -311,6 +311,7 @@ class Dev:
                 self.geoip,
                 self.miniupnpc,
                 self.natpmp,
+                self.md4c,
                 self.dwt,
                 self.intl,
             ],
