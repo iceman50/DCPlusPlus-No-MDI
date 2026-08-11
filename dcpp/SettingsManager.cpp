@@ -553,6 +553,21 @@ void SettingsManager::load(string const& aFileName)
 			set(PRIVATE_ID, CID::generate().toBase32());
 		}
 
+		// A 0.8834 development build used the legacy 16-bit UD_MAXVAL as the upper
+		// bound for byte-sized settings. Opening and applying the Experimental page
+		// consequently truncated every larger value to exactly 32767 bytes. The new
+		// KiB controls cannot produce this value, so restore affected configurations
+		// to their intended defaults.
+		constexpr int truncatedSpinnerValue = 32767;
+		const IntSetting truncatedSettings[] = {
+			MAX_QUEUED_PROTOCOL_DATA, MAX_PARTIAL_LIST_BYTES, RICH_TEXT_MAX_SIZE
+		};
+		for(const auto setting: truncatedSettings) {
+			if(get(setting, false) == truncatedSpinnerValue) {
+				unset(setting);
+			}
+		}
+
 		double v = Util::toDouble(SETTING(CONFIG_VERSION));
 
 		/* Handle setting migrations here with the following pattern:

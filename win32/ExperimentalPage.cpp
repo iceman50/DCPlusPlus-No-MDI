@@ -10,6 +10,8 @@
 #include "stdafx.h"
 #include "ExperimentalPage.h"
 
+#include <limits>
+
 #include <dcpp/File.h>
 #include <dcpp/HashManager.h>
 #include <dcpp/SettingsManager.h>
@@ -32,6 +34,10 @@ using dwt::Label;
 using dwt::Spinner;
 
 namespace {
+
+constexpr int BYTES_PER_KIB = 1024;
+constexpr int MAX_KIB_SETTING = static_cast<int>(
+	(static_cast<int64_t>(std::numeric_limits<int>::max()) + BYTES_PER_KIB - 1) / BYTES_PER_KIB);
 
 const ColumnInfo tempColumns[] = {
 	{ N_("File"), 130, false },
@@ -72,7 +78,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		items.emplace_back(inlineImages, SettingsManager::RTF_DROPPED_IMAGES_INLINE, PropPage::T_BOOL);
 
 		addIntItem(cur, T_("Rich text message size limit"), SettingsManager::RICH_TEXT_MAX_SIZE,
-			IDH_SETTINGS_EXPERIMENTAL_RICH_TEXT_MAX_SIZE, T_("bytes"), 1024, UD_MAXVAL);
+			IDH_SETTINGS_EXPERIMENTAL_RICH_TEXT_MAX_SIZE, T_("KiB"), 1, MAX_KIB_SETTING, BYTES_PER_KIB);
 		addIntItem(cur, T_("Clickable chat link length limit"), SettingsManager::CHAT_LINK_MAX_LENGTH,
 			IDH_SETTINGS_EXPERIMENTAL_CHAT_LINK_MAX_LENGTH, T_("characters"), 1, UD_MAXVAL);
 		addIntItem(cur, T_("Maximum temporary shares"), SettingsManager::RTF_TEMP_SHARE_LIMIT,
@@ -148,7 +154,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		auto cur = group->addChild(Grid::Seed(11, 1));
 		cur->column(0).mode = GridInfo::FILL;
 		addIntItem(cur, T_("Queued protocol data limit"), SettingsManager::MAX_QUEUED_PROTOCOL_DATA,
-			IDH_SETTINGS_EXPERIMENTAL_MAX_QUEUED_PROTOCOL_DATA, T_("bytes"), 1024, UD_MAXVAL);
+			IDH_SETTINGS_EXPERIMENTAL_MAX_QUEUED_PROTOCOL_DATA, T_("KiB"), 1, MAX_KIB_SETTING, BYTES_PER_KIB);
 		addIntItem(cur, T_("Concurrent peer connection limit"), SettingsManager::MAX_CONCURRENT_CONNECTIONS,
 			IDH_SETTINGS_EXPERIMENTAL_MAX_CONCURRENT_CONNECTIONS, T_("connections"), 1, UD_MAXVAL);
 		addIntItem(cur, T_("Incoming connection flood window"), SettingsManager::FLOOD_WINDOW,
@@ -168,10 +174,11 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		addIntItem(cur, T_("Stored encrypted UDP key limit"), SettingsManager::MAX_SUDP_KEYS,
 			IDH_SETTINGS_EXPERIMENTAL_MAX_SUDP_KEYS, T_("keys"), 1, UD_MAXVAL);
 		addIntItem(cur, T_("Generated partial file list limit"), SettingsManager::MAX_PARTIAL_LIST_BYTES,
-			IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES, T_("bytes"), 1024, UD_MAXVAL);
+			IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES, T_("KiB"), 1, MAX_KIB_SETTING, BYTES_PER_KIB);
 	}
 
 	PropPage::read(items);
+	readScaledIntItems();
 	fillTempShares();
 }
 
@@ -188,6 +195,7 @@ void ExperimentalPage::layout() {
 
 void ExperimentalPage::write() {
 	PropPage::write(items);
+	writeScaledIntItems();
 
 	auto settings = SettingsManager::getInstance();
 	auto clamp = [settings](SettingsManager::IntSetting setting, int minimum) {
@@ -214,7 +222,7 @@ void ExperimentalPage::write() {
 }
 
 void ExperimentalPage::addIntItem(GridPtr target, const tstring& text, int setting,
-	unsigned helpId, const tstring& unit, int minimum, int maximum)
+	unsigned helpId, const tstring& unit, int minimum, int maximum, int multiplier)
 {
 	auto row = target->addChild(Grid::Seed(1, 4));
 	row->column(0).mode = GridInfo::FILL;
@@ -223,11 +231,44 @@ void ExperimentalPage::addIntItem(GridPtr target, const tstring& text, int setti
 	row->addChild(Label::Seed(text))->setHelpId(helpId);
 	auto box = row->addChild(WinUtil::Seeds::Dialog::intTextBox);
 	box->setHelpId(helpId);
-	items.emplace_back(box, setting, PropPage::T_INT_WITH_SPIN);
+	if(multiplier == 1) {
+		items.emplace_back(box, setting, PropPage::T_INT_WITH_SPIN);
+	} else {
+		scaledIntItems.push_back({ box, setting, multiplier });
+	}
 	auto spin = row->addChild(Spinner::Seed(minimum, maximum, box));
 	row->setWidget(spin);
 	spin->setHelpId(helpId);
 	row->addChild(Label::Seed(unit))->setHelpId(helpId);
+}
+
+void ExperimentalPage::readScaledIntItems() {
+	auto settings = SettingsManager::getInstance();
+	for(const auto& item: scaledIntItems) {
+		const auto storedValue = static_cast<int64_t>(settings->get(
+			static_cast<SettingsManager::IntSetting>(item.setting)));
+		// Round upward so opening and applying Settings can never reduce an existing byte limit.
+		const auto displayedValue = storedValue > 0 ?
+			(storedValue + item.multiplier - 1) / item.multiplier : 0;
+		item.box->setText(Text::toT(std::to_string(displayedValue)));
+	}
+}
+
+void ExperimentalPage::writeScaledIntItems() {
+	auto settings = SettingsManager::getInstance();
+	for(const auto& item: scaledIntItems) {
+		const auto setting = static_cast<SettingsManager::IntSetting>(item.setting);
+		const auto text = Text::fromT(item.box->getText());
+		if(text.empty()) {
+			settings->unset(setting);
+			continue;
+		}
+
+		const auto maximumStoredValue = static_cast<int64_t>(std::numeric_limits<int>::max());
+		const auto maximum = (maximumStoredValue + item.multiplier - 1) / item.multiplier;
+		const auto displayedValue = std::max<int64_t>(0, std::min(Util::toInt64(text), maximum));
+		settings->set(setting, static_cast<int>(std::min(displayedValue * item.multiplier, maximumStoredValue)));
+	}
 }
 
 void ExperimentalPage::fillTempShares() {

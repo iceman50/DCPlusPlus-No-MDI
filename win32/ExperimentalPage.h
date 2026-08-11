@@ -23,14 +23,23 @@ public:
 	virtual void write();
 
 private:
+	struct ScaledIntItem {
+		TextBoxPtr box;
+		int setting;
+		int multiplier;
+	};
+
 	ItemList items;
+	std::vector<ScaledIntItem> scaledIntItems;
 	TablePtr tempShares;
 	LabelPtr tempSummary;
 	ButtonPtr removeTemp;
 	ButtonPtr clearTemps;
 
 	void addIntItem(GridPtr target, const tstring& text, int setting, unsigned helpId,
-		const tstring& unit, int minimum, int maximum);
+		const tstring& unit, int minimum, int maximum, int multiplier = 1);
+	void readScaledIntItems();
+	void writeScaledIntItems();
 	void fillTempShares();
 	void handleTempSelectionChanged();
 	void handleRemoveTemps();
