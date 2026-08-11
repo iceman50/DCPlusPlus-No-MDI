@@ -91,6 +91,7 @@ public:
 		/* [iid_is][out]  _COM_Outptr_*/ void __RPC_FAR *__RPC_FAR *ppvObject)
 	{
 		if(!ppvObject) { return E_POINTER; }
+		*ppvObject = nullptr;
 		if(IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IDropTarget)) {
 			*ppvObject = this;
 			AddRef();
@@ -106,8 +107,9 @@ public:
 
 	virtual ULONG STDMETHODCALLTYPE Release( void)
 	{
-		if(--ref == 0) { delete this; }
-		return ref;
+		const auto remaining = --ref;
+		if(remaining == 0) { delete this; }
+		return remaining;
 	}
 
 	virtual HRESULT STDMETHODCALLTYPE DragEnter(
@@ -116,8 +118,17 @@ public:
 		/* [in] */ POINTL pt,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
-		setPoint(pt);
-		*pdwEffect = dragging ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+		if(!pdwEffect) return E_INVALIDARG;
+		try {
+			setPoint(pt);
+			// The tab strip only switches the visible target while another window owns
+			// the eventual drop; don't advertise an operation that Drop won't consume.
+			*pdwEffect = DROPEFFECT_NONE;
+		} catch(...) {
+			dragging = false;
+			*pdwEffect = DROPEFFECT_NONE;
+			return E_UNEXPECTED;
+		}
 		return S_OK;
 	}
 
@@ -126,8 +137,15 @@ public:
 		/* [in] */ POINTL pt,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
-		setPoint(pt);
-		*pdwEffect = dragging ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+		if(!pdwEffect) return E_INVALIDARG;
+		try {
+			setPoint(pt);
+			*pdwEffect = DROPEFFECT_NONE;
+		} catch(...) {
+			dragging = false;
+			*pdwEffect = DROPEFFECT_NONE;
+			return E_UNEXPECTED;
+		}
 		return S_OK;
 	}
 
@@ -143,6 +161,8 @@ public:
 		/* [in] */ POINTL /*pt*/,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
+		if(!pdwEffect) return E_INVALIDARG;
+		dragging = false;
 		*pdwEffect = DROPEFFECT_NONE;
 		return S_OK;
 	}

@@ -40,7 +40,8 @@ namespace dwt {
 
 TextBoxBase::TextBoxBase(Widget *parent, Dispatcher& dispatcher) :
 BaseType(parent, dispatcher),
-lines(1)
+lines(1),
+fileDropEnabled(false)
 {
 	dwtassert(parent, "Cant have a TextBox without a parent...");
 }
@@ -71,6 +72,7 @@ public:
 		/* [iid_is][out]  _COM_Outptr_*/ void __RPC_FAR *__RPC_FAR *ppvObject)
 	{
 		if(!ppvObject) { return E_POINTER; }
+		*ppvObject = nullptr;
 		if(IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IDropTarget)) {
 			*ppvObject = this;
 			AddRef();
@@ -86,8 +88,9 @@ public:
 
 	virtual ULONG STDMETHODCALLTYPE Release( void)
 	{
-		if(--ref == 0) { delete this; }
-		return ref;
+		const auto remaining = --ref;
+		if(remaining == 0) { delete this; }
+		return remaining;
 	}
 
 	virtual HRESULT STDMETHODCALLTYPE DragEnter(
@@ -96,17 +99,26 @@ public:
 		/* [in] */ POINTL /*pt*/,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
-		if(w->hasStyle(ES_READONLY)) { return S_OK; }
-		FORMATETC files { CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-		FORMATETC text { CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-		const auto acceptsFiles = (::GetWindowLongPtr(w->handle(), GWL_EXSTYLE) & WS_EX_ACCEPTFILES) != 0;
-		dragging = acceptsFiles && pDataObj->QueryGetData(&files) == S_OK ? DROP_FILES :
-			(pDataObj->QueryGetData(&text) == S_OK ? DROP_TEXT : DROP_NONE);
-		if(dragging != DROP_NONE) {
-			w->setFocus(); // focus to display the caret
-			*pdwEffect = DROPEFFECT_COPY;
-		} else {
+		if(!pDataObj || !pdwEffect) return E_INVALIDARG;
+		try {
+			FORMATETC files { CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+			FORMATETC text { CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+			const auto hasFiles = pDataObj->QueryGetData(&files) == S_OK;
+			// Shell file data objects may also expose text. A disabled file drop must not
+			// unexpectedly paste a path or URL through that secondary format.
+			dragging = hasFiles ? (w->acceptsFileDrops() ? DROP_FILES : DROP_NONE) :
+				(!w->hasStyle(ES_READONLY) && pDataObj->QueryGetData(&text) == S_OK ? DROP_TEXT : DROP_NONE);
+			if(dragging != DROP_NONE && (*pdwEffect & DROPEFFECT_COPY)) {
+				w->setFocus(); // focus to display the caret
+				*pdwEffect = DROPEFFECT_COPY;
+			} else {
+				dragging = DROP_NONE;
+				*pdwEffect = DROPEFFECT_NONE;
+			}
+		} catch(...) {
+			dragging = DROP_NONE;
 			*pdwEffect = DROPEFFECT_NONE;
+			return E_UNEXPECTED;
 		}
 		return S_OK;
 	}
@@ -116,11 +128,18 @@ public:
 		/* [in] */ POINTL pt,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
-		if(dragging != DROP_NONE) {
-			moveCaret(pt);
-			*pdwEffect = DROPEFFECT_COPY;
-		} else {
+		if(!pdwEffect) return E_INVALIDARG;
+		try {
+			if(dragging != DROP_NONE && (*pdwEffect & DROPEFFECT_COPY)) {
+				moveCaret(pt);
+				*pdwEffect = DROPEFFECT_COPY;
+			} else {
+				*pdwEffect = DROPEFFECT_NONE;
+			}
+		} catch(...) {
+			dragging = DROP_NONE;
 			*pdwEffect = DROPEFFECT_NONE;
+			return E_UNEXPECTED;
 		}
 		return S_OK;
 	}
@@ -137,59 +156,97 @@ public:
 		/* [in] */ POINTL pt,
 		/* [out][in]  __RPC__inout*/ DWORD *pdwEffect)
 	{
+		if(!pDataObj || !pdwEffect) return E_INVALIDARG;
+		const auto copyAllowed = (*pdwEffect & DROPEFFECT_COPY) != 0;
+		*pdwEffect = DROPEFFECT_NONE;
+
+		if(!copyAllowed) {
+			dragging = DROP_NONE;
+			return S_OK;
+		}
+
 		if(dragging == DROP_FILES) {
 			FORMATETC formatetc { CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
 			STGMEDIUM stgmedium;
 			if(pDataObj->GetData(&formatetc, &stgmedium) == S_OK) {
 				if(stgmedium.tymed == TYMED_HGLOBAL && stgmedium.hGlobal) {
-					const auto bytes = ::GlobalSize(stgmedium.hGlobal);
-					auto copy = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
-					auto source = ::GlobalLock(stgmedium.hGlobal);
-					auto target = copy ? ::GlobalLock(copy) : nullptr;
-					if(source && target) memcpy(target, source, bytes);
-					if(target) ::GlobalUnlock(copy);
-					if(source) ::GlobalUnlock(stgmedium.hGlobal);
+					std::vector<tstring> files;
+					try {
+						files = queryDropFiles(reinterpret_cast<HDROP>(stgmedium.hGlobal));
+					} catch(...) {
+						::ReleaseStgMedium(&stgmedium);
+						dragging = DROP_NONE;
+						return E_OUTOFMEMORY;
+					}
 					::ReleaseStgMedium(&stgmedium);
-					if(source && target) {
-						moveCaret(pt);
-						// The WM_DROPFILES aspect takes ownership of this independent copy.
-						w->sendMessage(WM_DROPFILES, reinterpret_cast<WPARAM>(copy));
-					} else if(copy) {
-						::GlobalFree(copy);
+					if(!files.empty()) {
+						try {
+							moveCaret(pt);
+							POINT clientPoint { pt.x, pt.y };
+							::ScreenToClient(w->handle(), &clientPoint);
+							if(w->dispatchFileDrop(files, Point(clientPoint.x, clientPoint.y))) {
+								*pdwEffect = DROPEFFECT_COPY;
+							}
+						} catch(...) {
+							dragging = DROP_NONE;
+							return E_UNEXPECTED;
+						}
 					}
 				} else {
 					::ReleaseStgMedium(&stgmedium);
 				}
 			}
-			*pdwEffect = DROPEFFECT_COPY;
 		} else if(dragging == DROP_TEXT) {
 			FORMATETC formatetc { CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
 			STGMEDIUM stgmedium;
 			if(pDataObj->GetData(&formatetc, &stgmedium) == S_OK) {
-				if(stgmedium.tymed == TYMED_HGLOBAL && stgmedium.hGlobal) {
-					auto buf = reinterpret_cast<LPCTSTR>(::GlobalLock(stgmedium.hGlobal));
-					if(buf) {
-						tstring text { buf };
-						::GlobalUnlock(stgmedium.hGlobal);
-						if(w->hasStyle(ES_NUMBER) && text.find_first_not_of(_T("0123456789")) != tstring::npos) {
-							w->sendMessage(WM_CHAR, 'A'); // simulate a key press to show the error popup
-						} else {
-							moveCaret(pt);
-							w->replaceSelection(text);
+				bool globalLocked = false;
+				try {
+					if(stgmedium.tymed == TYMED_HGLOBAL && stgmedium.hGlobal) {
+						auto buf = reinterpret_cast<LPCTSTR>(::GlobalLock(stgmedium.hGlobal));
+						globalLocked = buf != nullptr;
+						if(buf) {
+							tstring text { buf };
+							::GlobalUnlock(stgmedium.hGlobal);
+							globalLocked = false;
+							if(w->hasStyle(ES_NUMBER) && text.find_first_not_of(_T("0123456789")) != tstring::npos) {
+								w->sendMessage(WM_CHAR, 'A'); // simulate a key press to show the error popup
+							} else {
+								moveCaret(pt);
+								w->replaceSelection(text);
+								*pdwEffect = DROPEFFECT_COPY;
+							}
 						}
 					}
+				} catch(...) {
+					if(globalLocked) ::GlobalUnlock(stgmedium.hGlobal);
+					::ReleaseStgMedium(&stgmedium);
+					dragging = DROP_NONE;
+					return E_OUTOFMEMORY;
 				}
 				::ReleaseStgMedium(&stgmedium);
 			}
-			*pdwEffect = DROPEFFECT_COPY;
-		} else {
-			*pdwEffect = DROPEFFECT_NONE;
 		}
+		dragging = DROP_NONE;
 		return S_OK;
 	}
 
 private:
 	enum DropType { DROP_NONE, DROP_TEXT, DROP_FILES };
+
+	static std::vector<tstring> queryDropFiles(HDROP source) {
+		std::vector<tstring> files;
+		const auto count = ::DragQueryFile(source, 0xFFFFFFFF, nullptr, 0);
+		files.reserve(count);
+		for(UINT i = 0; i < count; ++i) {
+			const auto length = ::DragQueryFile(source, i, nullptr, 0);
+			std::vector<TCHAR> fileName(static_cast<size_t>(length) + 1, 0);
+			if(::DragQueryFile(source, i, fileName.data(), length + 1)) {
+				files.emplace_back(fileName.data(), length);
+			}
+		}
+		return files;
+	}
 
 	inline void moveCaret(const POINTL& pt) {
 		auto pos = w->charFromPos(ScreenCoordinate(Point(pt.x, pt.y)));
@@ -212,6 +269,33 @@ void TextBoxBase::create(const Seed& cs) {
 	} else {
 		delete dropper;
 	}
+}
+
+void TextBoxBase::onFileDrop(std::function<bool (const std::vector<tstring>&, Point)> f) {
+	fileDropCallback = std::move(f);
+	BaseType::onDragDrop([this](const std::vector<tstring>& files, Point point) {
+		dispatchFileDrop(files, point);
+	});
+}
+
+void TextBoxBase::setFileDropEnabled(bool accept) {
+	fileDropEnabled = accept;
+	BaseType::setDragAcceptFiles(accept);
+}
+
+void TextBoxBase::onDragDrop(std::function<void (const std::vector<tstring>&, Point)> f) {
+	onFileDrop([f = std::move(f)](const std::vector<tstring>& files, Point point) {
+		f(files, point);
+		return true;
+	});
+}
+
+void TextBoxBase::setDragAcceptFiles(bool accept) {
+	setFileDropEnabled(accept);
+}
+
+bool TextBoxBase::dispatchFileDrop(const std::vector<tstring>& files, const Point& point) {
+	return fileDropEnabled && fileDropCallback && fileDropCallback(files, point);
 }
 
 TextBox::Seed::Seed(const tstring& caption) :

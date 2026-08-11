@@ -68,28 +68,43 @@ public:
 	  * 	int x = droppoint.x;
 	  * 	int y = droppoint.y;
 	  * }
-	  */
+	 */
 	void onDragDrop(std::function<void (const std::vector<tstring>&, Point)> f) {
-		W().addCallback(Message(WM_DROPFILES), [f](const MSG& msg, LRESULT& ret) -> bool {
+		// An HDROP may only be finished once. Keep one owning callback per window so
+		// registering a replacement handler can't make two callbacks free the same handle.
+		W().setCallback(Message(WM_DROPFILES), [f](const MSG& msg, LRESULT& ret) -> bool {
 			std::vector<tstring> files;
 			POINT pt = { 0 };
 
 			HDROP handle = reinterpret_cast<HDROP>(msg.wParam);
 			if(handle) {
-				UINT iFiles = ::DragQueryFile(handle, 0xFFFFFFFF, 0, 0);
-				for(UINT i = 0; i < iFiles; ++i) {
-					const auto length = ::DragQueryFile(handle, i, nullptr, 0);
-					std::vector<TCHAR> fileName(static_cast<size_t>(length) + 1, 0);
-					if(::DragQueryFile(handle, i, fileName.data(), length + 1)) {
-						files.emplace_back(fileName.data(), length);
+				try {
+					UINT iFiles = ::DragQueryFile(handle, 0xFFFFFFFF, 0, 0);
+					for(UINT i = 0; i < iFiles; ++i) {
+						const auto length = ::DragQueryFile(handle, i, nullptr, 0);
+						std::vector<TCHAR> fileName(static_cast<size_t>(length) + 1, 0);
+						if(::DragQueryFile(handle, i, fileName.data(), length + 1)) {
+							files.emplace_back(fileName.data(), length);
+						}
 					}
+					::DragQueryPoint(handle, &pt);
+				} catch(...) {
+					::DragFinish(handle);
+					ret = 0;
+					return true;
 				}
-				::DragQueryPoint(handle, &pt);
 				::DragFinish(handle);
 			}
 
-			f(files, pt);
-			return false;
+			try {
+				f(files, pt);
+			} catch(...) {
+				// Never unwind a user callback through the window procedure.
+			}
+			// DragFinish above releases the HDROP handle. Mark the message handled so
+			// native controls don't receive and inspect that released handle afterward.
+			ret = 0;
+			return true;
 		});
 	}
 

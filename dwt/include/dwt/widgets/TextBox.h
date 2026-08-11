@@ -163,6 +163,18 @@ public:
 
 	bool getModify();
 
+	/// Register a file-drop handler for both OLE CF_HDROP and WM_DROPFILES input.
+	/// The handler returns whether the files were accepted by the application.
+	void onFileDrop(std::function<bool (const std::vector<tstring>&, Point)> f);
+
+	/// Enable or disable file drops for this control's OLE and WM_DROPFILES paths.
+	void setFileDropEnabled(bool accept = true);
+
+	/// Compatibility wrappers for the inherited WM_DROPFILES API. Text boxes also
+	/// have an OLE target, so both paths must update the same explicit state.
+	void onDragDrop(std::function<void (const std::vector<tstring>&, Point)> f);
+	void setDragAcceptFiles(bool accept = true);
+
 	void scrollToBottom();
 
 	ClientCoordinate ptFromPos(int pos);
@@ -203,9 +215,13 @@ protected:
 
 private:
 	class Dropper;
+	bool dispatchFileDrop(const std::vector<tstring>& files, const Point& point);
+	bool acceptsFileDrops() const noexcept { return fileDropEnabled && static_cast<bool>(fileDropCallback); }
 
 	unsigned lines;
 	Menu::Seed menuSeed;
+	std::function<bool (const std::vector<tstring>&, Point)> fileDropCallback;
+	bool fileDropEnabled;
 };
 
 class TextBox :
