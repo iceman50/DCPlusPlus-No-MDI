@@ -40,9 +40,9 @@ public:
 
 	virtual void connect(const OnlineUser& aUser, const string&, ConnectionType);
 
-	virtual void hubMessage(const string& aMessage, bool /*thirdPerson*/ = false,
+	virtual bool hubMessage(const string& aMessage, bool /*thirdPerson*/ = false,
 		bool /*explicitRichText*/ = false);
-	virtual void privateMessage(const OnlineUser& aUser, const string& aMessage, bool /*thirdPerson*/ = false,
+	virtual bool privateMessage(const OnlineUser& aUser, const string& aMessage, bool /*thirdPerson*/ = false,
 		bool echo = true, bool /*explicitRichText*/ = false);
 	virtual void sendUserCmd(const UserCommand& command, const ParamMap& params);
 	virtual void search(int aSizeType, int64_t aSize, int aFileType, const string& aString, const string& aToken, const StringList& aExtList, const string& aKey = Util::emptyString);

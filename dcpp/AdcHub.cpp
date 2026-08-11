@@ -857,16 +857,16 @@ void AdcHub::connect(const OnlineUser& user, const string& token, ConnectionType
 	}
 }
 
-void AdcHub::hubMessage(const string& aMessage, bool thirdPerson, bool explicitRichText) {
+bool AdcHub::hubMessage(const string& aMessage, bool thirdPerson, bool explicitRichText) {
 	if(state != STATE_NORMAL)
-		return;
+		return false;
 
 	string message = aMessage;
 	if(PluginManager::getInstance()->runHook(HOOK_CHAT_OUT, this, message))
-		return;
+		return true;
 	const bool richText = supportsRTF0 && RichText::prepareOutgoingMessage(message, explicitRichText, getHubUrl());
 	if(explicitRichText && !richText)
-		return;
+		return false;
 
 	AdcCommand c(AdcCommand::CMD_MSG, AdcCommand::TYPE_BROADCAST);
 	c.addParam(message);
@@ -875,18 +875,19 @@ void AdcHub::hubMessage(const string& aMessage, bool thirdPerson, bool explicitR
 	if(richText)
 		c.addParam("RT", "1");
 	send(c);
+	return true;
 }
 
-void AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson, bool echo,
+bool AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson, bool echo,
 	bool explicitRichText)
 {
 	if(state != STATE_NORMAL)
-		return;
+		return false;
 	string message = aMessage;
 	const bool richText = supportsRTF0 && user.getIdentity().supports("RTF0") &&
 		RichText::prepareOutgoingMessage(message, explicitRichText, getHubUrl());
 	if(explicitRichText && !richText)
-		return;
+		return false;
 
 	AdcCommand c(AdcCommand::CMD_MSG, user.getIdentity().getSID(), echo ? AdcCommand::TYPE_ECHO : AdcCommand::TYPE_DIRECT);
 	c.addParam(message);
@@ -903,6 +904,7 @@ void AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool
 			fire(ClientListener::Message(), this, ChatMessage(message, me, &user, me, thirdPerson, 0, richText));
 		}
 	}
+	return true;
 }
 
 void AdcHub::sendUserCmd(const UserCommand& command, const ParamMap& params) {

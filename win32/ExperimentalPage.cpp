@@ -60,7 +60,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 	grid->column(0).mode = GridInfo::FILL;
 
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("RTF0 and dropped files")));
+		auto group = grid->addChild(GroupBox::Seed(T_("Rich text and temporary shares")));
 		group->setHelpId(IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES);
 		auto cur = group->addChild(Grid::Seed(4, 1));
 		cur->column(0).mode = GridInfo::FILL;
@@ -70,7 +70,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		auto richText = checks->addChild(CheckBox::Seed(T_("Enable ADC RTF0 CommonMark chat")));
 		richText->setHelpId(IDH_SETTINGS_EXPERIMENTAL_ENABLE_RICH_TEXT);
 		items.emplace_back(richText, SettingsManager::ENABLE_RICH_TEXT, PropPage::T_BOOL);
-		auto temp = checks->addChild(CheckBox::Seed(T_("Enable drag-and-drop temporary sharing")));
+		auto temp = checks->addChild(CheckBox::Seed(T_("Enable temporary file sharing in chats")));
 		temp->setHelpId(IDH_SETTINGS_EXPERIMENTAL_ENABLE_TEMP_SHARES);
 		items.emplace_back(temp, SettingsManager::ENABLE_RTF_TEMP_SHARES, PropPage::T_BOOL);
 		auto inlineImages = checks->addChild(CheckBox::Seed(T_("Insert dropped image files as inline media")));
@@ -96,7 +96,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		tempShares = cur->addChild(WinUtil::Seeds::Dialog::table);
 		tempShares->setHelpId(IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES);
 		WinUtil::makeColumns(tempShares, tempColumns, 5);
-		tempShares->onGetEmptyText([] { return T_("No drag-and-drop temporary shares are active"); });
+		tempShares->onGetEmptyText([] { return T_("No temporary attachment shares are active"); });
 		tempShares->onSelectionChanged([this] { handleTempSelectionChanged(); });
 
 		auto buttons = cur->addChild(Grid::Seed(1, 4));
@@ -310,7 +310,7 @@ void ExperimentalPage::handleRemoveTemps() {
 }
 
 void ExperimentalPage::handleClearTemps() {
-	if(dwt::MessageBox(this).show(T_("Remove all active drag-and-drop temporary shares?"),
+	if(dwt::MessageBox(this).show(T_("Remove all active temporary attachment shares and cancel pending preparations?"),
 		_T(APPNAME) _T(" ") _T(VERSIONSTRING), dwt::MessageBox::BOX_YESNO,
 		dwt::MessageBox::BOX_ICONQUESTION) != IDYES) return;
 	ShareManager::getInstance()->clearTempShares();

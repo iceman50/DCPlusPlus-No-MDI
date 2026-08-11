@@ -79,6 +79,7 @@ public:
 		const ChatMessage& message);
 	static void handlePMI(const HintedUser& user, const string& connectionToken, const AdcCommand& cmd);
 	static void closeAll(bool offline);
+	static void refreshRichTextSettings();
 
 	WindowParams getWindowParams() const;
 	static void parseWindowParams(TabViewPtr parent, const WindowParams& params);

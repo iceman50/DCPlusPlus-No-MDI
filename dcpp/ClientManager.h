@@ -128,7 +128,7 @@ public:
 	void sendUDP(AdcCommand& cmd, const OnlineUser& user, const string& aKey = Util::emptyString);
 
 	void connect(const HintedUser& user, const string& token, ConnectionType type = CONNECTION_TYPE_LAST);
-	void privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo = true,
+	bool privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo = true,
 		bool explicitRichText = false);
 	void userCommand(const HintedUser& user, const UserCommand& uc, ParamMap& params, bool compatibility);
 	bool isActive() const;

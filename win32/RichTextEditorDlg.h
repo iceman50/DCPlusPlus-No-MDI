@@ -10,7 +10,12 @@
 #ifndef DCPLUSPLUS_WIN32_RICH_TEXT_EDITOR_DLG_H
 #define DCPLUSPLUS_WIN32_RICH_TEXT_EDITOR_DLG_H
 
+#include <dcpp/ShareManager.h>
 #include <dcpp/typedefs.h>
+
+#include <atomic>
+#include <memory>
+#include <optional>
 
 #include "GridDialog.h"
 
@@ -18,6 +23,7 @@
 class RichTextEditorDlg : public GridDialog {
 public:
 	RichTextEditorDlg(dwt::Widget* parent, const string& hubUrl, const tstring& initialText);
+	~RichTextEditorDlg();
 
 	const tstring& getText() const { return result; }
 
@@ -31,6 +37,16 @@ private:
 	LabelPtr validation;
 	ButtonPtr useButton;
 	bool ready;
+	size_t pendingAttachments;
+	std::shared_ptr<std::atomic<bool>> editorAlive;
+	vector<uint64_t> attachmentRequests;
+
+	struct AttachmentBatch {
+		vector<string> names;
+		vector<bool> inlineMedia;
+		vector<std::optional<ShareManager::ChatAttachmentResult>> results;
+		size_t remaining = 0;
+	};
 
 	bool handleInitDialog();
 	void updatePreview();
@@ -39,6 +55,10 @@ private:
 	void wrapSelection(const tstring& before, const tstring& after, const tstring& placeholder);
 	void insertBlock(const tstring& block);
 	void insertAttachment(bool inlineMedia);
+	bool handleDroppedFiles(const TStringList& files);
+	void prepareAttachments(const StringList& paths, const vector<bool>& inlineMedia);
+	void finishAttachments(const std::shared_ptr<AttachmentBatch>& batch);
+	void removeAttachmentRequest(uint64_t requestId);
 	void showAttachmentError(const tstring& message);
 };
 

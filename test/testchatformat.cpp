@@ -99,6 +99,20 @@ TEST_F(testchatformat, overlong_chat_links_are_not_clickable)
 	EXPECT_NE(string::npos, html.find("http://example.invalid/abcdefghijklmnopqrstuvwxyz"));
 }
 
+TEST_F(testchatformat, plain_magnets_keep_the_link_visible_and_show_the_file_size)
+{
+	const string hash = "VN6PLQ7ZQGKD3NDBK6ZTZG5PYQXSNMFYVJH4TXA";
+	const string magnet = "magnet:?xt=urn:tree:tiger:" + hash + "&xl=204800&dn=cat.jpg";
+	string scratch;
+	Tagger tags(magnet);
+	ChatMessage::format(tags, scratch);
+	const auto html = tags.merge(scratch);
+
+	EXPECT_NE(string::npos, html.find("<a href=\"magnet:?xt=urn:tree:tiger:" + hash));
+	EXPECT_NE(string::npos, html.find("magnet:?xt=urn:tree:tiger:" + hash));
+	EXPECT_NE(string::npos, html.find("cat.jpg — 200.00 KiB"));
+}
+
 TEST_F(testchatformat, rich_text_parses_the_complete_safe_dialect)
 {
 	const auto parsed = RichText::parse(
@@ -161,15 +175,23 @@ TEST_F(testchatformat, rich_text_uses_magnets_for_attachments_and_inline_media)
 	EXPECT_TRUE(RichText::isSafeLink("https://example.org/path", 256));
 	EXPECT_FALSE(RichText::isSafeLink("javascript:alert(1)", 256));
 	EXPECT_FALSE(RichText::isSafeLink("file:///tmp/private", 256));
+	EXPECT_TRUE(RichText::isInlineMediaFile("shared icon.ico"));
+	EXPECT_TRUE(RichText::isInlineMediaFile("SHARED ICON.ICO"));
+	EXPECT_FALSE(RichText::isInlineMediaFile("renamed icon.ico.exe"));
 
 	const auto built = RichText::makeAttachmentMarkdown(
 		"photo (final) [1].jpg", hash, 204800, true);
 	EXPECT_NE(string::npos, built.find("&dn=photo+%28final%29+%5B1%5D.jpg"));
+	EXPECT_EQ("magnet:?xt=urn:tree:tiger:" + hash +
+		"&xl=204800&dn=photo+%28final%29+%5B1%5D.jpg",
+		RichText::makeAttachmentMagnet("photo (final) [1].jpg", hash, 204800));
 	const auto builtParsed = RichText::parse(built, 512);
 	ASSERT_TRUE(builtParsed.valid);
 	ASSERT_EQ(size_t(1), builtParsed.attachments.size());
 	EXPECT_TRUE(builtParsed.attachments[0].inlineMedia);
 	EXPECT_EQ("photo (final) [1].jpg", builtParsed.attachments[0].name);
+	EXPECT_NE(string::npos, builtParsed.html.find("magnet:?xt=urn:tree:tiger:" + hash));
+	EXPECT_NE(string::npos, builtParsed.html.find("200.00 KiB"));
 }
 
 TEST_F(testchatformat, rich_text_message_policy_is_protocol_independent)

@@ -81,6 +81,7 @@ public:
 	static void reconnectDisconnected();
 
 	static void resortUsers();
+	static void refreshRichTextSettings();
 
 	WindowParams getWindowParams() const;
 	static void parseWindowParams(TabViewPtr parent, const WindowParams& params);

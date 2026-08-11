@@ -20,7 +20,6 @@
 
 #include <dcpp/ChatMessage.h>
 #include <dcpp/File.h>
-#include <dcpp/HashManager.h>
 #include <dcpp/RichText.h>
 #include <dcpp/ShareManager.h>
 #include <dcpp/SimpleXML.h>
@@ -29,10 +28,13 @@
 #include <dcpp/User.h>
 
 #include <dwt/WidgetCreator.h>
+#include <dwt/Application.h>
 #include <dwt/widgets/Button.h>
 
+#include <atomic>
 #include <deque>
 #include <memory>
+#include <optional>
 
 #include "HoldRedraw.h"
 #include "HtmlToRtf.h"
@@ -41,7 +43,7 @@
 #include "WinUtil.h"
 
 template<typename T>
-class AspectChat : private HashManagerListener {
+class AspectChat {
 	typedef AspectChat<T> ThisType;
 
 	const T& t() const { return *static_cast<const T*>(this); }
@@ -54,12 +56,11 @@ protected:
 		richTextButton(0),
 		messageLines(1),
 		chatFlushScheduled(false),
-		chatAlive(std::make_shared<bool>(true)),
+		chatAlive(std::make_shared<std::atomic<bool>>(true)),
 		richTextAvailable(false),
+		tempShareAvailable(false),
 		curCommandPosition(0)
-	{
-		HashManager::getInstance()->addListener(this);
-	}
+	{ }
 
 	void createChat(dwt::Widget *parent) {
 		{
@@ -75,9 +76,15 @@ protected:
 			cs.style |= WS_VSCROLL | ES_AUTOVSCROLL | ES_MULTILINE | ES_NOHIDESEL;
 			message = t().addChild(cs);
 			message->onUpdated([this] { this->handleMessageUpdated(); });
-			message->onDragDrop([this](const TStringList& files, dwt::Point) { this->handleDroppedFiles(files); });
-			message->setDragAcceptFiles(false);
+			message->onFileDrop([this](const TStringList& files, dwt::Point) {
+				return this->handleDroppedFiles(files);
+			});
+			message->setFileDropEnabled(false);
 		}
+		chat->onFileDrop([this](const TStringList& files, dwt::Point) {
+			return this->handleDroppedFiles(files);
+		});
+		chat->setFileDropEnabled(false);
 		t().onDragDrop([this](const TStringList& files, dwt::Point) { this->handleDroppedFiles(files); });
 		t().setDragAcceptFiles(false);
 
@@ -98,19 +105,23 @@ protected:
 	}
 
 	virtual ~AspectChat() {
-		HashManager::getInstance()->removeListener(this);
-		*chatAlive = false;
+		chatAlive->store(false);
+		cancelAttachmentRequests();
 	}
 
-	void setRichTextAvailable(bool available, const string& hubUrl) {
+	void setChatAvailability(bool richText, bool temporarySharing, const string& hubUrl) {
+		const auto routeChanged = Util::stricmp(richTextHubUrl, hubUrl) != 0;
 		richTextHubUrl = hubUrl;
-		available = available && SETTING(ENABLE_RICH_TEXT);
-		const auto acceptTempFiles = available && SETTING(ENABLE_RTF_TEMP_SHARES);
-		message->setDragAcceptFiles(acceptTempFiles);
+		richText = richText && SETTING(ENABLE_RICH_TEXT);
+		const auto acceptTempFiles = temporarySharing && !hubUrl.empty() && SETTING(ENABLE_RTF_TEMP_SHARES);
+		if(routeChanged || !acceptTempFiles) cancelAttachmentRequests();
+		message->setFileDropEnabled(acceptTempFiles);
+		chat->setFileDropEnabled(acceptTempFiles);
 		t().setDragAcceptFiles(acceptTempFiles);
-		if(richTextAvailable == available) return;
-		richTextAvailable = available;
-		richTextButton->setVisible(available);
+		tempShareAvailable = acceptTempFiles;
+		if(richTextAvailable == richText) return;
+		richTextAvailable = richText;
+		richTextButton->setVisible(richText);
 		t().layout();
 	}
 
@@ -155,14 +166,15 @@ protected:
 		chatFlushScheduled = true;
 		auto alive = chatAlive;
 		t().callAsync([this, alive] {
-			if(*alive) flushChat();
+			if(alive->load()) flushChat();
 		});
 	}
 
 	/// add an HTML-formatted message.
 	void addChatHTML(const string& message, const tstring& plainText = Util::emptyStringT,
 		tstring author = Util::emptyStringT, string userId = Util::emptyString, time_t timestamp = 0) {
-		addChatRTF(HtmlToRtf::convert(message, chat), plainText, std::move(author), std::move(userId), timestamp);
+		addChatRTF(HtmlToRtf::convert(message, chat, richTextHubUrl), plainText,
+			std::move(author), std::move(userId), timestamp);
 	}
 
 	void readLog(const string& logPath, const unsigned setting) {
@@ -337,101 +349,108 @@ protected:
 	unsigned messageLines;
 
 private:
-	struct PendingDrop {
-		string realPath;
+	struct DroppedAttachmentBatch {
 		string hubUrl;
-		string name;
-		int64_t size;
-		uint32_t timestamp;
-		bool inlineMedia;
+		vector<string> names;
+		vector<bool> inlineMedia;
+		vector<std::optional<ShareManager::ChatAttachmentResult>> results;
+		bool richText = false;
+		size_t remaining = 0;
 	};
 
-	static bool isInlineImage(const string& path) {
-		const auto ext = Text::toLower(Util::getFileExt(path));
-		return ext == ".bmp" || ext == ".gif" || ext == ".jpg" || ext == ".jpeg" ||
-			ext == ".png" || ext == ".tif" || ext == ".tiff" || ext == ".webp";
-	}
+	bool handleDroppedFiles(const TStringList& files) {
+		if(files.empty() || !tempShareAvailable || !SETTING(ENABLE_RTF_TEMP_SHARES) ||
+			richTextHubUrl.empty()) return false;
 
-	void handleDroppedFiles(const TStringList& files) {
-		if(!richTextAvailable || !SETTING(ENABLE_RTF_TEMP_SHARES) || richTextHubUrl.empty()) return;
+		auto batch = std::make_shared<DroppedAttachmentBatch>();
+		batch->hubUrl = richTextHubUrl;
+		batch->richText = richTextAvailable;
+		batch->remaining = files.size();
+		batch->names.reserve(files.size());
+		batch->inlineMedia.reserve(files.size());
+		batch->results.resize(files.size());
 
-		for(const auto& fileName: files) {
-			const auto realPath = Text::fromT(fileName);
-			try {
-				File file(realPath, File::READ, File::OPEN | File::SHARED);
-				PendingDrop pending { realPath, richTextHubUrl, Util::getFileName(realPath),
-					file.getSize(), file.getLastModified(),
-					SETTING(RTF_DROPPED_IMAGES_INLINE) && isInlineImage(realPath) };
-				file.close();
-				if(pending.size < 0 || pending.name.empty()) throw FileException("Invalid file");
-
-				{
-					Lock l(pendingDropsCs);
-					pendingDrops.push_back(pending);
-				}
-				const auto tth = HashManager::getInstance()->getTTH(realPath, pending.size, pending.timestamp);
-				if(tth) {
-					completeDroppedFiles(realPath, *tth);
-				} else {
-					t().addStatus(T_("Hashing dropped attachment: ") + Text::toT(pending.name));
-				}
-			} catch(const Exception& e) {
-				t().addStatus(T_("Unable to prepare dropped attachment: ") + Text::toT(e.getError()));
-			}
-		}
-	}
-
-	void on(HashManagerListener::TTHDone, const string& realPath, const TTHValue& tth) noexcept override {
-		try {
-			completeDroppedFiles(realPath, tth);
-		} catch(...) {
-			// Hash notifications must not unwind through the worker thread.
-		}
-	}
-
-	void completeDroppedFiles(const string& realPath, const TTHValue& tth) {
-		vector<PendingDrop> completed;
-		{
-			Lock l(pendingDropsCs);
-			for(auto i = pendingDrops.begin(); i != pendingDrops.end();) {
-				if(Util::stricmp(i->realPath, realPath) == 0) {
-					completed.push_back(std::move(*i));
-					i = pendingDrops.erase(i);
-				} else {
-					++i;
-				}
-			}
-		}
-
-		for(const auto& pending: completed) {
-			const auto shared = ShareManager::getInstance()->addTempShare(pending.realPath,
-				pending.size, pending.timestamp, tth, pending.hubUrl);
-			const auto markdown = shared ? RichText::makeAttachmentMarkdown(
-				pending.name, tth.toBase32(), pending.size, pending.inlineMedia) : string();
+		for(size_t index = 0; index < files.size(); ++index) {
+			const auto realPath = Text::fromT(files[index]);
+			batch->names.push_back(Util::getFileName(realPath));
+			batch->inlineMedia.push_back(batch->richText && SETTING(RTF_DROPPED_IMAGES_INLINE) &&
+				RichText::isInlineMediaFile(realPath));
 			auto alive = chatAlive;
-			t().callAsync([this, alive, pending, markdown] {
-				if(!*alive) return;
-				if(markdown.empty()) {
-					t().addStatus(T_("The dropped attachment changed or could not be added to the temporary share: ") +
-						Text::toT(pending.name));
-					return;
-				}
-				if(!richTextAvailable || Util::stricmp(richTextHubUrl, pending.hubUrl) != 0) return;
-				insertDroppedAttachment(Text::toT(markdown));
-			});
+			const auto requestId = ShareManager::getInstance()->prepareChatAttachment(realPath,
+				batch->hubUrl, [this, alive, batch, index](ShareManager::ChatAttachmentResult result) mutable {
+					dwt::Application::instance().callAsync(
+						[this, alive, batch, index, result = std::move(result)]() mutable {
+							if(!alive->load()) return;
+							removeAttachmentRequest(result.requestId);
+							batch->results[index] = std::move(result);
+							if(--batch->remaining == 0) finishDroppedAttachments(batch);
+						});
+				});
+			attachmentRequests.push_back(requestId);
+		}
+
+		t().addStatus(files.size() == 1 ? T_("Preparing dropped attachment...") :
+			str(TF_("Preparing %1% dropped attachments...") % files.size()));
+		return true;
+	}
+
+	void finishDroppedAttachments(const std::shared_ptr<DroppedAttachmentBatch>& batch) {
+		if(!tempShareAvailable || Util::stricmp(richTextHubUrl, batch->hubUrl) != 0) return;
+		const auto insertAsRichText = batch->richText && richTextAvailable;
+
+		for(size_t i = 0; i < batch->results.size(); ++i) {
+			if(!batch->results[i]) continue;
+			auto& result = *batch->results[i];
+			if(!result.attachment) {
+				t().addStatus(T_("Unable to prepare dropped attachment: ") +
+					Text::toT(batch->names[i]) + _T(" (") + Text::toT(result.error) + _T(")"));
+				continue;
+			}
+
+			const auto& attachment = *result.attachment;
+			if(!ShareManager::getInstance()->validateChatAttachment(
+				attachment.tth, attachment.size, batch->hubUrl))
+			{
+				t().addStatus(T_("The dropped attachment is no longer available: ") +
+					Text::toT(batch->names[i]));
+				continue;
+			}
+
+			if(insertAsRichText) {
+				const auto markdown = RichText::makeAttachmentMarkdown(batch->names[i],
+					attachment.tth.toBase32(), attachment.size, batch->inlineMedia[i]);
+				insertDroppedAttachment(Text::toT(markdown), true);
+			} else {
+				insertDroppedAttachment(Text::toT(RichText::makeAttachmentMagnet(batch->names[i],
+					attachment.tth.toBase32(), attachment.size)), false);
+			}
 		}
 	}
 
-	void insertDroppedAttachment(const tstring& markdown) {
-		auto text = message->getText();
-		const auto text8 = Text::fromT(text);
-		const auto hasCommand = text8.size() >= 4 && Util::strnicmp(text8.c_str(), "/rtf", 4) == 0 &&
-			(text8.size() == 4 || text8[4] == ' ' || text8[4] == '\t' || text8[4] == '\r' || text8[4] == '\n');
-		if(!hasCommand) text = _T("/rtf ") + text;
-		else if(text.size() == 4) text += _T(' ');
+	void removeAttachmentRequest(uint64_t requestId) {
+		attachmentRequests.erase(std::remove(attachmentRequests.begin(), attachmentRequests.end(), requestId),
+			attachmentRequests.end());
+	}
 
-		if(text.size() > 5 && !iswspace(text.back())) text += _T("\r\n");
-		text += markdown;
+	void cancelAttachmentRequests() {
+		for(const auto requestId: attachmentRequests) {
+			ShareManager::getInstance()->cancelChatAttachment(requestId);
+		}
+		attachmentRequests.clear();
+	}
+
+	void insertDroppedAttachment(const tstring& attachment, bool richText) {
+		auto text = message->getText();
+		if(richText) {
+			const auto text8 = Text::fromT(text);
+			const auto hasCommand = text8.size() >= 4 && Util::strnicmp(text8.c_str(), "/rtf", 4) == 0 &&
+				(text8.size() == 4 || text8[4] == ' ' || text8[4] == '\t' || text8[4] == '\r' || text8[4] == '\n');
+			if(!hasCommand) text = _T("/rtf ") + text;
+			else if(text.size() == 4) text += _T(' ');
+		}
+
+		if(!text.empty() && !iswspace(text.back())) text += _T("\r\n");
+		text += attachment;
 		message->setText(text);
 		const auto end = static_cast<int>(message->length());
 		message->setSelection(end, end);
@@ -451,8 +470,13 @@ private:
 			initial.erase(0, content);
 		}
 
-		RichTextEditorDlg editor(&t(), richTextHubUrl, initial);
+		const auto editorHubUrl = richTextHubUrl;
+		RichTextEditorDlg editor(&t(), editorHubUrl, initial);
 		if(editor.run() != IDOK) return;
+		if(!richTextAvailable || Util::stricmp(richTextHubUrl, editorHubUrl) != 0) {
+			t().addStatus(T_("The RTF0 route changed while the editor was open. The draft was not inserted."));
+			return;
+		}
 
 		message->setText(_T("/rtf ") + editor.getText());
 		const auto end = static_cast<int>(message->length());
@@ -475,18 +499,18 @@ private:
 		} else {
 			auto alive = chatAlive;
 			t().callAsync([this, alive] {
-				if(*alive) flushChat();
+				if(alive->load()) flushChat();
 			});
 		}
 	}
 
 	std::deque<RichTextBox::RenderedMessage> pendingChat;
 	bool chatFlushScheduled;
-	std::shared_ptr<bool> chatAlive;
+	std::shared_ptr<std::atomic<bool>> chatAlive;
 	bool richTextAvailable;
+	bool tempShareAvailable;
 	string richTextHubUrl;
-	CriticalSection pendingDropsCs;
-	vector<PendingDrop> pendingDrops;
+	vector<uint64_t> attachmentRequests;
 
 	TStringList prevCommands;
 	tstring currentCommand;

@@ -208,20 +208,20 @@ void UserConnection::snd(const string& aType, const string& aName, const int64_t
 	send(AdcCommand(AdcCommand::CMD_SND).addParam(aType).addParam(aName).addParam(Util::toString(aStart)).addParam(Util::toString(aBytes)));
 }
 
-void UserConnection::pm(const string& message, bool thirdPerson, bool explicitRichText) {
+bool UserConnection::pm(const string& message, bool thirdPerson, bool explicitRichText) {
 	{
 		auto lock = ClientManager::getInstance()->lock();
 		auto ou = ClientManager::getInstance()->findOnlineUserHint(getHintedUser());
 
 		if(PluginManager::getInstance()->runHook(HOOK_CHAT_PM_OUT, ou, message))
-			return;
+			return true;
 	}
 
 	string preparedMessage = message;
 	const bool richText = supportsRTF0() &&
 		RichText::prepareOutgoingMessage(preparedMessage, explicitRichText, getHubUrl());
 	if(explicitRichText && !richText)
-		return;
+		return false;
 
 	AdcCommand c(AdcCommand::CMD_MSG);
 	c.addParam(preparedMessage);
@@ -233,6 +233,7 @@ void UserConnection::pm(const string& message, bool thirdPerson, bool explicitRi
 
 	// simulate an echo message.
 	handlePM(c, true);
+	return true;
 }
 
 void UserConnection::pmi(const char* name, const string& value) {

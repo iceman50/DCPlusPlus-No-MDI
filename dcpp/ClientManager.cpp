@@ -458,7 +458,7 @@ void ClientManager::connect(const HintedUser& user, const string& token, Connect
 	}
 }
 
-void ClientManager::privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo,
+bool ClientManager::privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo,
 	bool explicitRichText)
 {
 	Lock l(cs);
@@ -466,9 +466,9 @@ void ClientManager::privateMessage(const HintedUser& user, const string& msg, bo
 		findOnlineUser(user) :
 		findOnlineUserHint(user);
 
-	if(u && !PluginManager::getInstance()->runHook(HOOK_CHAT_PM_OUT, u, msg)) {
-		u->getClient().privateMessage(*u, msg, thirdPerson, echo, explicitRichText);
-	}
+	if(!u) return false;
+	if(PluginManager::getInstance()->runHook(HOOK_CHAT_PM_OUT, u, msg)) return true;
+	return u->getClient().privateMessage(*u, msg, thirdPerson, echo, explicitRichText);
 }
 
 bool ClientManager::supportsRichText(const HintedUser& user) const {

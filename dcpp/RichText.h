@@ -55,10 +55,14 @@ public:
 	/** Whether a target may become an actionable RTF0 link. */
 	static bool isSafeLink(const string& url, size_t maxLength) noexcept;
 
+	/** Build a TTH magnet suitable for plain chat or a CommonMark target. */
+	static string makeAttachmentMagnet(const string& displayName, const string& tth, int64_t size);
 	/** Build a spec-compliant attachment link. The display name is escaped for
 	 * CommonMark and also used as the percent-encoded magnet dn field. */
 	static string makeAttachmentMarkdown(const string& displayName, const string& tth,
 		int64_t size, bool inlineMedia);
+	/** Whether a local file type is supported by the inline-image renderer. */
+	static bool isInlineMediaFile(const string& path) noexcept;
 
 	static bool hasFormatting(const string& text, size_t maxTargetLength);
 

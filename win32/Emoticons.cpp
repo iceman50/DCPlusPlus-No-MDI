@@ -13,6 +13,7 @@
 #include <dcpp/EmoticonManager.h>
 #include <dcpp/File.h>
 #include <dcpp/Text.h>
+#include <dcpp/Util.h>
 
 #include <algorithm>
 #include <mutex>
@@ -291,7 +292,8 @@ tstring Emoticons::fileRtf(const std::string& path, int maxPixels) {
 
 	UINT width = 0, height = 0;
 	std::vector<unsigned char> png;
-	if(!encodePng(path, maxPixels, 32, png, width, height, maxPixels, false, false)) return tstring();
+	const auto selectBestFrame = Text::toLower(Util::getFileExt(path)) == ".ico";
+	if(!encodePng(path, maxPixels, 32, png, width, height, maxPixels, false, selectBestFrame)) return tstring();
 	auto ret = pngRtf(png, width, height, static_cast<int>(height));
 	if(cache.size() >= 16) cache.erase(cache.begin());
 	return cache.emplace(key, std::move(ret)).first->second;

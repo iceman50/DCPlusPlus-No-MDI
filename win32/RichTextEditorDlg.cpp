@@ -10,11 +10,12 @@
 #include "stdafx.h"
 #include "RichTextEditorDlg.h"
 
-#include <dcpp/File.h>
+#include <dcpp/format.h>
 #include <dcpp/RichText.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/ShareManager.h>
 
+#include <dwt/Application.h>
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/Label.h>
 #include <dwt/widgets/LoadDialog.h>
@@ -64,9 +65,18 @@ RichTextEditorDlg::RichTextEditorDlg(dwt::Widget* parent, const string& aHubUrl,
 	preview(nullptr),
 	validation(nullptr),
 	useButton(nullptr),
-	ready(false)
+	ready(false),
+	pendingAttachments(0),
+	editorAlive(std::make_shared<std::atomic<bool>>(true))
 {
 	onInitDialog([this] { return handleInitDialog(); });
+}
+
+RichTextEditorDlg::~RichTextEditorDlg() {
+	editorAlive->store(false);
+	for(const auto requestId: attachmentRequests) {
+		ShareManager::getInstance()->cancelChatAttachment(requestId);
+	}
 }
 
 bool RichTextEditorDlg::handleInitDialog() {
@@ -90,6 +100,10 @@ bool RichTextEditorDlg::handleInitDialog() {
 	grid->row(1).size = 165;
 	grid->row(1).align = GridInfo::STRETCH;
 	source->setTextLimit(std::max(1024, SETTING(RICH_TEXT_MAX_SIZE)));
+	source->onFileDrop([this](const TStringList& files, dwt::Point) {
+		return handleDroppedFiles(files);
+	});
+	source->setFileDropEnabled(!hubUrl.empty() && SETTING(ENABLE_RTF_TEMP_SHARES));
 
 	auto builder = grid->addChild(Grid::Seed(2, 7));
 	WinUtil::setColor(builder);
@@ -193,7 +207,9 @@ void RichTextEditorDlg::updatePreview() {
 	preview->setText(Util::emptyStringT);
 
 	if(text.empty()) {
-		validation->setText(T_("Start typing Markdown or use the builder buttons."));
+		validation->setText(pendingAttachments ?
+			str(TF_("Preparing %1% attachment(s)...") % pendingAttachments) :
+			T_("Start typing Markdown or use the builder buttons."));
 		useButton->setEnabled(false);
 		return;
 	}
@@ -205,7 +221,7 @@ void RichTextEditorDlg::updatePreview() {
 
 	const auto parsed = RichText::parse(text, maxTarget);
 	if(parsed.valid) {
-		const auto rtf = _T("{\\urtf1\n") + HtmlToRtf::convert(parsed.html, preview) + _T("}\n");
+		const auto rtf = _T("{\\urtf1\n") + HtmlToRtf::convert(parsed.html, preview, hubUrl) + _T("}\n");
 		preview->addTextSteady(rtf);
 		preview->setSelection(0, 0);
 		preview->sendMessage(WM_VSCROLL, SB_TOP);
@@ -226,11 +242,23 @@ void RichTextEditorDlg::updatePreview() {
 			validation->setText(str(TF_("Ready: %1% bytes, %2% attachment(s).") % text.size() % parsed.attachments.size()));
 		}
 	}
+	if(pendingAttachments) {
+		ready = false;
+		validation->setText(str(TF_("Preparing %1% attachment(s)...") % pendingAttachments));
+	}
 	useButton->setEnabled(ready);
 }
 
 void RichTextEditorDlg::handleUse() {
-	if(!ready) return;
+	if(!ready || pendingAttachments) return;
+	auto checked = Text::fromT(source->getText());
+	normalizeAdcLineEndings(checked);
+	if(!RichText::prepareOutgoingMessage(checked, true, hubUrl)) {
+		ready = false;
+		useButton->setEnabled(false);
+		validation->setText(T_("The draft changed or an attachment is no longer available for this chat route."));
+		return;
+	}
 	result = source->getText();
 	endDialog(IDOK);
 }
@@ -302,37 +330,92 @@ void RichTextEditorDlg::insertAttachment(bool inlineMedia) {
 	if(!LoadDialog(this).addFilter(T_("All files"), _T("*.*")).open(file)) return;
 
 	const auto realPath = Text::fromT(file);
-	const auto tth = ShareManager::getInstance()->getTTHFromReal(realPath);
-	if(!tth) {
-		showAttachmentError(T_("The selected file is not currently shared or has not finished hashing."));
+	if(inlineMedia && !RichText::isInlineMediaFile(realPath)) {
+		showAttachmentError(T_("Inline media must be a supported BMP, GIF, ICO, JPEG, PNG, TIFF, or WebP image."));
 		return;
 	}
+	prepareAttachments({ realPath }, { inlineMedia });
+}
 
-	const auto size = File::getSize(realPath);
-	if(size < 0) {
-		showAttachmentError(T_("The selected file could not be read."));
-		return;
+bool RichTextEditorDlg::handleDroppedFiles(const TStringList& files) {
+	if(files.empty() || hubUrl.empty() || !SETTING(ENABLE_RTF_TEMP_SHARES)) return false;
+	StringList paths;
+	vector<bool> inlineMedia;
+	paths.reserve(files.size());
+	inlineMedia.reserve(files.size());
+	for(const auto& file: files) {
+		auto path = Text::fromT(file);
+		inlineMedia.push_back(SETTING(RTF_DROPPED_IMAGES_INLINE) && RichText::isInlineMediaFile(path));
+		paths.push_back(std::move(path));
 	}
+	prepareAttachments(paths, inlineMedia);
+	return true;
+}
 
-	try {
-		const auto tthPath = "TTH/" + tth->toBase32();
-		const auto shared = hubUrl.empty() ? ShareManager::getInstance()->toRealWithSize(tthPath) :
-			ShareManager::getInstance()->toRealWithSize(tthPath, hubUrl);
-		if(shared.second != size) {
-			showAttachmentError(T_("The selected file's shared size does not match its current size."));
-			return;
+void RichTextEditorDlg::prepareAttachments(const StringList& paths, const vector<bool>& inlineMedia) {
+	if(paths.empty() || paths.size() != inlineMedia.size()) return;
+	auto batch = std::make_shared<AttachmentBatch>();
+	batch->remaining = paths.size();
+	batch->inlineMedia = inlineMedia;
+	batch->results.resize(paths.size());
+	batch->names.reserve(paths.size());
+	pendingAttachments += paths.size();
+
+	for(size_t index = 0; index < paths.size(); ++index) {
+		batch->names.push_back(Util::getFileName(paths[index]));
+		auto alive = editorAlive;
+		const auto requestId = ShareManager::getInstance()->prepareChatAttachment(paths[index], hubUrl,
+			[this, alive, batch, index](ShareManager::ChatAttachmentResult result) mutable {
+				dwt::Application::instance().callAsync(
+					[this, alive, batch, index, result = std::move(result)]() mutable {
+						if(!alive->load()) return;
+						removeAttachmentRequest(result.requestId);
+						batch->results[index] = std::move(result);
+						if(--batch->remaining == 0) finishAttachments(batch);
+					});
+			});
+		attachmentRequests.push_back(requestId);
+	}
+	updatePreview();
+}
+
+void RichTextEditorDlg::finishAttachments(const std::shared_ptr<AttachmentBatch>& batch) {
+	pendingAttachments = batch->results.size() > pendingAttachments ? 0 :
+		pendingAttachments - batch->results.size();
+	tstring insertion;
+	tstring firstError;
+	for(size_t i = 0; i < batch->results.size(); ++i) {
+		if(!batch->results[i]) continue;
+		auto& result = *batch->results[i];
+		if(!result.attachment) {
+			if(firstError.empty()) firstError = Text::toT(batch->names[i] + ": " + result.error);
+			continue;
 		}
-	} catch(const Exception&) {
-		showAttachmentError(T_("The selected file is not exposed by the share configured for this hub."));
-		return;
+
+		const auto& attachment = *result.attachment;
+		if(!ShareManager::getInstance()->validateChatAttachment(attachment.tth, attachment.size, hubUrl)) {
+			if(firstError.empty()) firstError = Text::toT(batch->names[i]) +
+				T_(": the temporary attachment is no longer available");
+			continue;
+		}
+		if(!insertion.empty()) insertion += _T("\r\n");
+		insertion += Text::toT(RichText::makeAttachmentMarkdown(batch->names[i],
+			attachment.tth.toBase32(), attachment.size, batch->inlineMedia[i]));
 	}
 
-	const auto markdown = RichText::makeAttachmentMarkdown(
-		Util::getFileName(realPath), tth->toBase32(), size, inlineMedia);
-	source->replaceSelection(Text::toT(markdown));
-	const auto end = source->getCaretPos();
-	source->setSelection(end, end);
-	source->setFocus();
+	if(!insertion.empty()) {
+		source->replaceSelection(insertion);
+		const auto end = source->getCaretPos();
+		source->setSelection(end, end);
+		source->setFocus();
+	}
+	updatePreview();
+	if(!firstError.empty()) showAttachmentError(firstError);
+}
+
+void RichTextEditorDlg::removeAttachmentRequest(uint64_t requestId) {
+	attachmentRequests.erase(std::remove(attachmentRequests.begin(), attachmentRequests.end(), requestId),
+		attachmentRequests.end());
 }
 
 void RichTextEditorDlg::showAttachmentError(const tstring& message) {

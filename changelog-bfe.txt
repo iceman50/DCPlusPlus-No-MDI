@@ -1,9 +1,11 @@
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
 * Accept shorter Base32 ADC password salts used by older hubsofts while rejecting empty and undecodable challenges
 * Add the bundled md4c library for standards-compliant CommonMark and GitHub-style table parsing
-* Add ADC RTF0 CommonMark chat over hubs and CCPM with /rtf sending, safe local rendering, allowed-scheme links, magnet-only attachments, bounded held-file inline images, standards-compliant RichEdit tables, and a globally themed route-aware Markdown builder with live preview and toggleable formatting controls
-* Add route-scoped drag-and-drop temporary shares for RTF0 hubs and CCPM chats with asynchronous hashing, inline-image magnets, exact-TTH upload verification, session limits, and active-share management
-* Consolidate RTF0, drag-and-drop temporary shares, MCN, hashing and defensive protocol controls under Sharing > Experimental with active temporary-share management
+* Add ADC RTF0 CommonMark chat over hubs and CCPM with /rtf sending, safe local rendering, allowed-scheme links, magnet-only attachments, bounded held-file inline images including multi-frame ICO files, standards-compliant RichEdit tables, and a globally themed route-aware Markdown builder with live preview and toggleable formatting controls
+* Add route-scoped, searchable temporary shares to all ADC and NMDC hubs and private chats, with asynchronous hashing, visible magnet links and file sizes, rich editor attachments and inline media on RTF0 routes, exact-TTH downloads and upload verification, session limits, and active-share management
+* Fix OLE file drops being rejected or discarded over chat controls, preserve multi-file order, refresh live acceptance settings, and report hashing failures or cancellations without leaving attachments pending
+* Consolidate RTF0, drag-and-drop temporary shares, MCN, hashing and defensive protocol controls under the Experimental settings root with active temporary-share management
+* Prefer hub-provided ADC chat timestamps over local arrival times and mark them with the bundled OK icon
 * Add structured System Log severity levels and component areas with colored RichEdit messages, embedded resource icons and configurable styles
 * Accept hub GPA password challenges in every ADC connection state and enter VERIFY before responding
 * Enforce ADC protocol states, message contexts, command syntax and numeric bounds across hub, client-to-client, UDP, user-command and plugin send paths

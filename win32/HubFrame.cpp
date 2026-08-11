@@ -108,6 +108,10 @@ void HubFrame::activateWindow(const string& url) {
 	}
 }
 
+void HubFrame::refreshRichTextSettings() {
+	for(auto frame: frames) frame->updateRichTextAvailability();
+}
+
 void HubFrame::closeAll(ClosePred f) {
 	if(!WinUtil::mainWindow->getEnabled())
 		return;
@@ -471,7 +475,8 @@ void HubFrame::updateSecureStatus() {
 }
 
 void HubFrame::updateRichTextAvailability() {
-	setRichTextAvailable(client && client->isConnected() && client->supportsRichText(),
+	const auto connected = client && client->isConnected();
+	setChatAvailability(connected && client->supportsRichText(), connected,
 		client ? client->getHubUrl() : url);
 }
 
@@ -511,7 +516,10 @@ void HubFrame::enterImpl(const tstring& s) {
 
 		} else if(WinUtil::checkCommand(cmd, param, msg, status, thirdPerson)) {
 			if(!msg.empty()) {
-				client->hubMessage(Text::fromT(msg), thirdPerson);
+				if(!client->hubMessage(Text::fromT(msg), thirdPerson)) {
+					addStatus(T_("The message could not be sent because the hub connection changed."));
+					resetText = false;
+				}
 			}
 			if(!status.empty()) {
 				addStatus(status);
@@ -525,13 +533,17 @@ void HubFrame::enterImpl(const tstring& s) {
 				addStatus(T_("Usage: /rtf <message>"));
 			} else if(!client->supportsRichText()) {
 				addStatus(T_("RTF0 is disabled or unsupported by this hub. The message was not sent."));
+				resetText = false;
 			} else {
 				auto richMessage = Text::fromT(param);
 				if(!RichText::prepareOutgoingMessage(richMessage, true, client->getHubUrl())) {
 					addStatus(T_("The RTF0 message has no formatting, exceeds the size limit, contains non-magnet inline media, or references an attachment that is not available in this hub's share. It was not sent."));
 					resetText = false;
 				} else {
-					client->hubMessage(richMessage, false, true);
+					if(!client->hubMessage(richMessage, false, true)) {
+						addStatus(T_("The RTF0 message or one of its attachments became unavailable before it could be sent."));
+						resetText = false;
+					}
 				}
 			}
 		} else if(Util::stricmp(cmd.c_str(), _T("info")) == 0) {
@@ -705,7 +717,11 @@ void HubFrame::enterImpl(const tstring& s) {
 
 	if(send) {
 		if(client->isConnected()) {
-			client->hubMessage(Text::fromT(s));
+			if(!client->hubMessage(Text::fromT(s))) {
+				message->showPopup(T_("Message not sent"),
+					T_("The message could not be delivered because the hub connection changed."), TTI_ERROR);
+				resetText = false;
+			}
 		} else {
 			message->showPopup(T_("Hub offline"), T_("The message cannot be delivered because the hub is offline."), TTI_ERROR);
 			resetText = false;

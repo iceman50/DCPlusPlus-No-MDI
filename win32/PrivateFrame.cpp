@@ -150,6 +150,16 @@ bool PrivateFrame::isOpen(const UserPtr& u) {
 	return frames.find(u) != frames.end();
 }
 
+void PrivateFrame::refreshRichTextSettings() {
+	vector<PrivateFrame*> openFrames;
+	{
+		Lock l(framesMutex);
+		openFrames.reserve(frames.size());
+		for(const auto& frame: frames) openFrames.push_back(frame.second);
+	}
+	for(auto frame: openFrames) frame->updateRichTextAvailability();
+}
+
 void PrivateFrame::handlePMConnection(const HintedUser& user, const string& connectionToken) {
 	PrivateFrame* frame = nullptr;
 	{
@@ -564,6 +574,7 @@ void PrivateFrame::updateChannel() {
 void PrivateFrame::updateRichTextAvailability() {
 	bool directRoute = false;
 	bool available = false;
+	bool temporarySharing = online;
 	auto routeHubUrl = replyTo.getUser().hint;
 	{
 		Lock lifetimeLock(connLifetimeMutex);
@@ -574,6 +585,7 @@ void PrivateFrame::updateRichTextAvailability() {
 		}
 		if(activeConn && activeConn->getState() == UserConnection::STATE_CMD && activeConn->isSecure()) {
 			directRoute = true;
+			temporarySharing = true;
 			available = activeConn->supportsRTF0();
 			routeHubUrl = activeConn->getHubUrl();
 		}
@@ -581,7 +593,7 @@ void PrivateFrame::updateRichTextAvailability() {
 	if(!directRoute) {
 		available = ClientManager::getInstance()->supportsRichText(replyTo.getUser());
 	}
-	setRichTextAvailable(available, routeHubUrl);
+	setChatAvailability(available, temporarySharing, routeHubUrl);
 }
 
 void PrivateFrame::startCC(bool silent) {
@@ -828,7 +840,10 @@ void PrivateFrame::enterImpl(const tstring& s) {
 
 		} else if(WinUtil::checkCommand(cmd, param, message, status, thirdPerson)) {
 			if(!message.empty()) {
-				sendMessage(message, thirdPerson);
+				if(!sendMessage(message, thirdPerson)) {
+					addStatus(T_("The message could not be sent because the active route changed."));
+					resetText = false;
+				}
 			}
 			if(!status.empty()) {
 				addStatus(status);
@@ -916,7 +931,11 @@ void PrivateFrame::enterImpl(const tstring& s) {
 
 	if(send) {
 		if(online || ccReady()) {
-			sendMessage(s);
+			if(!sendMessage(s)) {
+				message->showPopup(T_("Message not sent"),
+					T_("The message could not be delivered because the active route changed."), TTI_ERROR);
+				resetText = false;
+			}
 		} else {
 			message->showPopup(T_("User offline"), T_("The message cannot be delivered because the user is offline."), TTI_ERROR);
 			resetText = false;
@@ -932,10 +951,6 @@ bool PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson, bool explic
 	if(explicitRichText && !SETTING(ENABLE_RICH_TEXT)) {
 		return false;
 	}
-	if(explicitRichText) {
-		auto checked = msg8;
-		if(!RichText::prepareOutgoingMessage(checked, true, replyTo.getUser().hint)) return false;
-	}
 
 	{
 		Lock lifetimeLock(connLifetimeMutex);
@@ -948,17 +963,19 @@ bool PrivateFrame::sendMessage(const tstring& msg, bool thirdPerson, bool explic
 			if(explicitRichText && !activeConn->supportsRTF0()) {
 				return false;
 			}
-			activeConn->pm(msg8, thirdPerson, explicitRichText);
-			return true;
+			return activeConn->pm(msg8, thirdPerson, explicitRichText);
 		}
 	}
 
 	if(explicitRichText && !ClientManager::getInstance()->supportsRichText(replyTo.getUser())) {
 		return false;
 	}
-	ClientManager::getInstance()->privateMessage(replyTo.getUser(), msg8, thirdPerson,
+	if(explicitRichText) {
+		auto checked = msg8;
+		if(!RichText::prepareOutgoingMessage(checked, true, replyTo.getUser().hint)) return false;
+	}
+	return ClientManager::getInstance()->privateMessage(replyTo.getUser(), msg8, thirdPerson,
 		replyTo.getUser().user->isNMDC(), explicitRichText);
-	return true;
 }
 
 PrivateFrame::UserInfoList PrivateFrame::selectedUsersImpl() {

@@ -26,7 +26,7 @@
 Simple HTML phrasing content and the trusted semantic elements generated for RTF0 are supported. */
 class HtmlToRtf {
 public:
-	static tstring convert(const string& html, dwt::RichTextBox* box);
+	static tstring convert(const string& html, dwt::RichTextBox* box, const string& hubUrl = string());
 };
 
 #endif

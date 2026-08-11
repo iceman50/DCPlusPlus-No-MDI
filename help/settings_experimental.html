@@ -7,25 +7,25 @@
 </head>
 <body>
 <h1>Experimental</h1>
-<p>This page is located under <em>Sharing</em> and collects experimental sharing, transfer,
+<p>This page is a top-level Settings category immediately above <em>Plugins</em> and collects experimental sharing, transfer,
 hashing, RTF0, and defensive protocol controls.</p>
 
-<h2>RTF0 and dropped files</h2>
+<h2>Rich text and temporary shares</h2>
 <dl style="margin-left: 40px;">
   <dt>Enable ADC RTF0 CommonMark chat</dt>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_ENABLE_RICH_TEXT">Advertise ADC RTF0 support on hubs and direct CCPM connections and render its safe CommonMark dialect. Supporting chats provide the RTF0 editor and drag-and-drop attachments.</dd>
-  <dt>Enable drag-and-drop temporary sharing</dt>
-  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_ENABLE_TEMP_SHARES">Allow files dropped on an RTF0-capable hub or CCPM window to be hashed and exposed by exact TTH for that route. Disabling this prevents new drops and makes existing temporary entries unavailable to transfer while retaining them in the management list until removed or the application exits.</dd>
+  <dt>Enable temporary file sharing in chats</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_ENABLE_TEMP_SHARES">Allow unshared files dropped on any connected ADC or NMDC hub or private chat—and files selected by the RTF0 editor—to be hashed and exposed by exact TTH for that route. Plain and RTF0 chat displays keep the magnet URI visible and clickable and show its human-readable file size; RTF0 routes may additionally render formatted attachments and inline images. Disabling this prevents new temporary shares and makes existing temporary entries unavailable to search or transfer while retaining them in the management list until removed or the application exits.</dd>
   <dt>Insert dropped image files as inline media</dt>
-  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_DROPPED_IMAGES_INLINE">Use RTF0 inline-image syntax for recognized image extensions. When disabled, dropped images are inserted as ordinary attachment links.</dd>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_DROPPED_IMAGES_INLINE">Use RTF0 inline-image syntax for recognized BMP, GIF, ICO, JPEG, PNG, TIFF, and WebP files when the chat supports RTF0. Plain ADC and NMDC chats always receive an ordinary magnet link.</dd>
   <dt>Rich text message size limit</dt>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_RICH_TEXT_MAX_SIZE">Maximum UTF-8 size of an incoming or outgoing ADC RTF0 rich text message, in KiB. Larger incoming messages are replaced with an omission notice; larger editor drafts cannot be inserted into chat. Minimum: 1 KiB. Default: 64 KiB.</dd>
   <dt>Clickable chat link length limit</dt>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_CHAT_LINK_MAX_LENGTH">Maximum URL or magnet URI length that will be turned into a clickable chat link. Longer links remain visible as plain text. Minimum: 1 character. Default: 256 characters.</dd>
   <dt>Maximum temporary shares</dt>
-  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARE_LIMIT">Maximum number of drag-and-drop attachments retained for the current application session. Adding another entry removes the oldest entries first. Minimum: 1. Default: 256.</dd>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARE_LIMIT">Maximum number of temporary RTF0 attachments retained for the current application session. Adding another entry removes the least recently used entries first. Minimum: 1. Default: 256.</dd>
   <dt>Active temporary shares</dt>
-  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES">Lists the session-only files currently addressable by exact TTH, including their route and local path. These files never appear in file lists, searches, or share totals. Remove selected entries, clear the full list, or refresh file availability from here.</dd>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES">Lists the session-only files currently addressable by exact TTH, including their route and local path. These files appear in search results only on the hub or CCPM route where they were added, remain absent from file lists and share totals, and can be downloaded by TTH only from that route. Remove selected entries, clear the full list, or refresh file availability from here.</dd>
 </dl>
 
 <h2>Multi-connection transfers (MCN)</h2>

@@ -195,6 +195,11 @@ namespace {
 			string alt;
 			bool valid;
 		};
+		struct LinkState {
+			bool safe = false;
+			optional<RichText::Attachment> attachment;
+			string label;
+		};
 
 		RichText::Parsed result;
 		size_t maxTargetLength;
@@ -202,8 +207,21 @@ namespace {
 		size_t paragraphs = 0;
 		size_t tableColumns = 0;
 		vector<ListState> lists;
-		vector<bool> links;
+		vector<LinkState> links;
 		vector<ImageState> images;
+
+		void appendAttachmentMetadata(const RichText::Attachment& attachment, bool uriAlreadyVisible) {
+			result.html += " <span id=\"rtfAttachmentMeta\">[";
+			if(!uriAlreadyVisible) {
+				result.html += "<a href=\"";
+				appendXmlEscaped(result.html, attachment.uri);
+				result.html += "\">";
+				appendXmlEscaped(result.html, attachment.uri);
+				result.html += "</a> — ";
+			}
+			appendXmlEscaped(result.html, Util::formatBytes(attachment.size));
+			result.html += "]</span>";
+		}
 
 		int enterBlock(MD_BLOCKTYPE type, void* detail) {
 			if(++depth > RichText::MAX_NESTING_DEPTH) return 1;
@@ -356,15 +374,19 @@ namespace {
 				const auto data = static_cast<MD_SPAN_A_DETAIL*>(detail);
 				const auto href = data ? decodeAttribute(data->href) : string();
 				const auto safe = RichText::isSafeLink(href, maxTargetLength);
-				links.push_back(safe);
+				LinkState link;
+				link.safe = safe;
 				if(safe) {
 					RichText::Attachment attachment;
-					if(RichText::parseMagnetUri(href, maxTargetLength, attachment))
-						result.attachments.push_back(std::move(attachment));
+					if(RichText::parseMagnetUri(href, maxTargetLength, attachment)) {
+						result.attachments.push_back(attachment);
+						link.attachment = std::move(attachment);
+					}
 					result.html += "<a href=\"";
 					appendXmlEscaped(result.html, href);
 					result.html += "\">";
 				}
+				links.push_back(std::move(link));
 				break;
 			}
 			default:
@@ -390,6 +412,7 @@ namespace {
 					result.html += "\">[image] ";
 					appendXmlEscaped(result.html, description);
 					result.html += "</rtfimage></a>";
+					appendAttachmentMetadata(image.attachment, false);
 				} else {
 					appendXmlEscaped(result.html, description);
 				}
@@ -405,7 +428,12 @@ namespace {
 				case MD_SPAN_DEL: result.html += "</span>"; break;
 				case MD_SPAN_A:
 					if(links.empty()) return 1;
-					if(links.back()) result.html += "</a>";
+					{
+						auto link = std::move(links.back());
+						if(link.safe) result.html += "</a>";
+						if(link.attachment) appendAttachmentMetadata(
+							*link.attachment, link.label == link.attachment->uri);
+					}
 					links.pop_back();
 					break;
 				default:
@@ -436,6 +464,7 @@ namespace {
 				else images.back().alt += decoded;
 				return 0;
 			}
+			if(!links.empty()) links.back().label += decoded;
 
 			switch(type) {
 			case MD_TEXT_BR:
@@ -594,19 +623,30 @@ RichText::Parsed RichText::parse(const string& text, size_t maxTargetLength) {
 	return std::move(renderer.result);
 }
 
+string RichText::makeAttachmentMagnet(const string& displayName, const string& tth, int64_t size) {
+	const auto name = cleanAttachmentName(displayName);
+	auto encodedName = Util::encodeURI(name);
+	// Parentheses can terminate Markdown targets and plain chat link detection.
+	// Encoding them keeps unusual file names inside the magnet in either mode.
+	for(size_t pos = 0; (pos = encodedName.find_first_of("()", pos)) != string::npos; pos += 3) {
+		encodedName.replace(pos, 1, encodedName[pos] == '(' ? "%28" : "%29");
+	}
+	return "magnet:?xt=urn:tree:tiger:" + tth + "&xl=" + std::to_string(size) +
+		"&dn=" + encodedName;
+}
+
 string RichText::makeAttachmentMarkdown(const string& displayName, const string& tth,
 	int64_t size, bool inlineMedia)
 {
 	const auto name = cleanAttachmentName(displayName);
-	auto encodedName = Util::encodeURI(name);
-	// Parentheses are legal URI characters but delimit a CommonMark link target.
-	// Encoding them keeps unusual file names from ending the destination early.
-	for(size_t pos = 0; (pos = encodedName.find_first_of("()", pos)) != string::npos; pos += 3) {
-		encodedName.replace(pos, 1, encodedName[pos] == '(' ? "%28" : "%29");
-	}
-	return string(inlineMedia ? "![" : "[") + escapeMarkdownLabel(name) +
-		"](magnet:?xt=urn:tree:tiger:" + tth + "&xl=" + std::to_string(size) +
-		"&dn=" + encodedName + ")";
+	return string(inlineMedia ? "![" : "[") + escapeMarkdownLabel(name) + "](" +
+		makeAttachmentMagnet(name, tth, size) + ")";
+}
+
+bool RichText::isInlineMediaFile(const string& path) noexcept {
+	const auto ext = Text::toLower(Util::getFileExt(path));
+	return ext == ".bmp" || ext == ".gif" || ext == ".ico" || ext == ".jpg" || ext == ".jpeg" ||
+		ext == ".png" || ext == ".tif" || ext == ".tiff" || ext == ".webp";
 }
 
 bool RichText::hasFormatting(const string& text, size_t maxTargetLength) {
@@ -644,11 +684,8 @@ bool RichText::prepareOutgoingMessage(string& text, bool explicitRichText, const
 	// be available through the share that is visible on the message's route.
 	for(const auto& attachment: parsed.attachments) {
 		try {
-			const auto tthPath = "TTH/" + attachment.tth;
-			const auto shared = hubUrl.empty() ?
-				ShareManager::getInstance()->toRealWithSize(tthPath) :
-				ShareManager::getInstance()->toRealWithSize(tthPath, hubUrl);
-			if(shared.second != attachment.size) return false;
+			if(!ShareManager::getInstance()->validateChatAttachment(
+				TTHValue(attachment.tth), attachment.size, hubUrl)) return false;
 		} catch(const Exception&) {
 			return false;
 		}

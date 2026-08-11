@@ -21,6 +21,7 @@
 #include "HtmlToRtf.h"
 
 #include "Emoticons.h"
+#include "resource.h"
 
 #include <algorithm>
 #include <cmath>
@@ -62,15 +63,23 @@ namespace {
 		return s;
 	}
 
-	tstring inlineMediaRtf(const string& uri) {
+	tstring inlineMediaRtf(const string& uri, const string& hubUrl) {
 		RichText::Attachment attachment;
 		if(!RichText::parseMagnetUri(uri,
 			static_cast<size_t>(std::max(1, SETTING(CHAT_LINK_MAX_LENGTH))), attachment)) return tstring();
 
 		StringList paths;
 		try {
-			const auto shared = ShareManager::getInstance()->toRealWithSize("TTH/" + attachment.tth);
-			if(shared.second == attachment.size) paths.push_back(shared.first);
+			const TTHValue root(attachment.tth);
+			if(!hubUrl.empty()) {
+				if(ShareManager::getInstance()->validateChatAttachment(root, attachment.size, hubUrl)) {
+					auto shared = ShareManager::getInstance()->resolveFile("TTH/" + attachment.tth, hubUrl);
+					paths.push_back(std::move(shared.realPath));
+				}
+			} else if(ShareManager::getInstance()->isTTHShared(root)) {
+				const auto shared = ShareManager::getInstance()->toRealWithSize("TTH/" + attachment.tth);
+				if(shared.second == attachment.size) paths.push_back(shared.first);
+			}
 		} catch(const Exception&) {
 		}
 
@@ -98,7 +107,7 @@ namespace {
 }
 
 struct Parser : SimpleXMLReader::CallBack {
-	Parser(dwt::RichTextBox* box);
+	Parser(dwt::RichTextBox* box, string hubUrl);
 	void startTag(const string& name, StringPairList& attribs, bool simple);
 	void data(const string& data);
 	void endTag(const string& name);
@@ -113,6 +122,7 @@ private:
 		size_t bgColor; // index in the "colors" table
 		string link;
 		string semanticId;
+		bool timestampIconPending;
 
 		int alignment; // 0 = inherited, 1 = left, 2 = center, 3 = right
 
@@ -149,16 +159,17 @@ private:
 	unsigned suppressDepth = 0;
 	vector<bool> emoticonSuppressions;
 	vector<bool> inlineMediaSuppressions;
+	string hubUrl;
 };
 
-tstring HtmlToRtf::convert(const string& html, dwt::RichTextBox* box) {
-	Parser parser(box);
+tstring HtmlToRtf::convert(const string& html, dwt::RichTextBox* box, const string& hubUrl) {
+	Parser parser(box, hubUrl);
 	try { SimpleXMLReader(&parser).parse(html); }
 	catch(const SimpleXMLException& e) { return Text::toT(e.getError()); }
 	return parser.finalize();
 }
 
-Parser::Parser(dwt::RichTextBox* box) {
+Parser::Parser(dwt::RichTextBox* box, string aHubUrl) : hubUrl(std::move(aHubUrl)) {
 	// create a default context with the Rich Edit control's current formatting.
 	contexts.emplace_back(box, *this);
 	const auto width = std::max(1L, box->getClientSize().x);
@@ -168,7 +179,7 @@ Parser::Parser(dwt::RichTextBox* box) {
 void Parser::startTag(const string& name_, StringPairList& attribs, bool simple) {
 	auto name = trimCopy(name_);
 	if(name == "rtfimage") {
-		auto image = inlineMediaRtf(getAttrib(attribs, "src", 0));
+		auto image = inlineMediaRtf(getAttrib(attribs, "src", 0), hubUrl);
 		const bool rendered = !image.empty();
 		if(rendered) ret += std::move(image);
 		if(!simple) {
@@ -219,6 +230,8 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 	contexts.back().link.clear();
 	const auto semanticId = getAttrib(attribs, "id", 0);
 	contexts.back().semanticId = semanticId;
+	contexts.back().timestampIconPending = semanticId == "messageTimestamp" ||
+		semanticId == "ownMessageTimestamp";
 	ScopedFunctor([this] { ret += contexts.back().getBegin(); });
 
 	const auto preserveConfiguredColor = applySemanticStyle(contexts.back(), semanticId);
@@ -295,7 +308,22 @@ tstring Parser::rtfEscape(const string& data) {
 }
 
 void Parser::data(const string& data) {
-	if(suppressDepth == 0) ret += rtfEscape(data);
+	if(suppressDepth != 0 || data.empty()) return;
+
+	auto& context = contexts.back();
+	if(context.timestampIconPending) {
+		context.timestampIconPending = false;
+		auto begin = data.begin();
+		if(data.front() == '[') {
+			ret += rtfEscape("[");
+			++begin;
+		}
+		auto icon = Emoticons::resourceRtf(IDI_OK, 16);
+		if(!icon.empty()) ret += std::move(icon) + _T(" ");
+		ret += rtfEscape(string(begin, data.end()));
+		return;
+	}
+	ret += rtfEscape(data);
 }
 
 void Parser::endTag(const string& name) {
@@ -343,6 +371,7 @@ Parser::Context::Context(dwt::RichTextBox* box, Parser& parser) {
 
 	textColor = parser.addColor(box->getTextColor());
 	bgColor = parser.addColor(box->getBgColor());
+	timestampIconPending = false;
 	alignment = 0;
 }
 

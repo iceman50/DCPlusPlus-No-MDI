@@ -1322,6 +1322,8 @@ void MainWindow::handleSettings() {
 		}
 
 		ClientManager::getInstance()->infoUpdated();
+		HubFrame::refreshRichTextSettings();
+		PrivateFrame::refreshRichTextSettings();
 
 		bool rebuildGeo = prevGeo && SETTING(COUNTRY_FORMAT) != prevGeoFormat;
 		if(SETTING(GET_USER_COUNTRY) != prevGeo || SETTING(GEO_CITY) != prevGeoCity || SETTING(GEO_REGION) != prevGeoRegion) {

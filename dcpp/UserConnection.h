@@ -154,7 +154,9 @@ public:
 	void inf(bool withToken, int mcnSlots = 0);
 	void get(const string& aType, const string& aName, const int64_t aStart, const int64_t aBytes);
 	void snd(const string& aType, const string& aName, const int64_t aStart, const int64_t aBytes);
-	void pm(const string& message, bool thirdPerson = false, bool explicitRichText = false);
+	/** Send a direct private message. Returns false when an explicitly rich
+	 * message cannot be validated for this connection's route. */
+	bool pm(const string& message, bool thirdPerson = false, bool explicitRichText = false);
 	void pmi(const char* name, const string& value);
 	void send(const AdcCommand& c);
 

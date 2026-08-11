@@ -37,9 +37,9 @@ public:
 	virtual void connect(const OnlineUser& user, const string& token, ConnectionType type);
 	void connect(const OnlineUser& user, const string& token, ConnectionType type, bool secure);
 
-	virtual void hubMessage(const string& aMessage, bool thirdPerson = false,
+	virtual bool hubMessage(const string& aMessage, bool thirdPerson = false,
 		bool explicitRichText = false);
-	virtual void privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson = false,
+	virtual bool privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson = false,
 		bool echo = true, bool explicitRichText = false);
 	bool supportsRichText() const noexcept override { return supportsRTF0; }
 	virtual void sendUserCmd(const UserCommand& command, const ParamMap& params);

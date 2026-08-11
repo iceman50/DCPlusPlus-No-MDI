@@ -61,7 +61,10 @@ messageTimestamp(messageTimestamp)
 
 	htmlMessage += "<span id=\"message\" style=\"white-space: pre-wrap;\">";
 
-	if(SETTING(TIME_STAMPS)) {
+	// A hub-supplied ADC TS value is authoritative for display. Keep the local
+	// arrival time in timestamp for ordering and message metadata, but don't show
+	// both clocks for the same message.
+	if(SETTING(TIME_STAMPS) && !messageTimestamp) {
 		tmp = "[" + Util::getShortTimeString(timestamp) + "]";
 		htmlMessage += addSpan(ownMessage ? "ownTimestamp" : "timestamp", tmp, Util::emptyString) + " ";
 	}
@@ -189,19 +192,26 @@ void ChatMessage::format(Tagger& tags, string& tmp, const string& mentionNick) {
 				i = end;
 
 			} else if(Magnet::parseUri(link, hash, name, key)) {
+				string display = link;
+				RichText::Attachment attachment;
+				if(RichText::parseMagnetUri(link, maxLinkLength, attachment)) {
+					display += " [";
+					if(!attachment.name.empty()) display += attachment.name + " — ";
+					display += Util::formatBytes(attachment.size) + "]";
+				} else if(!name.empty()) {
+					display += " [" + name + "]";
+				}
 
-				if(!name.empty()) {
-					// magnet link: replace with the friendly name
-					name += " (magnet)";
-					tags.replaceText(begin, end, name);
-
-					// the size of the string has changed; update counts.
-					const auto delta = static_cast<int>(name.size()) - static_cast<int>(link.size());
+				if(display != link) {
+					tags.replaceText(begin, end, display);
+					const auto delta = static_cast<int>(display.size()) - static_cast<int>(link.size());
 					end += delta;
 					n += delta;
 				}
 
-				addLinkStr(begin, end, link);
+				// Keep the URI itself visible and clickable; friendly metadata and size
+				// follow outside the anchor so copying the link remains unambiguous.
+				addLinkStr(begin, begin + link.size(), link);
 				i = end;
 
 			} else {
