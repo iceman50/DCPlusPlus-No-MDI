@@ -171,7 +171,6 @@ bool SettingsDialog::initDialog() {
 		{
 			HTREEITEM item = addPage(T_("Sharing"), typeid(UploadPage), [container] { return new UploadPage(container); }, IDI_UPLOAD, TVI_ROOT);
 			addPage(T_("Filtering"), typeid(UploadFilteringPage), [container] { return new UploadFilteringPage(container); }, IDI_UPLOAD_FILTERING, item);
-			addPage(T_("Experimental"), typeid(ExperimentalPage), [container] { return new ExperimentalPage(container); }, IDI_EXPERT, item);
 		}
 
 		{
@@ -198,6 +197,7 @@ bool SettingsDialog::initDialog() {
 			addPage(T_("User matching"), typeid(UserMatchPage), [container] { return new UserMatchPage(container); }, IDI_USERS, item);
 		}
 
+		addPage(T_("Experimental"), typeid(ExperimentalPage), [container] { return new ExperimentalPage(container); }, IDI_EXPERT, TVI_ROOT);
 		addPage(T_("Plugins"), typeid(PluginPage), [container] { return new PluginPage(container); }, IDI_PLUGINS, TVI_ROOT);
 		// remember to change pluginPagePos accordingly...
 
