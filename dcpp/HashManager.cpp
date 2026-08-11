@@ -50,12 +50,15 @@ static const uint32_t HASH_FILE_VERSION = 3;
 const int64_t HashManager::MIN_BLOCK_SIZE = 64 * 1024;
 
 optional<TTHValue> HashManager::getTTH(const string& aFileName, int64_t aSize, uint32_t aTimeStamp) noexcept {
+	return requestTTH(aFileName, aSize, aTimeStamp).tth;
+}
+
+HashManager::TTHRequest HashManager::requestTTH(
+	const string& aFileName, int64_t aSize, uint32_t aTimeStamp) noexcept
+{
 	Lock l(cs);
 	auto tth = store.getTTH(aFileName, aSize, aTimeStamp);
-	if(!tth) {
-		hasher.hashFile(aFileName, aSize);
-	}
-	return tth;
+	return { tth, tth ? 0 : hasher.hashFile(aFileName, aSize, aTimeStamp) };
 }
 
 bool HashManager::verifyFileTTH(const string& aFileName, int64_t aSize, const TTHValue& root) noexcept {
@@ -134,10 +137,36 @@ bool HashManager::verifyFileTTH(const string& aFileName, int64_t aSize, const TT
 			}
 		}
 
-		fire(HashManagerListener::TTHDone(), aFileName, root);
+		fire(HashManagerListener::TTHDone(), aFileName, root, size, timestamp, 0);
 		return true;
 	} catch(const Exception&) {
 		return false;
+	} catch(...) {
+		return false;
+	}
+}
+
+bool HashManager::verifyFileTTH(File& file, int64_t aSize, const TTHValue& root) noexcept {
+	if(aSize < 0) return false;
+
+	try {
+		const auto originalPos = file.getPos();
+		ScopedFunctor(([&file, originalPos] { file.setPos(originalPos); }));
+		if(file.getSize() != aSize) return false;
+		file.setPos(0);
+
+		TigerTree tree(max(TigerTree::calcBlockSize(aSize, 10), MIN_BLOCK_SIZE));
+		ByteVector buffer(1024 * 1024);
+		int64_t remaining = aSize;
+		while(remaining > 0) {
+			auto bytes = static_cast<size_t>(std::min<int64_t>(remaining, buffer.size()));
+			if(file.read(buffer.data(), bytes) == 0 || bytes == 0) return false;
+			tree.update(buffer.data(), bytes);
+			remaining -= static_cast<int64_t>(bytes);
+		}
+		if(file.getSize() != aSize) return false;
+		tree.finalize();
+		return tree.getRoot() == root;
 	} catch(...) {
 		return false;
 	}
@@ -153,16 +182,20 @@ int64_t HashManager::getBlockSize(const TTHValue& root) {
 	return store.getBlockSize(root);
 }
 
-void HashManager::hashDone(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth, int64_t speed, int64_t size) {
+void HashManager::hashDone(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth,
+	int64_t speed, int64_t size, uint64_t jobId)
+{
 	try {
 		Lock l(cs);
 		store.addFile(aFileName, aTimeStamp, tth, true);
 	} catch (const Exception& e) {
 		LogManager::getInstance()->message(str(F_("Hashing failed: %1%") % e.getError()), LogMessage::SEV_ERROR, _("Hashing"));
+		hashFailed(aFileName, size, aTimeStamp, jobId,
+			HashManagerListener::Failure::HASH_STORE, e.getError());
 		return;
 	}
 
-	fire(HashManagerListener::TTHDone(), aFileName, tth.getRoot());
+	fire(HashManagerListener::TTHDone(), aFileName, tth.getRoot(), size, aTimeStamp, jobId);
 
 	if(speed > 0) {
 		LogManager::getInstance()->message(str(F_("Finished hashing: %1% (%2% at %3%/s)") % Util::addBrackets(aFileName) %
@@ -174,6 +207,12 @@ void HashManager::hashDone(const string& aFileName, uint32_t aTimeStamp, const T
 		LogManager::getInstance()->message(str(F_("Finished hashing: %1%") % Util::addBrackets(aFileName)),
 			LogMessage::SEV_INFO, _("Hashing"));
 	}
+}
+
+void HashManager::hashFailed(const string& aFileName, int64_t size, uint32_t timestamp, uint64_t jobId,
+	HashManagerListener::Failure reason, const string& detail) noexcept
+{
+	fire(HashManagerListener::TTHFailed(), aFileName, size, timestamp, jobId, reason, detail);
 }
 
 bool HashManager::verifyHashStore(bool fullCheck) {
@@ -1101,11 +1140,24 @@ HashManager::HashStore::~HashStore() {
 	flushWritesNoexcept();
 }
 
-void HashManager::Hasher::hashFile(const string& fileName, int64_t size) noexcept {
+uint64_t HashManager::Hasher::hashFile(const string& fileName, int64_t size, uint32_t timestamp) noexcept {
 	Lock l(cs);
-	if(w.insert(make_pair(fileName, size)).second && idle) {
-		s.signal();
+	if(running && !currentTerminal && currentFile == fileName && currentFileSize == size &&
+		currentTimestamp == timestamp)
+	{
+		return currentJobId;
 	}
+	auto& requests = w[fileName];
+	auto existing = std::find_if(requests.begin(), requests.end(), [&](const HashRequest& request) {
+		return request.size == size && request.timestamp == timestamp;
+	});
+	if(existing != requests.end()) return existing->jobId;
+
+	auto jobId = nextJobId++;
+	if(jobId == 0) jobId = nextJobId++;
+	requests.push_back({ size, timestamp, jobId });
+	if(idle) s.signal();
+	return jobId;
 }
 
 bool HashManager::Hasher::pause() noexcept {
@@ -1126,25 +1178,35 @@ bool HashManager::Hasher::isPaused() const noexcept {
 }
 
 void HashManager::Hasher::stopHashing(const string& baseDir) {
-	Lock l(cs);
-	for(auto i = w.begin(); i != w.end();) {
-		if(strncmp(baseDir.c_str(), i->first.c_str(), baseDir.size()) == 0) {
-			w.erase(i++);
-		} else {
-			++i;
+	vector<pair<string, HashRequest>> cancelled;
+	{
+		Lock l(cs);
+		for(auto i = w.begin(); i != w.end();) {
+			if(strncmp(baseDir.c_str(), i->first.c_str(), baseDir.size()) == 0) {
+				for(const auto& request: i->second) cancelled.emplace_back(i->first, request);
+				i = w.erase(i);
+			} else {
+				++i;
+			}
 		}
+	}
+	for(const auto& item: cancelled) {
+		HashManager::getInstance()->hashFailed(item.first, item.second.size, item.second.timestamp,
+			item.second.jobId,
+			HashManagerListener::Failure::CANCELLED, _("Hashing was cancelled"));
 	}
 }
 
 void HashManager::Hasher::getStats(string& curFile, uint64_t& bytesLeft, size_t& filesLeft) const {
 	Lock l(cs);
 	curFile = currentFile;
-	filesLeft = w.size();
+	filesLeft = 0;
+	for(const auto& item: w) filesLeft += item.second.size();
 	if (running)
 		filesLeft++;
 	bytesLeft = 0;
 	for (auto& i: w) {
-		bytesLeft += i.second;
+		for(const auto& request: i.second) bytesLeft += request.size;
 	}
 	bytesLeft += currentSize;
 }
@@ -1177,7 +1239,11 @@ void HashManager::Hasher::scheduleRebuild() {
 int HashManager::Hasher::run() {
 	setThreadPriority(Thread::IDLE);
 
+	struct SnapshotChanged { };
 	string fname;
+	int64_t requestedSize = 0;
+	uint32_t requestedTimestamp = 0;
+	uint64_t requestedJobId = 0;
 
 	for(;;) {
 		s.wait();
@@ -1193,25 +1259,54 @@ int HashManager::Hasher::run() {
 		{
 			Lock l(cs);
 			if(!w.empty()) {
-				currentFile = fname = w.begin()->first;
-				currentSize = w.begin()->second;
-				w.erase(w.begin());
+				auto item = w.begin();
+				currentFile = fname = item->first;
+				const auto request = item->second.front();
+				item->second.pop_front();
+				if(item->second.empty()) w.erase(item);
+				currentFileSize = requestedSize = request.size;
+				currentTimestamp = requestedTimestamp = request.timestamp;
+				currentJobId = requestedJobId = request.jobId;
+				currentTerminal = false;
+				currentSize = requestedSize;
+				running = true;
 				idle = false;
 			} else {
 				fname.clear();
+				requestedSize = 0;
+				requestedTimestamp = 0;
+				requestedJobId = 0;
 				idle = true;
 				continue;
 			}
 		}
 
-		running = true;
 		if(!fname.empty()) {
+			bool terminalPublished = false;
+			auto beginTerminal = [this, &terminalPublished] {
+				{
+					Lock l(cs);
+					currentTerminal = true;
+				}
+				terminalPublished = true;
+			};
 			try {
 				auto start = GET_TICK();
 
 				File f(fname, File::READ, File::OPEN);
 				auto size = f.getSize();
 				auto timestamp = f.getLastModified();
+				if(size != requestedSize || (requestedTimestamp != 0 && timestamp != requestedTimestamp)) {
+					f.close();
+					const auto detail = _("The file changed before hashing started");
+					beginTerminal();
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						HashManagerListener::Failure::FILE_CHANGED, detail);
+					LogManager::getInstance()->message(str(F_("%1% not shared; the file changed before hashing started.") %
+						Util::addBrackets(fname)), LogMessage::SEV_WARNING, _("Hashing"));
+					throw SnapshotChanged();
+				}
 
 				auto sizeLeft = size;
 				auto bs = max(TigerTree::calcBlockSize(size, 10), MIN_BLOCK_SIZE);
@@ -1254,7 +1349,9 @@ int HashManager::Hasher::run() {
 					return !stop;
 				});
 
-				f.close();
+				// Keep the write-denying snapshot handle alive through hashDone and
+				// listener publication. On Windows this prevents the path from being
+				// replaced between the final read and snapshot attribution.
 				tt.finalize();
 				uint64_t end = GET_TICK();
 				int64_t speed = 0;
@@ -1263,25 +1360,70 @@ int HashManager::Hasher::run() {
 				}
 
 				if(xcrc32 && xcrc32->getValue() != sfv.getCRC()) {
+					beginTerminal();
 					LogManager::getInstance()->message(str(F_("%1% not shared; calculated CRC32 does not match the one found in SFV file.") % Util::addBrackets(fname)),
 						LogMessage::SEV_WARNING, _("Hashing"));
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						HashManagerListener::Failure::CRC_MISMATCH, _("The file failed its SFV CRC32 check"));
 				} else if(sizeLeft != 0) {
+					beginTerminal();
 					LogManager::getInstance()->message(str(F_("%1% not shared; hashing did not complete.") % Util::addBrackets(fname)),
 						LogMessage::SEV_WARNING, _("Hashing"));
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						stop ? HashManagerListener::Failure::CANCELLED : HashManagerListener::Failure::INCOMPLETE,
+						stop ? _("Hashing was cancelled") : _("Hashing did not read the complete file"));
 				} else {
-					HashManager::getInstance()->hashDone(fname, timestamp, tt, speed, size);
+					beginTerminal();
+					HashManager::getInstance()->hashDone(fname, timestamp, tt, speed, size, requestedJobId);
 				}
+			} catch(const SnapshotChanged&) {
+				// The exact failure was already reported above.
 			} catch(const FileException& e) {
-				LogManager::getInstance()->message(str(F_("Error hashing %1%: %2%") % Util::addBrackets(fname) % e.getError()),
-					LogMessage::SEV_ERROR, _("Hashing"));
+				if(!terminalPublished) {
+					beginTerminal();
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						HashManagerListener::Failure::FILE_IO, e.getError());
+					LogManager::getInstance()->message(str(F_("Error hashing %1%: %2%") % Util::addBrackets(fname) % e.getError()),
+						LogMessage::SEV_ERROR, _("Hashing"));
+				}
+			} catch(const Exception& e) {
+				if(!terminalPublished) {
+					beginTerminal();
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						HashManagerListener::Failure::FILE_IO, e.getError());
+					LogManager::getInstance()->message(str(F_("Error hashing %1%: %2%") % Util::addBrackets(fname) % e.getError()),
+						LogMessage::SEV_ERROR, _("Hashing"));
+				}
+			} catch(const std::exception& e) {
+				if(!terminalPublished) {
+					beginTerminal();
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						HashManagerListener::Failure::FILE_IO, e.what());
+				}
+			} catch(...) {
+				if(!terminalPublished) {
+					beginTerminal();
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						HashManagerListener::Failure::FILE_IO, _("Unknown hashing error"));
+				}
 			}
 		}
 		{
 			Lock l(cs);
 			currentFile.clear();
 			currentSize = 0;
+			currentFileSize = 0;
+			currentTimestamp = 0;
+			currentJobId = 0;
+			currentTerminal = false;
+			running = false;
 		}
-		running = false;
 		s.signal();
 	}
 	return 0;

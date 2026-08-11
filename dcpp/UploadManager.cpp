@@ -74,6 +74,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	optional<TTHValue> requestedRoot;
 	int64_t expectedFileSize = -1;
 	bool verifyTempShare = false;
+	std::unique_ptr<File> verifiedFile;
 
 	try {
 		if(aType == Transfer::names[Transfer::TYPE_FILE]) {
@@ -92,20 +93,19 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				type = Transfer::TYPE_FULL_LIST;
 				miniSlot = true;
 			} else {
-				auto info = ShareManager::getInstance()->toRealWithSize(aFile, aSource.getHubUrl());
-				sourceFile = move(info.first);
-				expectedFileSize = info.second;
+				auto info = ShareManager::getInstance()->resolveFile(aFile, aSource.getHubUrl());
+				sourceFile = move(info.realPath);
+				expectedFileSize = info.size;
 				// Keep the requested root alongside the resolved path. If a refresh is
 				// active, the path is treated as a candidate until its bytes prove the TTH.
 				if(aFile.compare(0, 4, "TTH/") == 0) {
 					requestedRoot = TTHValue(aFile.substr(4));
-					verifyTempShare = ShareManager::getInstance()->isTempShare(
-						*requestedRoot, sourceFile, aSource.getHubUrl());
+					verifyTempShare = info.temporary;
 				} else {
 					requestedRoot = ShareManager::getInstance()->getTTH(aFile, aSource.getHubUrl());
 				}
 				type = Transfer::TYPE_FILE;
-				miniSlot = info.second <= static_cast<int64_t>(SETTING(SET_MINISLOT_SIZE) * 1024);
+				miniSlot = info.size <= static_cast<int64_t>(SETTING(SET_MINISLOT_SIZE) * 1024);
 			}
 
 		} else if(aType == Transfer::names[Transfer::TYPE_TREE]) {
@@ -193,6 +193,28 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 		if(!requestedRoot) {
 			return false;
 		}
+		if(verifyTempShare) {
+			try {
+				// Resolve again after slot negotiation. Removal, eviction, or a settings
+				// change must not turn a temporary candidate into an unverified upload.
+				auto current = ShareManager::getInstance()->resolveFile(
+					"TTH/" + requestedRoot->toBase32(), aSource.getHubUrl());
+				if(current.size != expectedFileSize) return false;
+
+				// Keep this exact handle for the transfer. On Windows the non-SHARED open
+				// prevents writes/replacement while the bytes are hashed and then served;
+				// hashing the handle also bypasses second-resolution timestamp caches.
+				auto candidate = std::make_unique<File>(current.realPath, File::READ, File::OPEN);
+				if(!HashManager::getInstance()->verifyFileTTH(*candidate, current.size, *requestedRoot)) return false;
+				if(current.temporary && !ShareManager::getInstance()->validateChatAttachment(
+					*requestedRoot, current.size, aSource.getHubUrl())) return false;
+				sourceFile = std::move(current.realPath);
+				verifiedFile = std::move(candidate);
+				return true;
+			} catch(const ShareException&) {
+				return false;
+			}
+		}
 
 		// Try the path from the cached virtual lookup first, then fall back to any
 		// current shared path with the same TTH that this hub is allowed to see.
@@ -228,7 +250,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 					}
 				}
 
-				File* f = new File(sourceFile, File::READ, File::OPEN);
+				File* f = verifiedFile ? verifiedFile.release() : new File(sourceFile, File::READ, File::OPEN);
 
 				start = aStartPos;
 				fullSize = f->getSize();

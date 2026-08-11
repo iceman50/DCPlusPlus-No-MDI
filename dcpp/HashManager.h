@@ -22,6 +22,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <atomic>
 
 #include <optional>
 
@@ -45,6 +46,7 @@ using std::optional;
 STANDARD_EXCEPTION(HashException);
 
 class HashLoader;
+class File;
 
 class HashManager : public Singleton<HashManager>, public Speaker<HashManagerListener>,
 	private TimerManagerListener
@@ -64,12 +66,20 @@ public:
 
 	/** Get the TTH root associated with the filename if its tree is current. */
 	optional<TTHValue> getTTH(const string& aFileName, int64_t aSize, uint32_t aTimeStamp) noexcept;
+	struct TTHRequest {
+		optional<TTHValue> tth;
+		uint64_t jobId;
+	};
+	/** Return the current root or the exact hash-job cohort that will produce it. */
+	TTHRequest requestTTH(const string& aFileName, int64_t aSize, uint32_t aTimeStamp) noexcept;
 	/**
 	 * Hash a file synchronously and verify that it still matches the advertised root.
 	 * Used for upload requests during share refreshes, where the cached virtual path
 	 * may briefly point at stale or moved filesystem data.
 	 */
 	bool verifyFileTTH(const string& aFileName, int64_t aSize, const TTHValue& root) noexcept;
+	/** Verify an already-open file handle and restore its original position. */
+	bool verifyFileTTH(File& file, int64_t aSize, const TTHValue& root) noexcept;
 
 	void stopHashing(const string& baseDir) { hasher.stopHashing(baseDir); }
 	void setPriority(Thread::Priority p) { hasher.setThreadPriority(p); }
@@ -116,9 +126,11 @@ public:
 private:
 	class Hasher : public Thread {
 	public:
-		Hasher() : stop(false), running(false), idle(true), paused(0), rebuild(false), currentSize(0) { }
+		Hasher() : stop(false), running(false), idle(true), paused(0), rebuild(false),
+			currentSize(0), currentFileSize(0), currentTimestamp(0), currentJobId(0),
+			currentTerminal(false), nextJobId(1) { }
 
-		void hashFile(const string& fileName, int64_t size) noexcept;
+		uint64_t hashFile(const string& fileName, int64_t size, uint32_t timestamp) noexcept;
 
 		/// @return whether hashing was already paused
 		bool pause() noexcept;
@@ -129,25 +141,45 @@ private:
 		virtual int run();
 		bool fastHash(const string& fname, uint8_t* buf, TigerTree& tth, int64_t size, CRC32Filter* xcrc32);
 		void getStats(string& curFile, uint64_t& bytesLeft, size_t& filesLeft) const;
-		void shutdown() { stop = true; if(paused) s.signal(); s.signal(); }
+		void shutdown() {
+			bool wakePaused;
+			{
+				Lock l(cs);
+				stop = true;
+				wakePaused = paused != 0;
+			}
+			if(wakePaused) s.signal();
+			s.signal();
+		}
 		void scheduleRebuild();
 
 	private:
+		struct HashRequest {
+			int64_t size;
+			uint32_t timestamp;
+			uint64_t jobId;
+		};
+
 		// Case-sensitive (faster), it is rather unlikely that case changes, and if it does it's harmless.
 		// map because it's sorted (to avoid random hash order that would create quite strange shares while hashing)
-		map<string, int64_t> w;
+		map<string, std::deque<HashRequest>> w;
 		mutable CriticalSection cs;
 		Semaphore s;
 
-		bool stop;
+		std::atomic<bool> stop;
 		/** A queue item's currently being processed */ 
-		bool running;
+		std::atomic<bool> running;
 		/** The queue is empty */ 
 		bool idle;
 		unsigned paused;
-		bool rebuild;
+		std::atomic<bool> rebuild;
 		string currentFile;
 		int64_t currentSize;
+		int64_t currentFileSize;
+		uint32_t currentTimestamp;
+		uint64_t currentJobId;
+		bool currentTerminal;
+		uint64_t nextJobId;
 
 		void instantPause();
 	};
@@ -296,7 +328,10 @@ private:
 	/** Single node tree where node = root, no storage in HashData.dat */
 	static const int64_t SMALL_TREE = -1;
 
-	void hashDone(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth, int64_t speed, int64_t size);
+	void hashDone(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth, int64_t speed,
+		int64_t size, uint64_t jobId);
+	void hashFailed(const string& aFileName, int64_t size, uint32_t timestamp, uint64_t jobId,
+		HashManagerListener::Failure reason, const string& detail) noexcept;
 
 	void doRebuild() {
 		Lock l(cs);

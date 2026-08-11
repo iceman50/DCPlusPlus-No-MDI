@@ -10,8 +10,10 @@
 #undef private
 
 #include <dcpp/ClientManager.h>
+#include <dcpp/FavoriteManager.h>
 #include <dcpp/File.h>
 #include <dcpp/HashManager.h>
+#include <dcpp/HttpManager.h>
 #include <dcpp/LogManager.h>
 #include <dcpp/QueueManager.h>
 #include <dcpp/SearchResult.h>
@@ -60,10 +62,16 @@ public:
 		UploadManager::newInstance();
 		QueueManager::newInstance();
 		ShareManager::newInstance();
+		HttpManager::newInstance();
+		FavoriteManager::newInstance();
 	}
 
 	void TearDown() override {
 		ShareManager::deleteInstance();
+		FavoriteManager::getInstance()->shutdown();
+		FavoriteManager::deleteInstance();
+		HttpManager::getInstance()->shutdown();
+		HttpManager::deleteInstance();
 		QueueManager::deleteInstance();
 		UploadManager::deleteInstance();
 		ClientManager::deleteInstance();
@@ -124,6 +132,32 @@ public:
 		sm->directories.clear();
 		sm->tthIndex.clear();
 		sm->bloom.clear();
+	}
+
+	struct CachedFile {
+		string path;
+		int64_t size;
+		uint32_t timestamp;
+		TTHValue tth;
+	};
+
+	CachedFile cacheFile(const string& path, const string& contents) {
+		{
+			std::ofstream output(path, std::ios::binary);
+			output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+		}
+
+		TigerTree tree(HashManager::MIN_BLOCK_SIZE);
+		tree.update(contents.data(), contents.size());
+		tree.finalize();
+
+		File file(path, File::READ, File::OPEN | File::SHARED);
+		const auto size = file.getSize();
+		const auto timestamp = file.getLastModified();
+		file.close();
+		EXPECT_EQ(size, static_cast<int64_t>(contents.size()));
+		EXPECT_TRUE(HashManager::getInstance()->verifyFileTTH(path, size, tree.getRoot()));
+		return { path, size, timestamp, tree.getRoot() };
 	}
 
 	string configPath;
@@ -246,9 +280,10 @@ TEST_F(ShareCacheTest, skips_cache_for_unc_share_roots) {
 	EXPECT_EQ(ShareManager::getInstance()->getSharedFiles(), 0U);
 }
 
-TEST_F(ShareCacheTest, temp_shares_are_tth_only_route_scoped_and_not_advertised) {
+TEST_F(ShareCacheTest, temp_shares_are_searchable_and_downloadable_only_on_their_route) {
 	auto sm = ShareManager::getInstance();
 	const auto path = configPath + "dropped photo.jpg";
+	const string route = "adc://example.invalid";
 	const string contents = "temporary attachment";
 	std::ofstream(path, std::ios::binary) << contents;
 	TigerTree tree(HashManager::MIN_BLOCK_SIZE);
@@ -258,25 +293,333 @@ TEST_F(ShareCacheTest, temp_shares_are_tth_only_route_scoped_and_not_advertised)
 	const auto timestamp = file.getLastModified();
 	file.close();
 	ASSERT_TRUE(HashManager::getInstance()->verifyFileTTH(path, contents.size(), tree.getRoot()));
-	ASSERT_TRUE(sm->addTempShare(path, contents.size(), timestamp, tree.getRoot(), "adc://example.invalid"));
+	ASSERT_TRUE(sm->addTempShare(path, contents.size(), timestamp, tree.getRoot(), route));
+	const string nmdcRoute = "dchub://legacy.example.invalid";
+	ASSERT_TRUE(sm->addTempShare(path, contents.size(), timestamp, tree.getRoot(), nmdcRoute));
 
 	EXPECT_EQ(sm->getSharedFiles(), 0U);
 	EXPECT_EQ(sm->getShareSize(), 0);
 	EXPECT_TRUE(sm->search("dropped", SearchManager::SIZE_DONTCARE, 0,
 		SearchManager::TYPE_ANY, 10).empty());
-	EXPECT_EQ(sm->toRealWithSize("TTH/" + tree.getRoot().toBase32()),
-		std::make_pair(path, static_cast<int64_t>(contents.size())));
 
 	const string matchingRoute = "ADC://EXAMPLE.INVALID";
 	const string otherRoute = "adc://other.invalid";
+	const auto matchingResults = sm->search("dropped", SearchManager::SIZE_DONTCARE, 0,
+		SearchManager::TYPE_ANY, 10, matchingRoute);
+	ASSERT_EQ(matchingResults.size(), 1U);
+	EXPECT_EQ(matchingResults.front()->getType(), SearchResult::TYPE_FILE);
+	EXPECT_EQ(matchingResults.front()->getFile(), "dropped photo.jpg");
+	EXPECT_EQ(matchingResults.front()->getSize(), static_cast<int64_t>(contents.size()));
+	EXPECT_EQ(matchingResults.front()->getTTH(), tree.getRoot());
+	EXPECT_TRUE(sm->search("dropped", SearchManager::SIZE_DONTCARE, 0,
+		SearchManager::TYPE_ANY, 10, otherRoute).empty());
+	const auto nmdcResults = sm->search("dropped", SearchManager::SIZE_DONTCARE, 0,
+		SearchManager::TYPE_ANY, 10, nmdcRoute);
+	ASSERT_EQ(nmdcResults.size(), 1U);
+	EXPECT_EQ(nmdcResults.front()->getTTH(), tree.getRoot());
+
+	const auto adcNameResults = sm->search(StringList { "ANphoto", "EXjpg" }, 10, matchingRoute);
+	ASSERT_EQ(adcNameResults.size(), 1U);
+	EXPECT_EQ(adcNameResults.front()->getTTH(), tree.getRoot());
+	const auto adcTthResults = sm->search(StringList { "TR" + tree.getRoot().toBase32() }, 10, matchingRoute);
+	ASSERT_EQ(adcTthResults.size(), 1U);
+	EXPECT_EQ(adcTthResults.front()->getTTH(), tree.getRoot());
+	EXPECT_TRUE(sm->search(StringList { "TR" + tree.getRoot().toBase32() }, 10, otherRoute).empty());
+
+	EXPECT_EQ(sm->toRealWithSize("TTH/" + tree.getRoot().toBase32(), matchingRoute),
+		std::make_pair(path, static_cast<int64_t>(contents.size())));
+	EXPECT_EQ(sm->toRealWithSize("TTH/" + tree.getRoot().toBase32(), nmdcRoute),
+		std::make_pair(path, static_cast<int64_t>(contents.size())));
+	EXPECT_THROW(sm->toRealWithSize("TTH/" + tree.getRoot().toBase32(), otherRoute), ShareException);
+	const auto resolved = sm->resolveFile("TTH/" + tree.getRoot().toBase32(), matchingRoute);
+	EXPECT_EQ(resolved.realPath, path);
+	EXPECT_EQ(resolved.size, static_cast<int64_t>(contents.size()));
+	EXPECT_TRUE(resolved.temporary);
+
 	ASSERT_NE(sm->findTempShare(tree.getRoot(), &matchingRoute), nullptr);
 	EXPECT_EQ(sm->findTempShare(tree.getRoot(), &otherRoute), nullptr);
 	EXPECT_TRUE(sm->isTempShare(tree.getRoot(), path, matchingRoute));
 	EXPECT_FALSE(sm->isTempShare(tree.getRoot(), path, otherRoute));
 	const auto tempShares = sm->getTempShares();
-	ASSERT_EQ(tempShares.size(), 1U);
+	ASSERT_EQ(tempShares.size(), 2U);
 	EXPECT_EQ(tempShares.front().realPath, path);
+
+	SettingsManager::getInstance()->set(SettingsManager::ENABLE_RTF_TEMP_SHARES, false);
+	EXPECT_TRUE(sm->search("dropped", SearchManager::SIZE_DONTCARE, 0,
+		SearchManager::TYPE_ANY, 10, matchingRoute).empty());
+	EXPECT_THROW(sm->toRealWithSize("TTH/" + tree.getRoot().toBase32(), matchingRoute), ShareException);
 	EXPECT_FALSE(sm->removeTempShare(path, tree.getRoot(), otherRoute));
 	EXPECT_TRUE(sm->removeTempShare(path, tree.getRoot(), matchingRoute));
+	EXPECT_TRUE(sm->removeTempShare(path, tree.getRoot(), nmdcRoute));
 	EXPECT_TRUE(sm->getTempShares().empty());
+}
+
+TEST_F(ShareCacheTest, prepares_cached_unshared_attachment_with_exact_route_metadata) {
+	auto sm = ShareManager::getInstance();
+	const string route = "adc://attachments.example.invalid";
+	const auto cached = cacheFile(configPath + "cached attachment.png", "cached temporary attachment");
+	optional<ShareManager::ChatAttachmentResult> result;
+
+	const auto requestId = sm->prepareChatAttachment(cached.path, route,
+		[&result](ShareManager::ChatAttachmentResult value) { result = std::move(value); });
+
+	ASSERT_TRUE(result);
+	EXPECT_EQ(result->requestId, requestId);
+	EXPECT_TRUE(result->error.empty());
+	ASSERT_TRUE(result->attachment);
+	EXPECT_EQ(result->attachment->realPath, cached.path);
+	EXPECT_EQ(result->attachment->hubUrl, route);
+	EXPECT_EQ(result->attachment->tth, cached.tth);
+	EXPECT_EQ(result->attachment->size, cached.size);
+	EXPECT_EQ(result->attachment->timestamp, cached.timestamp);
+	EXPECT_TRUE(result->attachment->temporary);
+	EXPECT_TRUE(sm->validateChatAttachment(cached.tth, cached.size, route));
+	EXPECT_FALSE(sm->validateChatAttachment(cached.tth, cached.size, "adc://other.example.invalid"));
+
+	{
+		std::ofstream output(cached.path, std::ios::binary | std::ios::trunc);
+		output << "changed temporary attachment with a different size";
+	}
+	EXPECT_FALSE(sm->validateChatAttachment(cached.tth, cached.size, route));
+}
+
+TEST_F(ShareCacheTest, opened_file_verification_ignores_stale_same_metadata_cache_entries) {
+	const auto cached = cacheFile(configPath + "same metadata attachment.bin", "AAAAAAAAAAAAAAAA");
+	const string replacement = "BBBBBBBBBBBBBBBB";
+	{
+		std::ofstream output(cached.path, std::ios::binary | std::ios::trunc);
+		output.write(replacement.data(), static_cast<std::streamsize>(replacement.size()));
+	}
+
+	TigerTree replacementTree(HashManager::MIN_BLOCK_SIZE);
+	replacementTree.update(replacement.data(), replacement.size());
+	replacementTree.finalize();
+
+	File file(cached.path, File::READ, File::OPEN);
+	file.setPos(3);
+	EXPECT_FALSE(HashManager::getInstance()->verifyFileTTH(file, cached.size, cached.tth));
+	EXPECT_EQ(file.getPos(), 3);
+	EXPECT_TRUE(HashManager::getInstance()->verifyFileTTH(
+		file, static_cast<int64_t>(replacement.size()), replacementTree.getRoot()));
+	EXPECT_EQ(file.getPos(), 3);
+}
+
+TEST_F(ShareCacheTest, preparing_existing_temp_share_moves_it_to_newest_position) {
+	auto sm = ShareManager::getInstance();
+	const string route = "adc://attachments.example.invalid";
+	const auto first = cacheFile(configPath + "first attachment.bin", "first attachment");
+	const auto second = cacheFile(configPath + "second attachment.bin", "second attachment");
+	int callbackCount = 0;
+	auto prepare = [&](const CachedFile& file) {
+		sm->prepareChatAttachment(file.path, route, [&](ShareManager::ChatAttachmentResult result) {
+			++callbackCount;
+			EXPECT_TRUE(result.error.empty());
+			ASSERT_TRUE(result.attachment);
+			EXPECT_TRUE(result.attachment->temporary);
+		});
+	};
+
+	prepare(first);
+	prepare(second);
+	ASSERT_EQ(callbackCount, 2);
+	auto shares = sm->getTempShares();
+	ASSERT_EQ(shares.size(), 2U);
+	EXPECT_EQ(shares[0].tth, first.tth);
+	EXPECT_EQ(shares[1].tth, second.tth);
+
+	prepare(first);
+	ASSERT_EQ(callbackCount, 3);
+	shares = sm->getTempShares();
+	ASSERT_EQ(shares.size(), 2U);
+	EXPECT_EQ(shares[0].tth, second.tth);
+	EXPECT_EQ(shares[1].tth, first.tth);
+}
+
+TEST_F(ShareCacheTest, preparing_permanently_visible_file_does_not_create_temp_share) {
+	auto sm = ShareManager::getInstance();
+	const string route = "adc://attachments.example.invalid";
+	const auto cached = cacheFile(sharePath + "visible attachment.jpg", "permanently shared attachment");
+
+	auto root = ShareManager::Directory::create("Visible");
+	root->files.insert(ShareManager::Directory::File("visible attachment.jpg", cached.size, root, cached.tth));
+	sm->shares[sharePath] = "Visible";
+	sm->directories["Visible"] = root;
+	sm->rebuildIndices(1);
+
+	optional<ShareManager::ChatAttachmentResult> result;
+	sm->prepareChatAttachment(cached.path, route,
+		[&result](ShareManager::ChatAttachmentResult value) { result = std::move(value); });
+
+	ASSERT_TRUE(result);
+	EXPECT_TRUE(result->error.empty());
+	ASSERT_TRUE(result->attachment);
+	EXPECT_FALSE(result->attachment->temporary);
+	EXPECT_EQ(result->attachment->realPath, cached.path);
+	EXPECT_EQ(result->attachment->tth, cached.tth);
+	EXPECT_EQ(result->attachment->size, cached.size);
+	EXPECT_TRUE(sm->getTempShares().empty());
+	EXPECT_TRUE(sm->validateChatAttachment(cached.tth, cached.size, route));
+}
+
+TEST_F(ShareCacheTest, cancelling_pending_chat_attachment_removes_request_without_callback) {
+	auto sm = ShareManager::getInstance();
+	const auto path = configPath + "uncached attachment.bin";
+	{
+		std::ofstream output(path, std::ios::binary);
+		output << "not present in the hash store";
+	}
+	bool callbackCalled = false;
+	const auto requestId = sm->prepareChatAttachment(path, "adc://attachments.example.invalid",
+		[&callbackCalled](ShareManager::ChatAttachmentResult) { callbackCalled = true; });
+
+	EXPECT_FALSE(callbackCalled);
+	{
+		Lock l(sm->chatAttachmentCs);
+		auto pending = sm->pendingChatAttachments.find(requestId);
+		ASSERT_NE(pending, sm->pendingChatAttachments.end());
+		EXPECT_NE(pending->second.hashJobId, 0U);
+	}
+
+	sm->cancelChatAttachment(requestId);
+	{
+		Lock l(sm->chatAttachmentCs);
+		EXPECT_EQ(sm->pendingChatAttachments.find(requestId), sm->pendingChatAttachments.end());
+	}
+	EXPECT_FALSE(callbackCalled);
+	EXPECT_TRUE(sm->getTempShares().empty());
+}
+
+TEST_F(ShareCacheTest, terminal_hash_event_only_completes_its_own_job_cohort) {
+	auto sm = ShareManager::getInstance();
+	const string path = configPath + "same snapshot retry.bin";
+	const string route = "adc://attachments.example.invalid";
+	constexpr int64_t size = 123;
+	constexpr uint32_t timestamp = 456;
+	constexpr uint64_t oldJob = 7001;
+	constexpr uint64_t retryJob = 7002;
+	optional<ShareManager::ChatAttachmentResult> oldResult;
+	optional<ShareManager::ChatAttachmentResult> retryResult;
+	uint64_t generation;
+	{
+		Lock l(sm->chatAttachmentCs);
+		generation = sm->chatAttachmentGeneration;
+		const auto oldId = sm->nextChatAttachmentRequest.fetch_add(1);
+		const auto retryId = sm->nextChatAttachmentRequest.fetch_add(1);
+		sm->pendingChatAttachments.emplace(oldId, ShareManager::PendingChatAttachment {
+			oldId, path, route, size, timestamp, generation, oldJob,
+			[&oldResult](ShareManager::ChatAttachmentResult value) { oldResult = std::move(value); } });
+		sm->pendingChatAttachments.emplace(retryId, ShareManager::PendingChatAttachment {
+			retryId, path, route, size, timestamp, generation, retryJob,
+			[&retryResult](ShareManager::ChatAttachmentResult value) { retryResult = std::move(value); } });
+	}
+
+	sm->failChatAttachments(path, size, timestamp, oldJob, "old job failed");
+	ASSERT_TRUE(oldResult);
+	EXPECT_FALSE(oldResult->attachment);
+	EXPECT_EQ(oldResult->error, "old job failed");
+	EXPECT_FALSE(retryResult);
+	{
+		Lock l(sm->chatAttachmentCs);
+		ASSERT_EQ(sm->pendingChatAttachments.size(), 1U);
+		EXPECT_EQ(sm->pendingChatAttachments.begin()->second.hashJobId, retryJob);
+	}
+
+	sm->failChatAttachments(path, size, timestamp, retryJob, "retry failed");
+	ASSERT_TRUE(retryResult);
+	EXPECT_EQ(retryResult->error, "retry failed");
+	{
+		Lock l(sm->chatAttachmentCs);
+		EXPECT_TRUE(sm->pendingChatAttachments.empty());
+		EXPECT_TRUE(sm->activeChatAttachments.empty());
+	}
+}
+
+TEST_F(ShareCacheTest, cancelling_extracted_chat_attachment_suppresses_callback_and_cleans_state) {
+	auto sm = ShareManager::getInstance();
+	const auto cached = cacheFile(configPath + "extracted cancellation.bin", "cancel extracted attachment");
+	bool callbackCalled = false;
+	uint64_t generation;
+	{
+		Lock l(sm->chatAttachmentCs);
+		generation = sm->chatAttachmentGeneration;
+	}
+	const auto requestId = sm->nextChatAttachmentRequest.fetch_add(1);
+	ShareManager::PendingChatAttachment request { requestId, cached.path,
+		"adc://attachments.example.invalid", cached.size, cached.timestamp, generation, 0,
+		[&callbackCalled](ShareManager::ChatAttachmentResult) { callbackCalled = true; } };
+	{
+		Lock l(sm->chatAttachmentCs);
+		sm->activeChatAttachments.insert(requestId);
+	}
+
+	sm->cancelChatAttachment(requestId);
+	sm->finishChatAttachment(std::move(request), cached.tth);
+
+	EXPECT_FALSE(callbackCalled);
+	EXPECT_TRUE(sm->getTempShares().empty());
+	{
+		Lock l(sm->chatAttachmentCs);
+		EXPECT_EQ(sm->activeChatAttachments.count(requestId), 0U);
+		EXPECT_EQ(sm->cancelledChatAttachments.count(requestId), 0U);
+	}
+}
+
+TEST_F(ShareCacheTest, clearing_temp_shares_completes_pending_attachment_with_cancellation) {
+	auto sm = ShareManager::getInstance();
+	const auto path = configPath + "pending clear attachment.bin";
+	{
+		std::ofstream output(path, std::ios::binary);
+		output << "uncached attachment cancelled by clear";
+	}
+	optional<ShareManager::ChatAttachmentResult> result;
+	const auto requestId = sm->prepareChatAttachment(path, "adc://attachments.example.invalid",
+		[&result](ShareManager::ChatAttachmentResult value) { result = std::move(value); });
+	EXPECT_FALSE(result);
+
+	EXPECT_EQ(sm->clearTempShares(), 0U);
+	ASSERT_TRUE(result);
+	EXPECT_EQ(result->requestId, requestId);
+	EXPECT_FALSE(result->attachment);
+	EXPECT_FALSE(result->error.empty());
+	{
+		Lock l(sm->chatAttachmentCs);
+		EXPECT_EQ(sm->pendingChatAttachments.find(requestId), sm->pendingChatAttachments.end());
+		EXPECT_EQ(sm->activeChatAttachments.count(requestId), 0U);
+	}
+	EXPECT_TRUE(sm->getTempShares().empty());
+}
+
+TEST_F(ShareCacheTest, stale_attachment_completion_reports_clear_and_cannot_readd) {
+	auto sm = ShareManager::getInstance();
+	const string route = "adc://attachments.example.invalid";
+	const auto cached = cacheFile(configPath + "clear race attachment.bin", "clear race attachment");
+	uint64_t staleGeneration;
+	{
+		Lock l(sm->chatAttachmentCs);
+		staleGeneration = sm->chatAttachmentGeneration;
+	}
+
+	EXPECT_EQ(sm->clearTempShares(), 0U);
+	optional<ShareManager::ChatAttachmentResult> staleResult;
+	const auto staleRequestId = sm->nextChatAttachmentRequest.fetch_add(1);
+	ShareManager::PendingChatAttachment staleRequest { staleRequestId, cached.path, route,
+		cached.size, cached.timestamp, staleGeneration, 0,
+		[&staleResult](ShareManager::ChatAttachmentResult value) { staleResult = std::move(value); } };
+	{
+		Lock l(sm->chatAttachmentCs);
+		sm->activeChatAttachments.insert(staleRequestId);
+	}
+	sm->finishChatAttachment(std::move(staleRequest), cached.tth);
+
+	ASSERT_TRUE(staleResult);
+	EXPECT_FALSE(staleResult->attachment);
+	EXPECT_FALSE(staleResult->error.empty());
+	EXPECT_TRUE(sm->getTempShares().empty());
+	optional<ShareManager::ChatAttachmentResult> freshResult;
+	sm->prepareChatAttachment(cached.path, route,
+		[&freshResult](ShareManager::ChatAttachmentResult value) { freshResult = std::move(value); });
+	ASSERT_TRUE(freshResult);
+	ASSERT_TRUE(freshResult->attachment);
+	EXPECT_TRUE(freshResult->attachment->temporary);
+	ASSERT_EQ(sm->getTempShares().size(), 1U);
 }

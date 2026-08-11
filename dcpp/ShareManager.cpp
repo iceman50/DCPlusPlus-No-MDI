@@ -139,6 +139,12 @@ ShareManager::~ShareManager() {
 	TimerManager::getInstance()->removeListener(this);
 	QueueManager::getInstance()->removeListener(this);
 	HashManager::getInstance()->removeListener(this);
+	{
+		Lock l(chatAttachmentCs);
+		pendingChatAttachments.clear();
+		activeChatAttachments.clear();
+		cancelledChatAttachments.clear();
+	}
 
 	join();
 
@@ -308,6 +314,11 @@ pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile) {
 }
 
 pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile, const string& hubUrl) {
+	auto info = resolveFile(virtualFile, hubUrl);
+	return make_pair(std::move(info.realPath), info.size);
+}
+
+ShareManager::ResolvedFileInfo ShareManager::resolveFile(const string& virtualFile, const string& hubUrl) {
 	auto access = getShareAccess(hubUrl);
 	Lock l(cs);
 
@@ -319,15 +330,17 @@ pair<string, int64_t> ShareManager::toRealWithSize(const string& virtualFile, co
 		const TTHValue tth(virtualFile.substr(4));
 		auto i = tthIndex.find(tth);
 		if(i != tthIndex.end() && isFileAllowed(*i->second, access)) {
-			return make_pair(i->second->getRealPath(), i->second->getSize());
+			return { i->second->getRealPath(), i->second->getSize(), tth, false, 0 };
 		}
-		if(const auto temp = findTempShare(tth, &hubUrl)) return make_pair(temp->realPath, temp->size);
+		if(const auto temp = findTempShare(tth, &hubUrl)) {
+			return { temp->realPath, temp->size, temp->tth, true, temp->timestamp };
+		}
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
 
 	auto& f = findFile(virtualFile);
 	if(!isFileAllowed(f, access)) throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
-	return make_pair(f.getRealPath(), f.getSize());
+	return { f.getRealPath(), f.getSize(), f.tth, false, 0 };
 }
 
 StringList ShareManager::getRealPaths(const string& virtualPath) {
@@ -414,21 +427,31 @@ bool ShareManager::addTempShare(const string& realPath, int64_t size, uint32_t t
 {
 	if(!SETTING(ENABLE_RTF_TEMP_SHARES) || realPath.empty() || hubUrl.empty() || size < 0) return false;
 	try {
-		File file(realPath, File::READ, File::OPEN | File::SHARED);
+		// Retain a write-denying handle through the table commit so the validated
+		// bytes cannot be replaced between the snapshot check and publication.
+		File file(realPath, File::READ, File::OPEN);
 		if(file.getSize() != size || file.getLastModified() != timestamp) return false;
-		file.close();
 		const auto current = HashManager::getInstance()->getTTH(realPath, size, timestamp);
 		if(!current || *current != tth) return false;
+		return addValidatedTempShare(realPath, size, timestamp, tth, hubUrl);
 	} catch(...) {
 		return false;
 	}
+}
 
+bool ShareManager::addValidatedTempShare(const string& realPath, int64_t size, uint32_t timestamp,
+	const TTHValue& tth, const string& hubUrl) noexcept
+{
+	if(!SETTING(ENABLE_RTF_TEMP_SHARES) || realPath.empty() || hubUrl.empty() || size < 0) return false;
 	Lock l(cs);
 	auto existing = std::find_if(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
 		return item.tth == tth && Util::stricmp(item.hubUrl, hubUrl) == 0;
 	});
 	if(existing != tempShares.end()) {
-		*existing = { realPath, hubUrl, tth, size, timestamp };
+		// Reuse is an access: move the entry to the newest end so it isn't the next
+		// item evicted immediately after being inserted into another draft.
+		tempShares.erase(existing);
+		tempShares.push_back({ realPath, hubUrl, tth, size, timestamp });
 	} else {
 		const auto maxTempShares = static_cast<size_t>(std::max(1, SETTING(RTF_TEMP_SHARE_LIMIT)));
 		while(tempShares.size() >= maxTempShares) tempShares.erase(tempShares.begin());
@@ -465,10 +488,336 @@ bool ShareManager::removeTempShare(const string& realPath, const TTHValue& tth,
 }
 
 size_t ShareManager::clearTempShares() noexcept {
-	Lock l(cs);
-	const auto count = tempShares.size();
-	tempShares.clear();
+	vector<PendingChatAttachment> cancelled;
+	size_t count = 0;
+	{
+		Lock l(chatAttachmentCs);
+		++chatAttachmentGeneration;
+		for(auto& request: pendingChatAttachments) {
+			activeChatAttachments.insert(request.first);
+			cancelled.push_back(std::move(request.second));
+		}
+		pendingChatAttachments.clear();
+
+		// Keep the generation change and clearing atomic with attachment insertion.
+		// A finisher either adds before this lock and is cleared here, or observes the
+		// new generation and cannot add after Clear has completed.
+		Lock shareLock(cs);
+		count = tempShares.size();
+		tempShares.clear();
+	}
+	for(auto& request: cancelled) {
+		deliverChatAttachmentCallback(std::move(request), nullopt,
+			_("Attachment preparation was cancelled when temporary shares were cleared"));
+	}
 	return count;
+}
+
+uint64_t ShareManager::prepareChatAttachment(const string& realPath, const string& hubUrl,
+	ChatAttachmentCallback callback) noexcept
+{
+	auto requestId = nextChatAttachmentRequest.fetch_add(1);
+	if(requestId == 0) requestId = nextChatAttachmentRequest.fetch_add(1);
+	uint64_t generation;
+	{
+		Lock l(chatAttachmentCs);
+		generation = chatAttachmentGeneration;
+	}
+	PendingChatAttachment request { requestId, realPath, hubUrl, -1, 0, generation, 0, std::move(callback) };
+
+	if(!request.callback) return requestId;
+	if(realPath.empty() || hubUrl.empty()) {
+		deliverChatAttachmentCallback(std::move(request), nullopt, _("The attachment path or chat route is empty"));
+		return requestId;
+	}
+
+	try {
+		File file(realPath, File::READ, File::OPEN | File::SHARED);
+		request.size = file.getSize();
+		request.timestamp = file.getLastModified();
+		file.close();
+		if(request.size < 0 || request.timestamp == 0 || Util::getFileName(realPath).empty()) {
+			deliverChatAttachmentCallback(std::move(request), nullopt, _("The selected attachment is not a readable file"));
+			return requestId;
+		}
+	} catch(const Exception& e) {
+		deliverChatAttachmentCallback(std::move(request), nullopt, e.getError());
+		return requestId;
+	} catch(...) {
+		deliverChatAttachmentCallback(std::move(request), nullopt, _("The selected attachment could not be read"));
+		return requestId;
+	}
+
+	if(!SETTING(ENABLE_RTF_TEMP_SHARES)) {
+		bool inNormalShare = false;
+		{
+			Lock l(cs);
+			inNormalShare = static_cast<bool>(getFile(realPath));
+		}
+		if(!inNormalShare) {
+			deliverChatAttachmentCallback(std::move(request), nullopt,
+				_("Temporary attachment sharing is disabled and the selected file is not shared"));
+			return requestId;
+		}
+	}
+
+	const auto snapshotSize = request.size;
+	const auto snapshotTimestamp = request.timestamp;
+	bool cleared = false;
+	optional<PendingChatAttachment> completed;
+	optional<TTHValue> exactTth;
+	{
+		Lock l(chatAttachmentCs);
+		if(request.generation != chatAttachmentGeneration) {
+			cleared = true;
+		} else {
+			auto inserted = pendingChatAttachments.emplace(requestId, std::move(request));
+			auto hashRequest = HashManager::getInstance()->requestTTH(
+				realPath, snapshotSize, snapshotTimestamp);
+			if(hashRequest.tth) {
+				activeChatAttachments.insert(requestId);
+				completed = std::move(inserted.first->second);
+				pendingChatAttachments.erase(inserted.first);
+				exactTth = std::move(hashRequest.tth);
+			} else {
+				inserted.first->second.hashJobId = hashRequest.jobId;
+			}
+		}
+	}
+	if(cleared) {
+		deliverChatAttachmentCallback(std::move(request), nullopt,
+			_("Attachment preparation was cancelled when temporary shares were cleared"));
+		return requestId;
+	}
+	if(completed) finishChatAttachment(std::move(*completed), *exactTth);
+	return requestId;
+}
+
+void ShareManager::cancelChatAttachment(uint64_t requestId) noexcept {
+	Lock l(chatAttachmentCs);
+	if(pendingChatAttachments.erase(requestId) == 0 && activeChatAttachments.count(requestId)) {
+		cancelledChatAttachments.insert(requestId);
+	}
+}
+
+ShareManager::ChatAttachmentRequestState ShareManager::getChatAttachmentRequestState(
+	uint64_t requestId, uint64_t generation) const noexcept
+{
+	Lock l(chatAttachmentCs);
+	if(cancelledChatAttachments.count(requestId)) return ChatAttachmentRequestState::CANCELLED;
+	if(generation != chatAttachmentGeneration) return ChatAttachmentRequestState::CLEARED;
+	return ChatAttachmentRequestState::READY;
+}
+
+ShareManager::ChatAttachmentRequestState ShareManager::beginChatAttachmentCallback(
+	uint64_t requestId, uint64_t generation) noexcept
+{
+	Lock l(chatAttachmentCs);
+	auto state = ChatAttachmentRequestState::READY;
+	if(cancelledChatAttachments.count(requestId)) {
+		state = ChatAttachmentRequestState::CANCELLED;
+	} else if(generation != chatAttachmentGeneration) {
+		state = ChatAttachmentRequestState::CLEARED;
+	}
+	activeChatAttachments.erase(requestId);
+	cancelledChatAttachments.erase(requestId);
+	return state;
+}
+
+void ShareManager::deliverChatAttachmentCallback(PendingChatAttachment&& request,
+	optional<ChatAttachmentInfo> attachment, string error) noexcept
+{
+	const auto state = beginChatAttachmentCallback(request.requestId, request.generation);
+	if(state == ChatAttachmentRequestState::CANCELLED) return;
+	if(state == ChatAttachmentRequestState::CLEARED) {
+		attachment = nullopt;
+		error = _("Attachment preparation was cancelled when temporary shares were cleared");
+	}
+	invokeChatAttachmentCallback(std::move(request), std::move(attachment), std::move(error));
+}
+
+void ShareManager::invokeChatAttachmentCallback(PendingChatAttachment&& request,
+	optional<ChatAttachmentInfo> attachment, string error) noexcept
+{
+	try {
+		request.callback({ request.requestId, std::move(attachment), std::move(error) });
+	} catch(...) {
+		// Attachment consumers may be UI objects; never unwind them through hashing.
+	}
+}
+
+void ShareManager::finishChatAttachment(PendingChatAttachment request, const TTHValue& tth) noexcept {
+	const auto requestId = request.requestId;
+	auto stopIfUnavailable = [this, requestId, &request] {
+		const auto state = getChatAttachmentRequestState(requestId, request.generation);
+		if(state == ChatAttachmentRequestState::READY) return false;
+		deliverChatAttachmentCallback(std::move(request), nullopt, Util::emptyString);
+		return true;
+	};
+	if(stopIfUnavailable()) return;
+	try {
+		auto access = getShareAccess(request.hubUrl);
+		bool permanentlyVisible = false;
+		{
+			Lock l(cs);
+			auto i = tthIndex.find(tth);
+			permanentlyVisible = i != tthIndex.end() && i->second->getSize() == request.size &&
+				isFileAllowed(*i->second, access);
+		}
+
+		if(permanentlyVisible) {
+			if(stopIfUnavailable()) return;
+			ChatAttachmentInfo attachment { request.realPath, request.hubUrl, tth,
+				request.size, request.timestamp, false };
+			deliverChatAttachmentCallback(std::move(request), std::move(attachment), Util::emptyString);
+			return;
+		}
+
+		if(!SETTING(ENABLE_RTF_TEMP_SHARES)) {
+			if(stopIfUnavailable()) return;
+			deliverChatAttachmentCallback(std::move(request), nullopt,
+				_("The selected file is not exposed by the share configured for this chat route"));
+			return;
+		}
+
+		// File access (including network paths) stays outside chatAttachmentCs so
+		// Cancel, route changes, frame teardown and Clear remain responsive. The
+		// handle denies writes until the state check and temp-table commit finish.
+		File attachmentFile(request.realPath, File::READ, File::OPEN);
+		if(attachmentFile.getSize() != request.size ||
+			attachmentFile.getLastModified() != request.timestamp)
+		{
+			if(stopIfUnavailable()) return;
+			deliverChatAttachmentCallback(std::move(request), nullopt,
+				_("The attachment changed or could not be added to the temporary share"));
+			return;
+		}
+		const auto current = HashManager::getInstance()->getTTH(
+			request.realPath, request.size, request.timestamp);
+		if(!current || *current != tth) {
+			if(stopIfUnavailable()) return;
+			deliverChatAttachmentCallback(std::move(request), nullopt,
+				_("The attachment changed or could not be added to the temporary share"));
+			return;
+		}
+		bool shared = false;
+		bool callbackClaimed = false;
+		{
+			Lock l(chatAttachmentCs);
+			if(!cancelledChatAttachments.count(requestId) &&
+				request.generation == chatAttachmentGeneration)
+			{
+				shared = addValidatedTempShare(
+					request.realPath, request.size, request.timestamp, tth, request.hubUrl);
+				if(shared) {
+					// Temp-share insertion and callback ownership are one operation. A
+					// later cancellation cannot suppress the result while leaving an
+					// unowned route share behind.
+					activeChatAttachments.erase(requestId);
+					cancelledChatAttachments.erase(requestId);
+					callbackClaimed = true;
+				}
+			}
+		}
+		if(callbackClaimed) {
+			ChatAttachmentInfo attachment { request.realPath, request.hubUrl, tth,
+				request.size, request.timestamp, true };
+			invokeChatAttachmentCallback(std::move(request), std::move(attachment), Util::emptyString);
+			return;
+		}
+		if(stopIfUnavailable()) return;
+		if(!shared) {
+			deliverChatAttachmentCallback(std::move(request), nullopt,
+				_("The attachment changed or could not be added to the temporary share"));
+			return;
+		}
+	} catch(const Exception& e) {
+		if(stopIfUnavailable()) return;
+		deliverChatAttachmentCallback(std::move(request), nullopt, e.getError());
+	} catch(...) {
+		if(stopIfUnavailable()) return;
+		deliverChatAttachmentCallback(std::move(request), nullopt, _("Unable to prepare the attachment"));
+	}
+}
+
+void ShareManager::completeChatAttachments(const string& realPath, const TTHValue& tth,
+	int64_t size, uint32_t timestamp, uint64_t hashJobId) noexcept
+{
+	vector<PendingChatAttachment> completed;
+	{
+		Lock l(chatAttachmentCs);
+		for(auto i = pendingChatAttachments.begin(); i != pendingChatAttachments.end();) {
+			if(Util::stricmp(i->second.realPath, realPath) == 0 && i->second.size == size &&
+				i->second.timestamp == timestamp && i->second.hashJobId == hashJobId)
+			{
+				activeChatAttachments.insert(i->first);
+				completed.push_back(std::move(i->second));
+				i = pendingChatAttachments.erase(i);
+			} else {
+				++i;
+			}
+		}
+	}
+	for(auto& request: completed) finishChatAttachment(std::move(request), tth);
+}
+
+void ShareManager::failChatAttachments(const string& realPath, int64_t size, uint32_t timestamp,
+	uint64_t hashJobId, const string& error) noexcept
+{
+	vector<PendingChatAttachment> failed;
+	{
+		Lock l(chatAttachmentCs);
+		for(auto i = pendingChatAttachments.begin(); i != pendingChatAttachments.end();) {
+			if(Util::stricmp(i->second.realPath, realPath) == 0 && i->second.size == size &&
+				i->second.timestamp == timestamp && i->second.hashJobId == hashJobId)
+			{
+				activeChatAttachments.insert(i->first);
+				failed.push_back(std::move(i->second));
+				i = pendingChatAttachments.erase(i);
+			} else {
+				++i;
+			}
+		}
+	}
+	for(auto& request: failed) {
+		deliverChatAttachmentCallback(std::move(request), nullopt,
+			error.empty() ? _("Hashing the attachment failed") : error);
+	}
+}
+
+bool ShareManager::validateChatAttachment(const TTHValue& tth, int64_t size,
+	const string& hubUrl) const noexcept
+{
+	try {
+		auto access = getShareAccess(hubUrl);
+		optional<TempShareInfo> temporary;
+		{
+			Lock l(cs);
+			auto i = tthIndex.find(tth);
+			if(i != tthIndex.end() && i->second->getSize() == size &&
+				(hubUrl.empty() || isFileAllowed(*i->second, access))) {
+				return true;
+			}
+			if(!hubUrl.empty()) {
+				if(const auto item = findTempShare(tth, &hubUrl); item && item->size == size) temporary = *item;
+			}
+		}
+		if(!temporary) return false;
+
+		File file(temporary->realPath, File::READ, File::OPEN | File::SHARED);
+		if(file.getSize() != temporary->size || file.getLastModified() != temporary->timestamp) return false;
+		file.close();
+		const auto current = HashManager::getInstance()->getTTH(
+			temporary->realPath, temporary->size, temporary->timestamp);
+		if(!current || *current != tth) return false;
+
+		Lock l(cs);
+		const auto item = findTempShare(tth, &hubUrl);
+		return item && item->size == temporary->size && item->timestamp == temporary->timestamp &&
+			Util::stricmp(item->realPath, temporary->realPath) == 0;
+	} catch(...) {
+		return false;
+	}
 }
 
 optional<TTHValue> ShareManager::getTTH(const string& virtualFile) const {
@@ -2188,29 +2537,72 @@ SearchResultList ShareManager::search(SearchQuery&& query, size_t maxResults) no
 	return results;
 }
 
-SearchResultList ShareManager::search(SearchQuery&& query, size_t maxResults, const ShareAccess& access) noexcept {
+void ShareManager::appendTempSearchResults(SearchResultList& results, SearchQuery& query,
+	size_t maxResults, const string& hubUrl) noexcept
+{
+	if(results.size() >= maxResults || query.isDirectory || hubUrl.empty() ||
+		!SETTING(ENABLE_RTF_TEMP_SHARES))
+	{
+		return;
+	}
+
+	vector<TempShareInfo> candidates;
+	{
+		Lock l(cs);
+		for(const auto& item: tempShares) {
+			if(Util::stricmp(item.hubUrl, hubUrl) == 0) candidates.push_back(item);
+		}
+	}
+
+	for(const auto& item: candidates) {
+		if(results.size() >= maxResults) break;
+
+		if(query.root) {
+			if(item.tth != *query.root) continue;
+		} else {
+			const auto name = Util::getFileName(item.realPath);
+			if(name.empty() || item.size < query.gt || item.size > query.lt || query.isExcluded(name)) continue;
+
+			auto term = query.includeInit.begin();
+			for(; term != query.includeInit.end() && term->match(name); ++term) { }
+			if(term != query.includeInit.end() || !query.hasExt(name)) continue;
+		}
+
+		const auto duplicate = std::any_of(results.begin(), results.end(), [&](const SearchResultPtr& result) {
+			return result->getType() == SearchResult::TYPE_FILE && result->getTTH() == item.tth;
+		});
+		if(duplicate || !validateChatAttachment(item.tth, item.size, hubUrl)) continue;
+
+		results.push_back(new SearchResult(SearchResult::TYPE_FILE, item.size,
+			Util::getFileName(item.realPath), item.tth));
+		addHits(1);
+	}
+}
+
+SearchResultList ShareManager::search(SearchQuery&& query, size_t maxResults,
+	const ShareAccess& access, const string& hubUrl) noexcept
+{
 	SearchResultList results;
-	Lock l(cs);
+	{
+		Lock l(cs);
 
-	if(query.root) {
-		auto item = tthIndex.find(*query.root);
-		if(item != tthIndex.end() && isFileAllowed(*item->second, access)) {
-			results.push_back(new SearchResult(SearchResult::TYPE_FILE, item->second->getSize(),
-				item->second->getParent()->getFullName() + item->second->getName(), *item->second->tth));
-			addHits(1);
+		if(query.root) {
+			auto item = tthIndex.find(*query.root);
+			if(item != tthIndex.end() && isFileAllowed(*item->second, access)) {
+				results.push_back(new SearchResult(SearchResult::TYPE_FILE, item->second->getSize(),
+					item->second->getParent()->getFullName() + item->second->getName(), *item->second->tth));
+				addHits(1);
+			}
+		} else {
+			for(const auto& dir: directories) {
+				if(!isVirtualAllowed(dir.first, access)) continue;
+				dir.second->search(results, query, maxResults);
+				if(results.size() >= maxResults) break;
+			}
 		}
-		return results;
 	}
 
-	for(const auto& dir: directories) {
-		if(!isVirtualAllowed(dir.first, access)) {
-			continue;
-		}
-		dir.second->search(results, query, maxResults);
-		if(results.size() >= maxResults) {
-			return results;
-		}
-	}
+	appendTempSearchResults(results, query, maxResults, hubUrl);
 	return results;
 }
 
@@ -2228,7 +2620,7 @@ SearchResultList ShareManager::search(const StringList& adcParams, size_t maxRes
 
 SearchResultList ShareManager::search(const StringList& adcParams, size_t maxResults, const string& hubUrl) noexcept {
 	try {
-		return search(SearchQuery(adcParams), maxResults, getShareAccess(hubUrl));
+		return search(SearchQuery(adcParams), maxResults, getShareAccess(hubUrl), hubUrl);
 	} catch(...) {
 		return SearchResultList();
 	}
@@ -2250,7 +2642,8 @@ SearchResultList ShareManager::search(const string& nmdcString, int searchType, 
 	size_t maxResults, const string& hubUrl) noexcept
 {
 	try {
-		return search(SearchQuery(nmdcString, searchType, size, fileType), maxResults, getShareAccess(hubUrl));
+		return search(SearchQuery(nmdcString, searchType, size, fileType), maxResults,
+			getShareAccess(hubUrl), hubUrl);
 	} catch(...) {
 		return SearchResultList();
 	}
@@ -2358,21 +2751,38 @@ void ShareManager::on(QueueManagerListener::FileMoved, const string& realPath) n
 	}
 }
 
-void ShareManager::on(HashManagerListener::TTHDone, const string& realPath, const TTHValue& root) noexcept {
-	Lock l(cs);
-	auto f = getFile(realPath);
-	if(f) {
-		auto& file = const_cast<Directory::File&>(f->get());
-		if(file.tth && root != *file.tth)
-			tthIndex.erase(*file.tth);
-		file.tth = root;
-		tthIndex[*file.tth] = &file;
+void ShareManager::on(HashManagerListener::TTHDone, const string& realPath, const TTHValue& root,
+	int64_t size, uint32_t timestamp, uint64_t hashJobId) noexcept
+{
+	try {
+		// A hash completion belongs to one exact filesystem snapshot. Keep a
+		// non-writable handle while updating the share node so an older completion
+		// cannot assign its TTH to a replacement that now occupies the same path.
+		File snapshot(realPath, File::READ, File::OPEN);
+		if(snapshot.getSize() == size && snapshot.getLastModified() == timestamp) {
+			Lock l(cs);
+			auto f = getFile(realPath);
+			if(f && f->get().getSize() == size) {
+				auto& file = const_cast<Directory::File&>(f->get());
+				if(file.tth && root != *file.tth)
+					tthIndex.erase(*file.tth);
+				file.tth = root;
+				tthIndex[*file.tth] = &file;
 
-		setDirty();
-		forceXmlRefresh = true;
+				setDirty();
+				forceXmlRefresh = true;
 
-		bloom.add(Text::toLower(Util::getFileName(realPath)));
-	}
+				bloom.add(Text::toLower(Util::getFileName(realPath)));
+			}
+		}
+	} catch(...) { }
+	completeChatAttachments(realPath, root, size, timestamp, hashJobId);
+}
+
+void ShareManager::on(HashManagerListener::TTHFailed, const string& realPath, int64_t size,
+	uint32_t timestamp, uint64_t hashJobId, HashManagerListener::Failure, const string& detail) noexcept
+{
+	failChatAttachments(realPath, size, timestamp, hashJobId, detail);
 }
 
 void ShareManager::on(TimerManagerListener::Minute, uint64_t tick) noexcept {

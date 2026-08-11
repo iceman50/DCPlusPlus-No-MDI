@@ -26,6 +26,7 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "TimerManager.h"
 #include "SearchManager.h"
@@ -75,6 +76,27 @@ public:
 		int64_t size;
 		uint32_t timestamp;
 	};
+	struct ChatAttachmentInfo {
+		string realPath;
+		string hubUrl;
+		TTHValue tth;
+		int64_t size;
+		uint32_t timestamp;
+		bool temporary;
+	};
+	struct ChatAttachmentResult {
+		uint64_t requestId;
+		optional<ChatAttachmentInfo> attachment;
+		string error;
+	};
+	using ChatAttachmentCallback = function<void (ChatAttachmentResult)>;
+	struct ResolvedFileInfo {
+		string realPath;
+		int64_t size;
+		optional<TTHValue> tth;
+		bool temporary;
+		uint32_t timestamp;
+	};
 
 	/**
 	 * @param aDirectory Physical directory location
@@ -88,18 +110,30 @@ public:
 	string toVirtual(const TTHValue& tth, const string& hubUrl) const;
 	optional<TTHValue> getTTHFromReal(const string& realPath) noexcept;
 	/** Register a transient, TTH-only file for one chat route. Temporary files
-	 * are uploadable by exact TTH but never appear in file lists or searches. */
+	 * are searchable and uploadable only on that route, but never appear in file lists. */
 	bool addTempShare(const string& realPath, int64_t size, uint32_t timestamp,
 		const TTHValue& tth, const string& hubUrl) noexcept;
 	bool isTempShare(const TTHValue& tth, const string& realPath, const string& hubUrl) const noexcept;
 	vector<TempShareInfo> getTempShares() const;
 	bool removeTempShare(const string& realPath, const TTHValue& tth, const string& hubUrl) noexcept;
 	size_t clearTempShares() noexcept;
+	/** Prepare a local file as an exact-TTH attachment for one chat route. The
+	 * callback may run immediately or on the hashing thread and is called exactly
+	 * once unless the request is cancelled. */
+	uint64_t prepareChatAttachment(const string& realPath, const string& hubUrl,
+		ChatAttachmentCallback callback) noexcept;
+	void cancelChatAttachment(uint64_t requestId) noexcept;
+	/** Verify that an attachment is currently visible and, for temporary entries,
+	 * still matches its saved file snapshot and TTH. */
+	bool validateChatAttachment(const TTHValue& tth, int64_t size, const string& hubUrl) const noexcept;
 	string toReal(const string& virtualFile);
 	string toReal(const string& virtualFile, const string& hubUrl);
 	/** @return Actual file path & size. Returns 0 for file lists. */
 	pair<string, int64_t> toRealWithSize(const string& virtualFile);
 	pair<string, int64_t> toRealWithSize(const string& virtualFile, const string& hubUrl);
+	/** Resolve an upload candidate and atomically retain whether it came from the
+	 * route-scoped temporary-share table. */
+	ResolvedFileInfo resolveFile(const string& virtualFile, const string& hubUrl);
 	StringList getRealPaths(const string& virtualPath);
 	/** Return all currently shared real paths for a TTH that are visible from the requesting hub. */
 	StringList getRealPaths(const TTHValue& tth, const string& hubUrl) const;
@@ -319,6 +353,23 @@ private:
 	unordered_map<TTHValue, const Directory::File*> tthIndex;
 
 	vector<TempShareInfo> tempShares;
+	struct PendingChatAttachment {
+		uint64_t requestId;
+		string realPath;
+		string hubUrl;
+		int64_t size;
+		uint32_t timestamp;
+		uint64_t generation;
+		uint64_t hashJobId;
+		ChatAttachmentCallback callback;
+	};
+	enum class ChatAttachmentRequestState { READY, CANCELLED, CLEARED };
+	mutable CriticalSection chatAttachmentCs;
+	unordered_map<uint64_t, PendingChatAttachment> pendingChatAttachments;
+	std::unordered_set<uint64_t> activeChatAttachments;
+	std::unordered_set<uint64_t> cancelledChatAttachments;
+	uint64_t chatAttachmentGeneration = 0;
+	std::atomic<uint64_t> nextChatAttachmentRequest { 1 };
 
 	BloomFilter<5> bloom;
 
@@ -328,6 +379,21 @@ private:
 
 	const Directory::File& findFile(const string& virtualFile) const;
 	const TempShareInfo* findTempShare(const TTHValue& tth, const string* hubUrl = nullptr) const noexcept;
+	bool addValidatedTempShare(const string& realPath, int64_t size, uint32_t timestamp,
+		const TTHValue& tth, const string& hubUrl) noexcept;
+	void finishChatAttachment(PendingChatAttachment request, const TTHValue& tth) noexcept;
+	void failChatAttachments(const string& realPath, int64_t size, uint32_t timestamp,
+		uint64_t hashJobId, const string& error) noexcept;
+	void completeChatAttachments(const string& realPath, const TTHValue& tth,
+		int64_t size, uint32_t timestamp, uint64_t hashJobId) noexcept;
+	static void invokeChatAttachmentCallback(PendingChatAttachment&& request,
+		optional<ChatAttachmentInfo> attachment, string error) noexcept;
+	void deliverChatAttachmentCallback(PendingChatAttachment&& request,
+		optional<ChatAttachmentInfo> attachment, string error) noexcept;
+	ChatAttachmentRequestState getChatAttachmentRequestState(uint64_t requestId,
+		uint64_t generation) const noexcept;
+	ChatAttachmentRequestState beginChatAttachmentCallback(uint64_t requestId,
+		uint64_t generation) noexcept;
 	ShareAccess getShareAccess(const string& hubUrl) const;
 	bool isVirtualAllowed(const string& virtualName, const ShareAccess& access) const;
 	bool isFileAllowed(const Directory::File& file, const ShareAccess& access) const;
@@ -356,7 +422,10 @@ private:
 	string findRealRoot(const string& virtualRoot, const string& virtualLeaf) const;
 
 	SearchResultList search(SearchQuery&& query, size_t maxResults) noexcept;
-	SearchResultList search(SearchQuery&& query, size_t maxResults, const ShareAccess& access) noexcept;
+	SearchResultList search(SearchQuery&& query, size_t maxResults,
+		const ShareAccess& access, const string& hubUrl) noexcept;
+	void appendTempSearchResults(SearchResultList& results, SearchQuery& query,
+		size_t maxResults, const string& hubUrl) noexcept;
 
 	/** Get the directory pointer corresponding to a given real path (on disk). Note that only
 	directories are considered here but not the file's base name. */
@@ -385,7 +454,11 @@ private:
 	virtual void on(QueueManagerListener::FileMoved, const string& realPath) noexcept;
 
 	// HashManagerListener
-	virtual void on(HashManagerListener::TTHDone, const string& realPath, const TTHValue& root) noexcept;
+	virtual void on(HashManagerListener::TTHDone, const string& realPath, const TTHValue& root,
+		int64_t size, uint32_t timestamp, uint64_t hashJobId) noexcept;
+	virtual void on(HashManagerListener::TTHFailed, const string& realPath, int64_t size,
+		uint32_t timestamp, uint64_t hashJobId, HashManagerListener::Failure reason,
+		const string& detail) noexcept;
 
 	// SettingsManagerListener
 	virtual void on(SettingsManagerListener::Save, SimpleXML& xml) noexcept {
