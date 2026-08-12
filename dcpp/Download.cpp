@@ -40,6 +40,9 @@ Download::Download(UserConnection& conn, QueueItem& qi) noexcept : Transfer(conn
 	} else if(qi.isSet(QueueItem::FLAG_USER_LIST)) {
 		setType(TYPE_FULL_LIST);
 	}
+	if(qi.isSet(QueueItem::FLAG_RECURSIVE_LIST)) {
+		setFlag(FLAG_RECURSIVE);
+	}
 
 	if(qi.getSize() != -1) {
 		if(HashManager::getInstance()->getTree(getTTH(), tt)) {
@@ -96,6 +99,9 @@ AdcCommand Download::getCommand(bool zlib) {
 		!(getType() == TYPE_FULL_LIST && isSet(Download::FLAG_XML_BZ_LIST)))
 	{
 		cmd.addParam("ZL1");
+	}
+	if(getType() == TYPE_PARTIAL_LIST && isSet(FLAG_RECURSIVE)) {
+		cmd.addParam("RE1");
 	}
 
 	return cmd;

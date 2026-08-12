@@ -96,3 +96,105 @@ TEST_F(HubHintQueueTest, replaces_the_route_for_a_hub_specific_file_list)
 		EXPECT_TRUE(item->isSourceForHub(user, "adc://two.EXAMPLE"));
 	});
 }
+
+TEST_F(HubHintQueueTest, adc_directory_downloads_queue_recursive_partial_lists_with_full_fallback)
+{
+	uint8_t cidData[CID::SIZE] = { 2 };
+	UserPtr user(new User(CID(cidData)));
+	auto queue = QueueManager::getInstance();
+
+	queue->addDirectory("Share\\Nested\\", HintedUser(user, "adc://example.invalid"),
+		Util::getPath(Util::PATH_DOWNLOADS));
+
+	string listTarget;
+	queue->lockedOperation([&](const QueueItem::StringMap& items) {
+		ASSERT_EQ(1U, items.size());
+		auto item = items.begin()->second;
+		listTarget = item->getTarget();
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_USER_LIST));
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD));
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_PARTIAL_LIST));
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
+		EXPECT_EQ("Share\\Nested\\", item->getTempTarget());
+	});
+
+	ASSERT_TRUE(queue->fallbackRecursiveList(listTarget));
+	queue->lockedOperation([&](const QueueItem::StringMap& items) {
+		ASSERT_EQ(1U, items.size());
+		auto item = items.begin()->second;
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_PARTIAL_LIST));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
+		EXPECT_TRUE(item->getTempTarget().empty());
+	});
+	queue->remove(listTarget);
+}
+
+TEST_F(HubHintQueueTest, nmdc_directory_downloads_keep_the_full_list_path)
+{
+	uint8_t cidData[CID::SIZE] = { 3 };
+	UserPtr user(new User(CID(cidData)));
+	user->setFlag(User::NMDC);
+	auto queue = QueueManager::getInstance();
+
+	queue->addDirectory("Share\\Nested\\", HintedUser(user, "dchub://example.invalid"),
+		Util::getPath(Util::PATH_DOWNLOADS));
+
+	string listTarget;
+	queue->lockedOperation([&](const QueueItem::StringMap& items) {
+		ASSERT_EQ(1U, items.size());
+		auto item = items.begin()->second;
+		listTarget = item->getTarget();
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_PARTIAL_LIST));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
+	});
+	queue->remove(listTarget);
+}
+
+TEST_F(HubHintQueueTest, an_existing_full_list_remains_full_when_a_directory_request_is_merged)
+{
+	uint8_t cidData[CID::SIZE] = { 4 };
+	UserPtr user(new User(CID(cidData)));
+	auto queue = QueueManager::getInstance();
+	const HintedUser hintedUser(user, "adc://example.invalid");
+
+	queue->addList(hintedUser, QueueItem::FLAG_CLIENT_VIEW);
+	queue->addDirectory("Share\\Nested\\", hintedUser, Util::getPath(Util::PATH_DOWNLOADS));
+
+	string listTarget;
+	queue->lockedOperation([&](const QueueItem::StringMap& items) {
+		ASSERT_EQ(1U, items.size());
+		auto item = items.begin()->second;
+		listTarget = item->getTarget();
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_CLIENT_VIEW));
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_PARTIAL_LIST));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
+	});
+	queue->remove(listTarget);
+}
+
+TEST_F(HubHintQueueTest, a_waiting_partial_list_upgrades_when_a_full_list_purpose_is_merged)
+{
+	uint8_t cidData[CID::SIZE] = { 5 };
+	UserPtr user(new User(CID(cidData)));
+	auto queue = QueueManager::getInstance();
+	const HintedUser hintedUser(user, "adc://example.invalid");
+
+	queue->addList(hintedUser, QueueItem::FLAG_CLIENT_VIEW | QueueItem::FLAG_PARTIAL_LIST, "Share\\");
+	queue->addList(hintedUser, QueueItem::FLAG_MATCH_QUEUE);
+
+	string listTarget;
+	queue->lockedOperation([&](const QueueItem::StringMap& items) {
+		ASSERT_EQ(1U, items.size());
+		auto item = items.begin()->second;
+		listTarget = item->getTarget();
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_CLIENT_VIEW));
+		EXPECT_TRUE(item->isSet(QueueItem::FLAG_MATCH_QUEUE));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_PARTIAL_LIST));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
+		EXPECT_FALSE(item->isSet(QueueItem::FLAG_DEFERRED_FULL_LIST));
+	});
+	queue->remove(listTarget);
+}

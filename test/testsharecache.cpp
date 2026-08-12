@@ -20,6 +20,7 @@
 #include <dcpp/SearchManager.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/SQLiteDB.h>
+#include <dcpp/Streams.h>
 #include <dcpp/TimerManager.h>
 #include <dcpp/UploadManager.h>
 #include <dcpp/Util.h>
@@ -91,12 +92,12 @@ public:
 		std::filesystem::create_directories(sharePath + "Child");
 		std::ofstream(sharePath + "Child" PATH_SEPARATOR_STR "file.bin") << "data";
 
-		auto root = ShareManager::Directory::create("Virtual");
-		auto child = ShareManager::Directory::create("Child", root);
+		auto root = ShareManager::Directory::create("Virtual", ShareManager::Directory::Ptr(), 1700000000);
+		auto child = ShareManager::Directory::create("Child", root, 1700000100);
 		root->directories.emplace("Child", child);
 
 		ShareManager::Directory::File file("file.bin", 1234, child,
-			TTHValue("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+			TTHValue("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), 1700000200);
 		child->files.insert(std::move(file));
 
 		sm->directories["Virtual"] = root;
@@ -132,6 +133,17 @@ public:
 		sm->directories.clear();
 		sm->tthIndex.clear();
 		sm->bloom.clear();
+	}
+
+	string readStream(std::unique_ptr<MemoryInputStream> stream) {
+		if(!stream) {
+			return Util::emptyString;
+		}
+		string result(stream->getSize(), '\0');
+		size_t size = result.size();
+		stream->read(result.data(), size);
+		result.resize(size);
+		return result;
 	}
 
 	struct CachedFile {
@@ -187,10 +199,55 @@ TEST_F(ShareCacheTest, round_trips_share_tree_and_indices) {
 	EXPECT_EQ(ShareManager::getInstance()->toReal("/Virtual/Child/file.bin"), sharePath + "Child" PATH_SEPARATOR_STR "file.bin");
 
 	auto child = ShareManager::getInstance()->directories["Virtual"]->directories["Child"];
+	EXPECT_EQ(1700000000, ShareManager::getInstance()->directories["Virtual"]->getLastWrite());
+	EXPECT_EQ(1700000100, child->getLastWrite());
 	auto file = child->findFile("file.bin");
 	ASSERT_NE(file, child->files.cend());
 	ASSERT_TRUE(file->realPath);
 	EXPECT_EQ(*file->realPath, sharePath + "Child" PATH_SEPARATOR_STR "file.bin");
+	EXPECT_EQ(1700000200, file->getLastWrite());
+}
+
+TEST_F(ShareCacheTest, emits_dates_only_for_non_recursive_partial_file_items) {
+	populateShare();
+
+	const auto partial = readStream(std::unique_ptr<MemoryInputStream>(
+		ShareManager::getInstance()->generatePartialList("/Virtual/Child/", false)));
+	EXPECT_NE(string::npos, partial.find("BaseDate=\"1700000100\""));
+	EXPECT_NE(string::npos, partial.find("<File Name=\"file.bin\" Size=\"1234\" TTH=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" Date=\"1700000200\"/>"));
+
+	const auto recursive = readStream(std::unique_ptr<MemoryInputStream>(
+		ShareManager::getInstance()->generatePartialList("/Virtual/Child/", true)));
+	EXPECT_NE(string::npos, recursive.find("BaseDate=\"1700000100\""));
+	EXPECT_NE(string::npos, recursive.find("<File Name=\"file.bin\" Size=\"1234\" TTH=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"/>"));
+	EXPECT_EQ(string::npos, recursive.find("TTH=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" Date="));
+
+	string full;
+	StringRefOutputStream fullOutput(full);
+	string indent;
+	string tmp;
+	ShareManager::getInstance()->directories["Virtual"]->toXml(fullOutput, indent, tmp, -1, false);
+	EXPECT_NE(string::npos, full.find("<Directory Name=\"Virtual\" Date=\"1700000000\""));
+	EXPECT_EQ(string::npos, full.find("TTH=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" Date="));
+}
+
+TEST_F(ShareCacheTest, incomplete_partial_directories_include_size_and_content_metadata) {
+	auto sm = ShareManager::getInstance();
+	sm->shares[sharePath] = "Virtual";
+	auto root = ShareManager::Directory::create("Virtual", ShareManager::Directory::Ptr(), 1700000000);
+	auto large = ShareManager::Directory::create("Large", root, 1700000100);
+	root->directories.emplace("Large", large);
+	for(int i = 0; i < 5; ++i) {
+		string tth(39, 'A');
+		tth[0] = static_cast<char>('A' + i);
+		large->files.insert(ShareManager::Directory::File("file" + std::to_string(i) + ".bin", 10, large,
+			TTHValue(tth), 1700000200 + i));
+	}
+	sm->directories["Virtual"] = root;
+	sm->rebuildIndices(5);
+
+	const auto partial = readStream(std::unique_ptr<MemoryInputStream>(sm->generatePartialList("/", false)));
+	EXPECT_NE(string::npos, partial.find("<Directory Name=\"Large\" Date=\"1700000100\" Size=\"50\" Directories=\"0\" Files=\"5\" Incomplete=\"1\" />"));
 }
 
 TEST_F(ShareCacheTest, preserves_merged_shares_search_and_protocol_lookups) {

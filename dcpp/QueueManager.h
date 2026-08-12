@@ -62,18 +62,19 @@ public:
 	typedef List::iterator Iter;
 
 	DirectoryItem() : priority(QueueItem::DEFAULT) { }
-	DirectoryItem(const UserPtr& aUser, const string& aName, const string& aTarget,
-		QueueItem::Priority p) : name(aName), target(aTarget), priority(p), user(aUser) { }
+	DirectoryItem(const HintedUser& aUser, const string& aName, const string& aTarget,
+		QueueItem::Priority p) : name(aName), target(aTarget), priority(p), hintedUser(aUser) { }
 	~DirectoryItem() { }
 
-	UserPtr& getUser() { return user; }
-	void setUser(const UserPtr& aUser) { user = aUser; }
+	UserPtr& getUser() { return hintedUser.user; }
+	void setUser(const UserPtr& aUser) { hintedUser.user = aUser; }
+	const HintedUser& getHintedUser() const { return hintedUser; }
 
 	GETSET(string, name, Name);
 	GETSET(string, target, Target);
 	GETSET(QueueItem::Priority, priority, Priority);
 private:
-	UserPtr user;
+	HintedUser hintedUser;
 };
 
 class ConnectionQueueItem;
@@ -96,6 +97,8 @@ public:
 	/** Add a directory to the queue (downloads filelist and matches the directory). */
 	void addDirectory(const string& aDir, const HintedUser& aUser, const string& aTarget,
 		QueueItem::Priority p = QueueItem::DEFAULT) noexcept;
+	/** Retry a rejected recursive partial list as a conventional full file list. */
+	bool fallbackRecursiveList(const string& target) noexcept;
 
 	int matchListing(const DirectoryListing& dl) noexcept;
 
@@ -289,6 +292,9 @@ private:
 	bool addSource(QueueItem* qi, const HintedUser& aUser, Flags::MaskType addBad);
 
 	void processList(const string& name, const HintedUser& user, int flags);
+	void processPartialList(const string& xml, const HintedUser& user, int flags, const string& requestedPath, bool recursive);
+	void queueNextDirectoryList(const HintedUser& user, bool recursive, int extraFlags = 0,
+		const string& initialDir = Util::emptyString);
 
 	void load(const SimpleXML& aXml);
 	void moveFile(const string& source, const string& target);

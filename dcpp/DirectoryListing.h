@@ -48,13 +48,13 @@ public:
 
 		File& operator=(const File&) = delete;
 
-		File(Directory* aDir, const string& aName, int64_t aSize, const TTHValue& aTTH) noexcept :
-			name(aName), size(aSize), parent(aDir), tthRoot(aTTH), adls(false)
+		File(Directory* aDir, const string& aName, int64_t aSize, const TTHValue& aTTH, time_t aRemoteDate = 0) noexcept :
+			name(aName), size(aSize), parent(aDir), tthRoot(aTTH), remoteDate(aRemoteDate), adls(false)
 		{
 		}
 
 		File(const File& rhs, bool _adls = false) :
-			name(rhs.name), size(rhs.size), parent(rhs.parent), tthRoot(rhs.tthRoot), adls(_adls)
+			name(rhs.name), size(rhs.size), parent(rhs.parent), tthRoot(rhs.tthRoot), remoteDate(rhs.remoteDate), adls(_adls)
 		{
 		}
 
@@ -64,6 +64,7 @@ public:
 		GETSET(int64_t, size, Size);
 		GETSET(Directory*, parent, Parent);
 		GETSET(TTHValue, tthRoot, TTH);
+		GETSET(time_t, remoteDate, RemoteDate);
 		GETSET(bool, adls, Adls);
 	};
 
@@ -83,8 +84,12 @@ public:
 		set<Ptr, Less<Directory>> directories;
 		set<File::Ptr, Less<File>> files;
 
-		Directory(Directory* aParent, const string& aName, bool _adls, bool aComplete) :
-			name(aName), parent(aParent), adls(_adls), complete(aComplete) { }
+		Directory(Directory* aParent, const string& aName, bool _adls, bool aComplete,
+			time_t aRemoteDate = 0, int64_t aRemoteSize = -1, int aRemoteDirectories = -1,
+			int aRemoteFiles = -1, bool aHasChildren = false) :
+			name(aName), parent(aParent), remoteDate(aRemoteDate), remoteSize(aRemoteSize),
+			remoteDirectories(aRemoteDirectories), remoteFiles(aRemoteFiles), hasChildren(aHasChildren),
+			adls(_adls), complete(aComplete) { }
 
 		virtual ~Directory();
 
@@ -95,6 +100,7 @@ public:
 		void getHashList(TTHSet& l);
 		void save(OutputStream& stream, string& indent, string& tmp) const;
 		void setAllComplete(bool complete);
+		bool isCompleteRecursive() const;
 
 		size_t getFileCount() const { return files.size(); }
 
@@ -108,6 +114,11 @@ public:
 
 		GETSET(string, name, Name);
 		GETSET(Directory*, parent, Parent);
+		GETSET(time_t, remoteDate, RemoteDate);
+		GETSET(int64_t, remoteSize, RemoteSize);
+		GETSET(int, remoteDirectories, RemoteDirectories);
+		GETSET(int, remoteFiles, RemoteFiles);
+		GETSET(bool, hasChildren, HasChildren);
 		GETSET(bool, adls, Adls);
 		GETSET(bool, complete, Complete);
 	};
@@ -135,6 +146,7 @@ public:
 	void download(const string& aDir, const string& aTarget, bool highPrio);
 	void download(Directory* aDir, const string& aTarget, bool highPrio);
 	void download(File* aFile, const string& aTarget, bool view, bool highPrio);
+	bool isComplete(const string& aDir) const;
 
 	string getPath(const Directory* d) const;
 	string getPath(const File* f) const { return getPath(f->getParent()); }

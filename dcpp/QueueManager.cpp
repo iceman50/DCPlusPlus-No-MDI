@@ -635,7 +635,30 @@ void QueueManager::add(const string& aTarget, int64_t aSize, const TTHValue& roo
 				throw QueueException(_("This file has already finished downloading"));
 			}
 
-			q->setFlag(aFlags);
+			if(q->isSet(QueueItem::FLAG_USER_LIST)) {
+				const auto existingPartial = q->isSet(QueueItem::FLAG_PARTIAL_LIST);
+				const auto requestedPartial = (aFlags & QueueItem::FLAG_PARTIAL_LIST) != 0;
+				auto flagsToSet = aFlags & ~(QueueItem::FLAG_PARTIAL_LIST | QueueItem::FLAG_RECURSIVE_LIST);
+
+				if(existingPartial && !requestedPartial) {
+					if(q->isRunning()) {
+						q->setFlag(QueueItem::FLAG_DEFERRED_FULL_LIST);
+					} else {
+						q->unsetFlag(QueueItem::FLAG_PARTIAL_LIST | QueueItem::FLAG_RECURSIVE_LIST);
+						q->unsetFlag(QueueItem::FLAG_DEFERRED_FULL_LIST);
+					}
+				} else if(existingPartial && requestedPartial) {
+					// Keep the path and recursion mode of the request that is already queued.
+				} else if(!existingPartial && requestedPartial) {
+					// A full list already in the queue can satisfy any partial-list purpose.
+				} else {
+					q->unsetFlag(QueueItem::FLAG_DEFERRED_FULL_LIST);
+				}
+
+				q->setFlag(flagsToSet);
+			} else {
+				q->setFlag(aFlags);
+			}
 		}
 
 		wantConnection = addSource(q, aUser, addBad ? QueueItem::Source::FLAG_MASK : 0);
@@ -755,11 +778,28 @@ void QueueManager::addDirectory(const string& aDir, const HintedUser& aUser, con
 
 	if(needList) {
 		try {
-			addList(aUser, QueueItem::FLAG_DIRECTORY_DOWNLOAD);
+			const auto recursive = !aUser.user->isNMDC();
+			const auto flags = QueueItem::FLAG_DIRECTORY_DOWNLOAD |
+				(recursive ? QueueItem::FLAG_PARTIAL_LIST | QueueItem::FLAG_RECURSIVE_LIST : 0);
+			addList(aUser, flags, recursive ? aDir : Util::emptyString);
 		} catch(const Exception&) {
 			// Ignore, we don't really care...
 		}
 	}
+}
+
+bool QueueManager::fallbackRecursiveList(const string& target) noexcept {
+	Lock l(cs);
+	auto q = fileQueue.find(target);
+	if(!q || !q->isSet(QueueItem::FLAG_USER_LIST) || !q->isSet(QueueItem::FLAG_RECURSIVE_LIST)) {
+		return false;
+	}
+
+	q->unsetFlag(QueueItem::FLAG_RECURSIVE_LIST);
+	q->unsetFlag(QueueItem::FLAG_PARTIAL_LIST);
+	q->setTempTarget(Util::emptyString);
+	setDirty();
+	return true;
 }
 
 QueueItem::Priority QueueManager::hasDownload(const UserPtr& aUser) noexcept {
@@ -1013,8 +1053,13 @@ void QueueManager::rechecked(QueueItem* qi) {
 
 void QueueManager::putDownload(Download* aDownload, bool finished) noexcept {
 	HintedUserList getConn;
- 	string fl_fname;
+	string fl_fname;
+	string fl_xml;
+	string fl_requestedPath;
+	HintedUser fl_user;
 	int fl_flag = 0;
+	bool processPartial = false;
+	bool fl_recursive = false;
 
 	// Make sure the download gets killed
 	unique_ptr<Download> d(aDownload);
@@ -1069,7 +1114,21 @@ void QueueManager::putDownload(Download* aDownload, bool finished) noexcept {
 		} else { // Finished
 			if(d->getType() == Transfer::TYPE_PARTIAL_LIST) {
 				userQueue.remove(q);
-				fire(QueueManagerListener::PartialList(), d->getHintedUser(), d->getPFS());
+				if(q->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD) || q->isSet(QueueItem::FLAG_MATCH_QUEUE) ||
+					q->isSet(QueueItem::FLAG_DEFERRED_FULL_LIST))
+				{
+					processPartial = true;
+					fl_xml = d->getPFS();
+					fl_requestedPath = q->getTempTarget();
+					fl_user = d->getHintedUser();
+					fl_recursive = d->isSet(Download::FLAG_RECURSIVE);
+					fl_flag = (q->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD) ? QueueItem::FLAG_DIRECTORY_DOWNLOAD : 0)
+						| (q->isSet(QueueItem::FLAG_MATCH_QUEUE) ? QueueItem::FLAG_MATCH_QUEUE : 0)
+						| (q->isSet(QueueItem::FLAG_CLIENT_VIEW) ? QueueItem::FLAG_CLIENT_VIEW : 0)
+						| (q->isSet(QueueItem::FLAG_DEFERRED_FULL_LIST) ? QueueItem::FLAG_DEFERRED_FULL_LIST : 0);
+				} else {
+					fire(QueueManagerListener::PartialList(), d->getHintedUser(), d->getPFS());
+				}
 				fire(QueueManagerListener::Removed(), q);
 				fileQueue.remove(q);
 			} else if(d->getType() == Transfer::TYPE_TREE) {
@@ -1151,6 +1210,9 @@ void QueueManager::putDownload(Download* aDownload, bool finished) noexcept {
 	if(!fl_fname.empty()) {
 		processList(fl_fname, d->getHintedUser(), fl_flag);
 	}
+	if(processPartial) {
+		processPartialList(fl_xml, fl_user, fl_flag, fl_requestedPath, fl_recursive);
+	}
 }
 
 void QueueManager::processList(const string& name, const HintedUser& user, int flags) {
@@ -1183,6 +1245,95 @@ void QueueManager::processList(const string& name, const HintedUser& user, int f
 		size_t files = matchListing(dirList);
 		LogManager::getInstance()->message(str(FN_("%1%: Matched %2% file", "%1%: Matched %2% files", files) %
 			Util::toString(ClientManager::getInstance()->getNicks(user)) % files), LogMessage::SEV_INFO, _("Queue"));
+	}
+}
+
+void QueueManager::processPartialList(const string& xml, const HintedUser& user, int flags, const string& requestedPath, bool recursive) {
+	DirectoryListing dirList(user);
+	string base;
+	try {
+		base = dirList.updateXML(xml);
+	} catch(const Exception& e) {
+		const auto fullRequired = recursive || (flags & (QueueItem::FLAG_MATCH_QUEUE | QueueItem::FLAG_DEFERRED_FULL_LIST));
+		LogManager::getInstance()->message(str(F_("Unable to process partial file list: %1%; retrying with a %2% file list") %
+			e.getError() % (fullRequired ? _("full") : _("recursive partial"))),
+			LogMessage::SEV_WARNING, _("File lists"));
+		const auto fullFlags = flags & (QueueItem::FLAG_MATCH_QUEUE | QueueItem::FLAG_CLIENT_VIEW);
+		queueNextDirectoryList(user, !fullRequired, fullRequired ? fullFlags : 0,
+			(flags & QueueItem::FLAG_CLIENT_VIEW) ? requestedPath : Util::emptyString);
+		return;
+	}
+
+	if(flags & QueueItem::FLAG_CLIENT_VIEW) {
+		fire(QueueManagerListener::PartialList(), user, xml);
+	}
+
+	const auto baseMatches = base == Util::toAdcFile(requestedPath);
+
+	if(flags & QueueItem::FLAG_DIRECTORY_DOWNLOAD) {
+		DirectoryItem::List completed;
+		if(baseMatches) {
+			Lock l(cs);
+			auto range = directories.equal_range(user.user);
+			for(auto item = range.first; item != range.second;) {
+				if(dirList.isComplete(item->second->getName())) {
+					completed.push_back(item->second);
+					item = directories.erase(item);
+				} else {
+					++item;
+				}
+			}
+		}
+
+		for(auto item: completed) {
+			dirList.download(item->getName(), item->getTarget(), item->getPriority() == QueueItem::HIGHEST);
+			delete item;
+		}
+	}
+
+	const auto completeResponse = baseMatches && dirList.isComplete(requestedPath);
+	const auto fullRequired = (flags & (QueueItem::FLAG_MATCH_QUEUE | QueueItem::FLAG_DEFERRED_FULL_LIST)) ||
+		(recursive && !completeResponse);
+	if(recursive && !completeResponse) {
+		LogManager::getInstance()->message(_("Recursive partial file list was incomplete; retrying with the full file list"),
+			LogMessage::SEV_INFO, _("File lists"));
+	}
+
+	if(fullRequired) {
+		const auto fullFlags = flags & (QueueItem::FLAG_MATCH_QUEUE | QueueItem::FLAG_CLIENT_VIEW);
+		queueNextDirectoryList(user, false, fullFlags,
+			(flags & QueueItem::FLAG_CLIENT_VIEW) ? requestedPath : Util::emptyString);
+	} else if(flags & QueueItem::FLAG_DIRECTORY_DOWNLOAD) {
+		queueNextDirectoryList(user, true);
+	}
+}
+
+void QueueManager::queueNextDirectoryList(const HintedUser& user, bool recursive, int extraFlags, const string& initialDir) {
+	HintedUser nextUser = user;
+	string nextPath;
+	bool hasDirectory = false;
+	{
+		Lock l(cs);
+		auto range = directories.equal_range(user.user);
+		if(range.first != range.second) {
+			hasDirectory = true;
+			nextUser = range.first->second->getHintedUser();
+			nextPath = range.first->second->getName();
+		}
+	}
+
+	if(!hasDirectory && extraFlags == 0) {
+		return;
+	}
+
+	const auto useRecursive = hasDirectory && recursive && !nextUser.user->isNMDC();
+	const auto flags = extraFlags | (hasDirectory ? QueueItem::FLAG_DIRECTORY_DOWNLOAD : 0) |
+		(useRecursive ? QueueItem::FLAG_PARTIAL_LIST | QueueItem::FLAG_RECURSIVE_LIST : 0);
+	try {
+		addList(nextUser, flags, useRecursive ? nextPath : initialDir);
+	} catch(const Exception& e) {
+		LogManager::getInstance()->message(str(F_("Unable to queue file list for directory download: %1%") % e.getError()),
+			LogMessage::SEV_ERROR, _("File lists"));
 	}
 }
 

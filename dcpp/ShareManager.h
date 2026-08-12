@@ -217,9 +217,10 @@ private:
 		Directory& operator=(const Directory&) = delete;
 
 		struct File {
-			File() : size(0), parent(0) { }
-			File(const string& aName, int64_t aSize, const Directory::Ptr& aParent, const optional<TTHValue>& aRoot) :
-				name(aName), tth(aRoot), size(aSize), parent(aParent.get()) { }
+			File() : size(0), lastWrite(0), parent(0) { }
+			File(const string& aName, int64_t aSize, const Directory::Ptr& aParent, const optional<TTHValue>& aRoot,
+				time_t aLastWrite = 0) :
+				name(aName), tth(aRoot), size(aSize), lastWrite(aLastWrite), parent(aParent.get()) { }
 
 			bool operator==(const File& rhs) const {
 				return getParent() == rhs.getParent() && (Util::stricmp(getName(), rhs.getName()) == 0);
@@ -247,6 +248,7 @@ private:
 			optional<string> realPath; // Exact path on disk; older cache records may not have this.
 			optional<TTHValue> tth;
 			GETSET(int64_t, size, Size);
+			GETSET(time_t, lastWrite, LastWrite);
 			GETSET(Directory*, parent, Parent);
 		};
 
@@ -254,7 +256,9 @@ private:
 		unordered_map<string, Ptr, noCaseStringHash, noCaseStringEq> directories;
 		set<File, File::FileLess> files;
 
-		static Ptr create(const string& aName, const Ptr& aParent = Ptr()) { return Ptr(new Directory(aName, aParent)); }
+		static Ptr create(const string& aName, const Ptr& aParent = Ptr(), time_t aLastWrite = 0) {
+			return Ptr(new Directory(aName, aParent, aLastWrite));
+		}
 
 		const string& getRealName() const noexcept;
 		const optional<string>& getRealNameOverride() const noexcept { return realName; }
@@ -273,8 +277,8 @@ private:
 		void search(SearchResultList& results, SearchQuery& query, size_t maxResults) const noexcept;
 
 		/// @param level -1 to include all levels, or the current level.
-		void toXml(OutputStream& xmlFile, string& indent, string& tmp2, int8_t level) const;
-		void filesToXml(OutputStream& xmlFile, string& indent, string& tmp2) const;
+		void toXml(OutputStream& xmlFile, string& indent, string& tmp2, int8_t level, bool addFileDates) const;
+		void filesToXml(OutputStream& xmlFile, string& indent, string& tmp2, bool addDates) const;
 
 		auto findFile(const string& aFile) const -> decltype(files.cbegin()) { return find_if(files.begin(), files.end(), File::StringComp(aFile)); }
 
@@ -282,11 +286,12 @@ private:
 
 		GETSET(string, name, Name);
 		GETSET(Directory*, parent, Parent);
+		GETSET(time_t, lastWrite, LastWrite);
 
 	private:
 		friend void intrusive_ptr_release(intrusive_ptr_base<Directory>*);
 
-		Directory(const string& aName, const Ptr& aParent);
+		Directory(const string& aName, const Ptr& aParent, time_t aLastWrite);
 		~Directory() { }
 
 		optional<string> realName; // only defined if this directory had to be renamed to avoid duplication.
@@ -399,7 +404,8 @@ private:
 	bool isFileAllowed(const Directory::File& file, const ShareAccess& access) const;
 	string generateFileListData(const string& hubUrl, bool compressed) const;
 
-	Directory::Ptr buildTree(const string& realPath, optional<std::reference_wrapper<const string>> dirName = nullopt, const Directory::Ptr& parent = nullptr);
+	Directory::Ptr buildTree(const string& realPath, optional<std::reference_wrapper<const string>> dirName = nullopt,
+		const Directory::Ptr& parent = nullptr, time_t lastWrite = 0);
 	bool checkHidden(const string& realPath) const;
 	bool checkInvalidFileName(const string& realPath) const;
 	bool checkInvalidPaths(const string& realPath) const;

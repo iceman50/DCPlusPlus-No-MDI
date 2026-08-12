@@ -98,6 +98,7 @@ private:
 		COLUMN_SIZE,
 		COLUMN_EXACTSIZE,
 		COLUMN_TTH,
+		COLUMN_DATE,
 		COLUMN_LAST
 	};
 
@@ -125,11 +126,16 @@ private:
 			columns[COLUMN_EXACTSIZE] = Text::toT(Util::formatExactSize(f->getSize()));
 			columns[COLUMN_SIZE] = Text::toT(Util::formatBytes(f->getSize()));
 			columns[COLUMN_TTH] = Text::toT(f->getTTH().toBase32());
+			if(f->getRemoteDate() > 0)
+				columns[COLUMN_DATE] = Text::toT(Util::formatTime("%Y-%m-%d %H:%M", f->getRemoteDate()));
 		}
 		ItemInfo(DirectoryListing::Directory* d) : type(DIRECTORY), dir(d) {
 			columns[COLUMN_FILENAME] = Text::toT(d->getName());
-			columns[COLUMN_EXACTSIZE] = d->getComplete() ? Text::toT(Util::formatExactSize(d->getTotalSize())) : _T("?");
-			columns[COLUMN_SIZE] = d->getComplete() ? Text::toT(Util::formatBytes(d->getTotalSize())) : _T("?");
+			const auto size = d->getComplete() ? d->getTotalSize() : d->getRemoteSize();
+			columns[COLUMN_EXACTSIZE] = size >= 0 ? Text::toT(Util::formatExactSize(size)) : _T("?");
+			columns[COLUMN_SIZE] = size >= 0 ? Text::toT(Util::formatBytes(size)) : _T("?");
+			if(d->getRemoteDate() > 0)
+				columns[COLUMN_DATE] = Text::toT(Util::formatTime("%Y-%m-%d %H:%M", d->getRemoteDate()));
 		}
 
 		const tstring& getText() const {

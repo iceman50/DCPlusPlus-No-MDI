@@ -63,7 +63,8 @@ static const ColumnInfo filesColumns[] = {
 	{ N_("Type"), 60, false },
 	{ N_("Size"), 80, true },
 	{ N_("Exact size"), 100, true },
-	{ N_("TTH"), 300, false }
+	{ N_("TTH"), 300, false },
+	{ N_("Date"), 130, false }
 };
 
 DirectoryListingFrame::UserMap DirectoryListingFrame::lists;
@@ -86,8 +87,11 @@ int DirectoryListingFrame::ItemInfo::compareItems(const ItemInfo* a, const ItemI
 	if(a->type == DIRECTORY) {
 		if(b->type == DIRECTORY) {
 			switch(col) {
-			case COLUMN_EXACTSIZE: return compare(a->dir->getTotalSize(), b->dir->getTotalSize());
-			case COLUMN_SIZE: return compare(a->dir->getTotalSize(), b->dir->getTotalSize());
+			case COLUMN_EXACTSIZE:
+			case COLUMN_SIZE: return compare(
+				a->dir->getComplete() ? a->dir->getTotalSize() : a->dir->getRemoteSize(),
+				b->dir->getComplete() ? b->dir->getTotalSize() : b->dir->getRemoteSize());
+			case COLUMN_DATE: return compare(a->dir->getRemoteDate(), b->dir->getRemoteDate());
 			default: return compare(a->columns[col], b->columns[col]);
 			}
 		} else {
@@ -99,6 +103,7 @@ int DirectoryListingFrame::ItemInfo::compareItems(const ItemInfo* a, const ItemI
 		switch(col) {
 		case COLUMN_EXACTSIZE: return compare(a->file->getSize(), b->file->getSize());
 		case COLUMN_SIZE: return compare(a->file->getSize(), b->file->getSize());
+		case COLUMN_DATE: return compare(a->file->getRemoteDate(), b->file->getRemoteDate());
 		default: return compare(a->columns[col], b->columns[col]);
 		}
 	}

@@ -485,9 +485,13 @@ void DownloadManager::fileNotAvailable(UserConnection* aSource) {
 	dcdebug("File Not Available: %s\n", d->getPath().c_str());
 
 	removeDownload(d);
-	fire(DownloadManagerListener::Failed(), d, str(F_("%1%: File not available") % Util::addBrackets(d->getTargetFileName())));
-
-	QueueManager::getInstance()->removeSource(d->getPath(), aSource->getUser(), d->getType() == Transfer::TYPE_TREE ? QueueItem::Source::FLAG_NO_TREE : QueueItem::Source::FLAG_FILE_NOT_AVAILABLE, false);
+	const auto recursiveFallback = d->getType() == Transfer::TYPE_PARTIAL_LIST &&
+		d->isSet(Download::FLAG_RECURSIVE) && QueueManager::getInstance()->fallbackRecursiveList(d->getPath());
+	if(!recursiveFallback) {
+		fire(DownloadManagerListener::Failed(), d, str(F_("%1%: File not available") % Util::addBrackets(d->getTargetFileName())));
+		QueueManager::getInstance()->removeSource(d->getPath(), aSource->getUser(),
+			d->getType() == Transfer::TYPE_TREE ? QueueItem::Source::FLAG_NO_TREE : QueueItem::Source::FLAG_FILE_NOT_AVAILABLE, false);
+	}
 
 	QueueManager::getInstance()->putDownload(d, false);
 

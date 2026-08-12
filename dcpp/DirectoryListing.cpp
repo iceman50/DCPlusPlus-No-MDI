@@ -152,12 +152,65 @@ string DirectoryListing::loadXML(InputStream& is, bool updating) {
 
 static const string sFileListing = "FileListing";
 static const string sBase = "Base";
+static const string sBaseDate = "BaseDate";
 static const string sDirectory = "Directory";
 static const string sIncomplete = "Incomplete";
+static const string sChildren = "Children";
+static const string sDirectories = "Directories";
+static const string sFiles = "Files";
 static const string sFile = "File";
 static const string sName = "Name";
 static const string sSize = "Size";
 static const string sTTH = "TTH";
+static const string sDate = "Date";
+
+namespace {
+	bool parseUnsigned(const string& value, uint64_t& result) noexcept {
+		if(value.empty()) {
+			return false;
+		}
+
+		result = 0;
+		for(const auto c: value) {
+			if(c < '0' || c > '9') {
+				return false;
+			}
+
+			const auto digit = static_cast<uint64_t>(c - '0');
+			if(result > ((std::numeric_limits<uint64_t>::max)() - digit) / 10) {
+				return false;
+			}
+			result = result * 10 + digit;
+		}
+		return true;
+	}
+
+	time_t parseRemoteDate(const string& value) noexcept {
+		uint64_t parsed = 0;
+		if(!parseUnsigned(value, parsed) || parsed == 0 ||
+			parsed > static_cast<uint64_t>((std::numeric_limits<time_t>::max)()))
+		{
+			return 0;
+		}
+		return static_cast<time_t>(parsed);
+	}
+
+	int64_t parseRemoteSize(const string& value) noexcept {
+		uint64_t parsed = 0;
+		if(!parseUnsigned(value, parsed) || parsed > static_cast<uint64_t>((std::numeric_limits<int64_t>::max)())) {
+			return -1;
+		}
+		return static_cast<int64_t>(parsed);
+	}
+
+	int parseRemoteCount(const string& value) noexcept {
+		uint64_t parsed = 0;
+		if(!parseUnsigned(value, parsed) || parsed > static_cast<uint64_t>((std::numeric_limits<int>::max)())) {
+			return -1;
+		}
+		return static_cast<int>(parsed);
+	}
+}
 
 void ListLoader::startTag(const string& name, StringPairList& attribs, bool simple) {
 	if(list->getAbort()) { throw Exception(); }
@@ -178,7 +231,9 @@ void ListLoader::startTag(const string& name, StringPairList& attribs, bool simp
 				return;
 			TTHValue tth(h); /// @todo verify validity?
 
-			auto f = new DirectoryListing::File(cur, n, size, tth);
+			const auto& remoteDateAttr = getAttrib(attribs, sDate, 3);
+			auto remoteDate = parseRemoteDate(remoteDateAttr);
+			auto f = new DirectoryListing::File(cur, n, size, tth, remoteDate);
 			auto insert = cur->files.insert(f);
 
 			if(!insert.second) {
@@ -190,6 +245,9 @@ void ListLoader::startTag(const string& name, StringPairList& attribs, bool simp
 					f->setName(n); // the casing might have changed
 					f->setSize(size);
 					f->setTTH(tth);
+					if(!remoteDateAttr.empty() && remoteDate > 0) {
+						f->setRemoteDate(remoteDate);
+					}
 				} else {
 					// duplicates are forbidden in complete file lists
 					throw Exception(_("Duplicate item in the file list"));
@@ -203,8 +261,19 @@ void ListLoader::startTag(const string& name, StringPairList& attribs, bool simp
 			}
 
 			bool incomp = getAttrib(attribs, sIncomplete, 1) == "1";
+			const auto& remoteDateAttr = getAttrib(attribs, sDate, 2);
+			const auto& remoteSizeAttr = getAttrib(attribs, sSize, 3);
+			const auto& remoteDirectoriesAttr = getAttrib(attribs, sDirectories, 4);
+			const auto& remoteFilesAttr = getAttrib(attribs, sFiles, 5);
+			const auto& childrenAttr = getAttrib(attribs, sChildren, 6);
+			auto remoteDate = parseRemoteDate(remoteDateAttr);
+			auto remoteSize = parseRemoteSize(remoteSizeAttr);
+			auto remoteDirectories = parseRemoteCount(remoteDirectoriesAttr);
+			auto remoteFiles = parseRemoteCount(remoteFilesAttr);
+			bool hasChildren = childrenAttr == "1";
 
-			auto d = new DirectoryListing::Directory(cur, n, false, !incomp);
+			auto d = new DirectoryListing::Directory(cur, n, false, !incomp, remoteDate,
+				remoteSize, remoteDirectories, remoteFiles, hasChildren);
 			auto insert = cur->directories.insert(d);
 
 			if(!insert.second) {
@@ -215,6 +284,21 @@ void ListLoader::startTag(const string& name, StringPairList& attribs, bool simp
 					d = *insert.first;
 					if(!d->getComplete())
 						d->setComplete(!incomp);
+					if(!remoteDateAttr.empty() && remoteDate > 0) {
+						d->setRemoteDate(remoteDate);
+					}
+					if(!remoteSizeAttr.empty() && remoteSize >= 0) {
+						d->setRemoteSize(remoteSize);
+					}
+					if(!remoteDirectoriesAttr.empty() && remoteDirectories >= 0) {
+						d->setRemoteDirectories(remoteDirectories);
+					}
+					if(!remoteFilesAttr.empty() && remoteFiles >= 0) {
+						d->setRemoteFiles(remoteFiles);
+					}
+					if(!childrenAttr.empty()) {
+						d->setHasChildren(hasChildren);
+					}
 				} else {
 					// duplicates are forbidden in complete file lists
 					throw Exception(_("Duplicate item in the file list"));
@@ -254,6 +338,11 @@ void ListLoader::startTag(const string& name, StringPairList& attribs, bool simp
 			cur = d;
 		}
 		cur->setComplete(true);
+		const auto& baseDateAttr = getAttrib(attribs, sBaseDate, 3);
+		const auto baseDate = parseRemoteDate(baseDateAttr);
+		if(!baseDateAttr.empty() && baseDate > 0) {
+			cur->setRemoteDate(baseDate);
+		}
 		inListing = true;
 
 		if(simple) {
@@ -286,9 +375,15 @@ void DirectoryListing::save(const string& path) const {
 	stream.write(user.user->getCID().toBase32());
 	stream.write(LIT("\" Base=\""));
 	stream.write(SimpleXML::escape(base, tmp, true));
-	stream.write(LIT("\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n"));
+	stream.write(LIT("\" Generator=\"" APPNAME " " VERSIONSTRING));
 
 	auto start = (base == "/") ? root : find(Util::toNmdcFile(base), root);
+	if(start && start->getRemoteDate() > 0) {
+		stream.write(LIT("\" BaseDate=\""));
+		stream.write(std::to_string(static_cast<int64_t>(start->getRemoteDate())));
+	}
+	stream.write(LIT("\">\r\n"));
+
 	if(start) {
 		std::for_each(start->directories.cbegin(), start->directories.cend(), [&](Directory* d) {
 			d->save(stream, indent, tmp);
@@ -308,6 +403,25 @@ void DirectoryListing::Directory::save(OutputStream& stream, string& indent, str
 	stream.write(indent);
 	stream.write(LIT("<Directory Name=\""));
 	stream.write(SimpleXML::escape(name, tmp, true));
+	if(remoteDate > 0) {
+		stream.write(LIT("\" Date=\""));
+		stream.write(std::to_string(static_cast<int64_t>(remoteDate)));
+	}
+	if(remoteSize >= 0) {
+		stream.write(LIT("\" Size=\""));
+		stream.write(std::to_string(remoteSize));
+	}
+	if(remoteDirectories >= 0) {
+		stream.write(LIT("\" Directories=\""));
+		stream.write(std::to_string(remoteDirectories));
+	}
+	if(remoteFiles >= 0) {
+		stream.write(LIT("\" Files=\""));
+		stream.write(std::to_string(remoteFiles));
+	}
+	if(hasChildren) {
+		stream.write(LIT("\" Children=\"1"));
+	}
 
 	if(!getComplete()) {
 		stream.write(LIT("\" Incomplete=\"1"));
@@ -341,6 +455,10 @@ void DirectoryListing::File::save(OutputStream& stream, string& indent, string& 
 	stream.write(LIT("\" TTH=\""));
 	tmp.clear();
 	stream.write(getTTH().toBase32(tmp));
+	if(remoteDate > 0) {
+		stream.write(LIT("\" Date=\""));
+		stream.write(std::to_string(static_cast<int64_t>(remoteDate)));
+	}
 	stream.write(LIT("\"/>\r\n"));
 }
 void DirectoryListing::setComplete(bool complete) {
@@ -352,6 +470,15 @@ void DirectoryListing::Directory::setAllComplete(bool complete) {
 		d->setAllComplete(complete);
 	}
 	setComplete(complete);
+}
+
+bool DirectoryListing::Directory::isCompleteRecursive() const {
+	if(!complete) {
+		return false;
+	}
+	return std::all_of(directories.cbegin(), directories.cend(), [](const Directory* dir) {
+		return dir->isCompleteRecursive();
+	});
 }
 
 string DirectoryListing::getPath(const Directory* d) const {
@@ -388,6 +515,12 @@ StringList DirectoryListing::getLocalPaths(const Directory* d) const {
 }
 
 void DirectoryListing::download(Directory* aDir, const string& aTarget, bool highPrio) {
+	if(!aDir->isCompleteRecursive() && getUser().user != ClientManager::getInstance()->getMe()) {
+		QueueManager::getInstance()->addDirectory(getPath(aDir), getUser(), aTarget,
+			highPrio ? QueueItem::HIGHEST : QueueItem::DEFAULT);
+		return;
+	}
+
 	string target = (aDir == getRoot()) ? aTarget : aTarget + aDir->getName() + PATH_SEPARATOR;
 	// First, recurse over the directories
 	for(auto& j: aDir->directories) {
@@ -406,11 +539,15 @@ void DirectoryListing::download(Directory* aDir, const string& aTarget, bool hig
 }
 
 void DirectoryListing::download(const string& aDir, const string& aTarget, bool highPrio) {
-	dcassert(aDir.size() > 2);
-	dcassert(aDir[aDir.size() - 1] == '\\'); // This should not be PATH_SEPARATOR
-	Directory* d = find(aDir, getRoot());
+	dcassert(aDir.empty() || aDir[aDir.size() - 1] == '\\'); // This should not be PATH_SEPARATOR
+	Directory* d = aDir.empty() ? getRoot() : find(aDir, getRoot());
 	if(d)
 		download(d, aTarget, highPrio);
+}
+
+bool DirectoryListing::isComplete(const string& aDir) const {
+	auto d = aDir.empty() ? root : find(aDir, root);
+	return d && d->isCompleteRecursive();
 }
 
 void DirectoryListing::download(File* aFile, const string& aTarget, bool view, bool highPrio) {

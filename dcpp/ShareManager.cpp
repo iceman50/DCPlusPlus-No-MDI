@@ -59,7 +59,7 @@ namespace dcpp {
 using std::numeric_limits;
 
 namespace {
-const int SHARE_CACHE_SCHEMA_VERSION = 2;
+const int SHARE_CACHE_SCHEMA_VERSION = 3;
 const size_t MAX_SHARE_CACHE_NAME = 4096;
 const size_t MAX_SHARE_CACHE_PATH = 32768;
 
@@ -154,10 +154,11 @@ ShareManager::~ShareManager() {
 	}
 }
 
-ShareManager::Directory::Directory(const string& aName, const ShareManager::Directory::Ptr& aParent) :
+ShareManager::Directory::Directory(const string& aName, const ShareManager::Directory::Ptr& aParent, time_t aLastWrite) :
 	size(0),
 	name(aName),
-	parent(aParent.get())
+	parent(aParent.get()),
+	lastWrite(aLastWrite)
 {
 }
 
@@ -1148,6 +1149,8 @@ void ShareManager::merge(const Directory::Ptr& directory, const string& realPath
 }
 
 void ShareManager::Directory::merge(const Directory::Ptr& source, const string& realPath) {
+	lastWrite = (std::max)(lastWrite, source->getLastWrite());
+
 	// merge directories
 	for(auto& i: source->directories) {
 		auto subSource = i.second;
@@ -1321,8 +1324,17 @@ size_t ShareManager::getSharedFiles(const string& hubUrl) const {
 	});
 }
 
-ShareManager::Directory::Ptr ShareManager::buildTree(const string& realPath, optional<std::reference_wrapper<const string>> dirName, const Directory::Ptr& parent) {
-	auto dir = Directory::create(dirName ? dirName->get() : Util::getLastDir(realPath), parent);
+ShareManager::Directory::Ptr ShareManager::buildTree(const string& realPath, optional<std::reference_wrapper<const string>> dirName,
+	const Directory::Ptr& parent, time_t lastWrite)
+{
+	if(lastWrite == 0) {
+		FileFindIter directoryInfo(realPath.substr(0, realPath.size() - 1));
+		if(directoryInfo != FileFindIter()) {
+			lastWrite = directoryInfo->getLastWriteTime();
+		}
+	}
+
+	auto dir = Directory::create(dirName ? dirName->get() : Util::getLastDir(realPath), parent, lastWrite);
 
 	auto lastFileIter = dir->files.begin();
 
@@ -1366,7 +1378,7 @@ ShareManager::Directory::Ptr ShareManager::buildTree(const string& realPath, opt
 				} while(dir->nameInUse(virtualName));
 			}
 
-			dir->directories[virtualName] = buildTree(newRealPath, std::cref(virtualName), dir);
+			dir->directories[virtualName] = buildTree(newRealPath, std::cref(virtualName), dir, i->getLastWriteTime());
 
 			if(virtualName != name) {
 				dir->directories[virtualName]->setRealName(move(name));
@@ -1388,8 +1400,9 @@ ShareManager::Directory::Ptr ShareManager::buildTree(const string& realPath, opt
 			// don't share the private key file
 			if(fileName == SETTING(TLS_PRIVATE_KEY_FILE)) { continue; }
 
+			const auto fileDate = i->getLastWriteTime();
 			Directory::File f(name, size, dir,
-				HashManager::getInstance()->getTTH(fileName, size, i->getLastWriteTime()));
+				HashManager::getInstance()->getTTH(fileName, size, fileDate), fileDate);
 			f.validateName(realPath);
 			lastFileIter = dir->files.insert(lastFileIter, move(f));
 		}
@@ -1575,7 +1588,7 @@ string ShareManager::getShareCacheFile() const {
 
 string ShareManager::getShareCacheFingerprint() const {
 	uint64_t hash = 1469598103934665603ULL;
-	fnvAppend(hash, string("ShareCache.v2"));
+	fnvAppend(hash, string("ShareCache.v3"));
 
 	for(const auto& share: shares) {
 		fnvAppend(hash, share.first);
@@ -1615,7 +1628,8 @@ void ShareManager::createShareCacheSchema(SQLiteDB& db) {
 		"id INTEGER PRIMARY KEY NOT NULL,"
 		"parent_id INTEGER REFERENCES directories(id) ON DELETE CASCADE,"
 		"name TEXT NOT NULL CHECK(length(name) > 0),"
-		"real_name TEXT"
+		"real_name TEXT,"
+		"last_write INTEGER NOT NULL CHECK(last_write >= 0)"
 		");"
 		"CREATE INDEX IF NOT EXISTS idx_share_cache_directories_parent ON directories(parent_id);"
 		"CREATE TABLE IF NOT EXISTS files ("
@@ -1624,11 +1638,12 @@ void ShareManager::createShareCacheSchema(SQLiteDB& db) {
 		"name TEXT NOT NULL CHECK(length(name) > 0),"
 		"size INTEGER NOT NULL CHECK(size >= 0),"
 		"tth TEXT CHECK(tth IS NULL OR length(tth) = 39),"
-		"real_path TEXT NOT NULL"
+		"real_path TEXT NOT NULL,"
+		"last_write INTEGER NOT NULL CHECK(last_write >= 0)"
 		");"
 		"CREATE INDEX IF NOT EXISTS idx_share_cache_files_directory ON files(directory_id);"
 		"CREATE INDEX IF NOT EXISTS idx_share_cache_files_tth ON files(tth);"
-		"PRAGMA user_version = 2;"
+		"PRAGMA user_version = 3;"
 	);
 }
 
@@ -1697,7 +1712,7 @@ bool ShareManager::loadShareCache() noexcept {
 			newDirectories.reserve(expectedRoots.size());
 		}
 
-		auto dirs = db.prepare("SELECT id, parent_id, name, real_name FROM directories ORDER BY id");
+		auto dirs = db.prepare("SELECT id, parent_id, name, real_name, last_write FROM directories ORDER BY id");
 		while(dirs.step()) {
 			const auto id = dirs.columnInt64(0);
 			if(id <= 0 || byId.find(id) != byId.end()) {
@@ -1709,7 +1724,14 @@ bool ShareManager::loadShareCache() noexcept {
 				throw ShareException(_("Invalid directory name in share cache"));
 			}
 
-			auto dir = Directory::create(name);
+			const auto directoryDate = dirs.columnInt64(4);
+			if(directoryDate < 0 || static_cast<uint64_t>(directoryDate) >
+				static_cast<uint64_t>((std::numeric_limits<time_t>::max)()))
+			{
+				throw ShareException(_("Invalid directory timestamp in share cache"));
+			}
+
+			auto dir = Directory::create(name, Directory::Ptr(), static_cast<time_t>(directoryDate));
 			if(!dirs.columnIsNull(3)) {
 				auto realName = dirs.columnText(3);
 				if(!isValidCachedName(realName)) {
@@ -1743,7 +1765,7 @@ bool ShareManager::loadShareCache() noexcept {
 			throw ShareException(_("Share cache is missing a configured root directory"));
 		}
 
-		auto files = db.prepare("SELECT directory_id, name, size, tth, real_path FROM files ORDER BY directory_id, name");
+		auto files = db.prepare("SELECT directory_id, name, size, tth, real_path, last_write FROM files ORDER BY directory_id, name");
 		while(files.step()) {
 			auto dir = byId.find(files.columnInt64(0));
 			if(dir == byId.end()) {
@@ -1765,7 +1787,14 @@ bool ShareManager::loadShareCache() noexcept {
 				root = TTHValue(tth);
 			}
 
-			Directory::File file(name, size, dir->second, root);
+			const auto fileDate = files.columnInt64(5);
+			if(fileDate < 0 || static_cast<uint64_t>(fileDate) >
+				static_cast<uint64_t>((std::numeric_limits<time_t>::max)()))
+			{
+				throw ShareException(_("Invalid file timestamp in share cache"));
+			}
+
+			Directory::File file(name, size, dir->second, root, static_cast<time_t>(fileDate));
 			if(files.columnIsNull(4)) {
 				throw ShareException(_("Missing real file path in share cache"));
 			}
@@ -1821,6 +1850,7 @@ void ShareManager::saveShareCacheDirectory(SQLiteStatement& dirStmt, SQLiteState
 	} else {
 		dirStmt.bindNull(4);
 	}
+	dirStmt.bind(5, static_cast<int64_t>(dir.getLastWrite()));
 	dirStmt.stepDone();
 	dirStmt.reset();
 	dirStmt.clearBindings();
@@ -1836,6 +1866,7 @@ void ShareManager::saveShareCacheDirectory(SQLiteStatement& dirStmt, SQLiteState
 			fileStmt.bindNull(4);
 		}
 		fileStmt.bind(5, file.getRealPath());
+		fileStmt.bind(6, static_cast<int64_t>(file.getLastWrite()));
 		fileStmt.stepDone();
 		fileStmt.reset();
 		fileStmt.clearBindings();
@@ -1879,8 +1910,8 @@ void ShareManager::saveShareCache() noexcept {
 				putMeta("fingerprint", getShareCacheFingerprint());
 				putMeta("app", APPNAME " " VERSIONSTRING);
 
-				auto dirStmt = db.prepare("INSERT INTO directories(id, parent_id, name, real_name) VALUES(?1, ?2, ?3, ?4)");
-				auto fileStmt = db.prepare("INSERT INTO files(directory_id, name, size, tth, real_path) VALUES(?1, ?2, ?3, ?4, ?5)");
+				auto dirStmt = db.prepare("INSERT INTO directories(id, parent_id, name, real_name, last_write) VALUES(?1, ?2, ?3, ?4, ?5)");
+				auto fileStmt = db.prepare("INSERT INTO files(directory_id, name, size, tth, real_path, last_write) VALUES(?1, ?2, ?3, ?4, ?5, ?6)");
 				int64_t nextId = 1;
 				for(const auto& dir: directories) {
 					saveShareCacheDirectory(dirStmt, fileStmt, *dir.second, nullopt, nextId, directoryCount, fileCount);
@@ -2071,7 +2102,7 @@ void ShareManager::generateXmlList() {
 				newXmlFile.write(SimpleXML::utf8Header);
 				newXmlFile.write("<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() + "\" Base=\"/\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n");
 				for(auto& i: directories) {
-					i.second->toXml(newXmlFile, indent, tmp2, -1);
+					i.second->toXml(newXmlFile, indent, tmp2, -1, false);
 				}
 				newXmlFile.write("</FileListing>");
 				newXmlFile.flush();
@@ -2127,7 +2158,7 @@ string ShareManager::generateFileListData(const string& hubUrl, bool compressed)
 		// returns a valid root-only file list.
 		for(const auto& item: directories) {
 			if(isVirtualAllowed(item.first, access)) {
-				item.second->toXml(output, indent, tmp, -1);
+				item.second->toXml(output, indent, tmp, -1, false);
 			}
 		}
 	}
@@ -2152,9 +2183,51 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 	if(dir.empty() || dir[0] != '/' || dir[dir.size()-1] != '/')
 		return 0;
 
+	time_t baseDate = 0;
+	{
+		Lock l(cs);
+		if(dir == "/") {
+			for(const auto& item: directories) {
+				baseDate = (std::max)(baseDate, item.second->getLastWrite());
+			}
+		} else {
+			Directory::Ptr root;
+			string::size_type pos = 1;
+			string::size_type next = 1;
+			bool first = true;
+			while((next = dir.find('/', pos)) != string::npos) {
+				if(next == pos) {
+					++pos;
+					continue;
+				}
+				if(first) {
+					first = false;
+					auto item = directories.find(dir.substr(pos, next - pos));
+					if(item == directories.end()) {
+						return nullptr;
+					}
+					root = item->second;
+				} else {
+					auto item = root->directories.find(dir.substr(pos, next - pos));
+					if(item == root->directories.end()) {
+						return nullptr;
+					}
+					root = item->second;
+				}
+				pos = next + 1;
+			}
+			baseDate = root ? root->getLastWrite() : 0;
+		}
+	}
+
 	string xml = SimpleXML::utf8Header;
 	string tmp;
-	xml += "<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() + "\" Base=\"" + SimpleXML::escape(dir, tmp, true) + "\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n";
+	xml += "<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() +
+		"\" Base=\"" + SimpleXML::escape(dir, tmp, true) + "\" Generator=\"" APPNAME " " VERSIONSTRING "\"";
+	if(baseDate > 0) {
+		xml += " BaseDate=\"" + Util::toString(static_cast<int64_t>(baseDate)) + "\"";
+	}
+	xml += ">\r\n";
 	// Limit generated XML before compression to keep partial-list requests memory-bounded.
 	const auto maxPartialListBytes = static_cast<uint64_t>(std::max(1024, SETTING(MAX_PARTIAL_LIST_BYTES)));
 	if(xml.size() >= maxPartialListBytes) {
@@ -2168,7 +2241,7 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 	if(dir == "/") {
 		for(auto& i: directories) {
 			tmp.clear();
-			i.second->toXml(sos, indent, tmp, recurse ? -1 : 0);
+			i.second->toXml(sos, indent, tmp, recurse ? -1 : 0, !recurse);
 		}
 	} else {
 		string::size_type i = 1, j = 1;
@@ -2203,9 +2276,9 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 			return 0;
 
 		for(auto& it2: root->directories) {
-			it2.second->toXml(sos, indent, tmp, recurse ? -1 : 0);
+			it2.second->toXml(sos, indent, tmp, recurse ? -1 : 0, !recurse);
 		}
-		root->filesToXml(sos, indent, tmp);
+		root->filesToXml(sos, indent, tmp, !recurse);
 	}
 
 	xml += "</FileListing>";
@@ -2218,10 +2291,53 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 	}
 
 	auto access = getShareAccess(hubUrl);
+	time_t baseDate = 0;
+	{
+		Lock l(cs);
+		if(dir == "/") {
+			for(const auto& item: directories) {
+				if(isVirtualAllowed(item.first, access)) {
+					baseDate = (std::max)(baseDate, item.second->getLastWrite());
+				}
+			}
+		} else {
+			Directory::Ptr root;
+			string::size_type pos = 1;
+			string::size_type next = 1;
+			bool first = true;
+			while((next = dir.find('/', pos)) != string::npos) {
+				if(next == pos) {
+					++pos;
+					continue;
+				}
+				if(first) {
+					first = false;
+					auto item = directories.find(dir.substr(pos, next - pos));
+					if(item == directories.end() || !isVirtualAllowed(item->first, access)) {
+						return nullptr;
+					}
+					root = item->second;
+				} else {
+					auto item = root->directories.find(dir.substr(pos, next - pos));
+					if(item == root->directories.end()) {
+						return nullptr;
+					}
+					root = item->second;
+				}
+				pos = next + 1;
+			}
+			baseDate = root ? root->getLastWrite() : 0;
+		}
+	}
+
 	string xml = SimpleXML::utf8Header;
 	string tmp;
 	xml += "<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() +
-		"\" Base=\"" + SimpleXML::escape(dir, tmp, true) + "\" Generator=\"" APPNAME " " VERSIONSTRING "\">\r\n";
+		"\" Base=\"" + SimpleXML::escape(dir, tmp, true) + "\" Generator=\"" APPNAME " " VERSIONSTRING "\"";
+	if(baseDate > 0) {
+		xml += " BaseDate=\"" + Util::toString(static_cast<int64_t>(baseDate)) + "\"";
+	}
+	xml += ">\r\n";
 	// Apply the same uncompressed bound to TTH-based partial-list generation.
 	const auto maxPartialListBytes = static_cast<uint64_t>(std::max(1024, SETTING(MAX_PARTIAL_LIST_BYTES)));
 	if(xml.size() >= maxPartialListBytes) {
@@ -2236,7 +2352,7 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 		for(const auto& item: directories) {
 			if(isVirtualAllowed(item.first, access)) {
 				tmp.clear();
-				item.second->toXml(output, indent, tmp, recurse ? -1 : 0);
+				item.second->toXml(output, indent, tmp, recurse ? -1 : 0, !recurse);
 			}
 		}
 	} else {
@@ -2273,9 +2389,9 @@ MemoryInputStream* ShareManager::generatePartialList(const string& dir, bool rec
 		}
 
 		for(const auto& item: root->directories) {
-			item.second->toXml(output, indent, tmp, recurse ? -1 : 0);
+			item.second->toXml(output, indent, tmp, recurse ? -1 : 0, !recurse);
 		}
-		root->filesToXml(output, indent, tmp);
+		root->filesToXml(output, indent, tmp, !recurse);
 	}
 
 	xml += "</FileListing>";
@@ -2288,10 +2404,14 @@ const int8_t maxLevel = 2;
 const size_t maxItemsPerLevel[maxLevel] = { 16, 4 };
 
 #define LITERAL(n) n, sizeof(n)-1
-void ShareManager::Directory::toXml(OutputStream& xmlFile, string& indent, string& tmp2, int8_t level) const {
+void ShareManager::Directory::toXml(OutputStream& xmlFile, string& indent, string& tmp2, int8_t level, bool addFileDates) const {
 	xmlFile.write(indent);
 	xmlFile.write(LITERAL("<Directory Name=\""));
 	xmlFile.write(SimpleXML::escape(name, tmp2, true));
+	if(lastWrite > 0) {
+		xmlFile.write(LITERAL("\" Date=\""));
+		xmlFile.write(Util::toString(static_cast<int64_t>(lastWrite)));
+	}
 
 	if(level < 0 || (level < maxLevel && directories.size() + files.size() <= maxItemsPerLevel[level])) {
 		xmlFile.write(LITERAL("\">\r\n"));
@@ -2301,9 +2421,9 @@ void ShareManager::Directory::toXml(OutputStream& xmlFile, string& indent, strin
 			++level;
 
 		for(auto& i: directories) {
-			i.second->toXml(xmlFile, indent, tmp2, level);
+			i.second->toXml(xmlFile, indent, tmp2, level, addFileDates);
 		}
-		filesToXml(xmlFile, indent, tmp2);
+		filesToXml(xmlFile, indent, tmp2, addFileDates);
 
 		if(level >= 0)
 			--level;
@@ -2316,12 +2436,38 @@ void ShareManager::Directory::toXml(OutputStream& xmlFile, string& indent, strin
 		if(directories.empty() && files.empty()) {
 			xmlFile.write(LITERAL("\" />\r\n"));
 		} else {
+			size_t directoryCount = 0;
+			size_t fileCount = 0;
+			int64_t visibleSize = 0;
+			std::function<void(const Directory&)> countContent = [&](const Directory& directory) {
+				directoryCount += directory.directories.size();
+				for(const auto& file: directory.files) {
+					if(file.tth) {
+						++fileCount;
+						visibleSize += file.getSize();
+					}
+				}
+				for(const auto& child: directory.directories) {
+					countContent(*child.second);
+				}
+			};
+			countContent(*this);
+
+			xmlFile.write(LITERAL("\" Size=\""));
+			xmlFile.write(Util::toString(visibleSize));
+			if(!directories.empty()) {
+				xmlFile.write(LITERAL("\" Children=\"1"));
+			}
+			xmlFile.write(LITERAL("\" Directories=\""));
+			xmlFile.write(std::to_string(directoryCount));
+			xmlFile.write(LITERAL("\" Files=\""));
+			xmlFile.write(std::to_string(fileCount));
 			xmlFile.write(LITERAL("\" Incomplete=\"1\" />\r\n"));
 		}
 	}
 }
 
-void ShareManager::Directory::filesToXml(OutputStream& xmlFile, string& indent, string& tmp2) const {
+void ShareManager::Directory::filesToXml(OutputStream& xmlFile, string& indent, string& tmp2, bool addDates) const {
 	for(auto& f: files) {
 		if(!f.tth) { continue; }
 		xmlFile.write(indent);
@@ -2332,6 +2478,10 @@ void ShareManager::Directory::filesToXml(OutputStream& xmlFile, string& indent, 
 		xmlFile.write(LITERAL("\" TTH=\""));
 		tmp2.clear();
 		xmlFile.write(f.tth->toBase32(tmp2));
+		if(addDates && f.getLastWrite() > 0) {
+			xmlFile.write(LITERAL("\" Date=\""));
+			xmlFile.write(Util::toString(static_cast<int64_t>(f.getLastWrite())));
+		}
 		xmlFile.write(LITERAL("\"/>\r\n"));
 	}
 }
@@ -2733,9 +2883,13 @@ optional<std::reference_wrapper<const ShareManager::Directory::File>> ShareManag
 
 void ShareManager::on(QueueManagerListener::FileMoved, const string& realPath) noexcept {
 	if(SETTING(ADD_FINISHED_INSTANTLY)) {
-		auto size = File::getSize(realPath);
-		if(size == -1) {
-			// looks like the file isn't actually there...
+		int64_t size = -1;
+		time_t lastWrite = 0;
+		try {
+			File completedFile(realPath, File::READ, File::OPEN);
+			size = completedFile.getSize();
+			lastWrite = completedFile.getLastModified();
+		} catch(const FileException&) {
 			return;
 		}
 
@@ -2743,10 +2897,18 @@ void ShareManager::on(QueueManagerListener::FileMoved, const string& realPath) n
 		// Check if the finished download dir is supposed to be shared
 		auto dir = getDirectory(realPath);
 		if(dir) {
+			const auto parentPath = Util::getFilePath(realPath);
 			Directory::File f(Util::getFileName(realPath), size, dir,
-				HashManager::getInstance()->getTTH(realPath, size, 0));
-			f.validateName(Util::getFilePath(realPath));
+				HashManager::getInstance()->getTTH(realPath, size, static_cast<uint32_t>(lastWrite)), lastWrite);
+			f.validateName(parentPath);
 			dir->files.insert(move(f));
+
+			FileFindIter parentInfo(parentPath.substr(0, parentPath.size() - 1));
+			if(parentInfo != FileFindIter()) {
+				dir->setLastWrite((std::max)(dir->getLastWrite(), static_cast<time_t>(parentInfo->getLastWriteTime())));
+			}
+			setDirty();
+			forceXmlRefresh = true;
 		}
 	}
 }
@@ -2767,6 +2929,7 @@ void ShareManager::on(HashManagerListener::TTHDone, const string& realPath, cons
 				if(file.tth && root != *file.tth)
 					tthIndex.erase(*file.tth);
 				file.tth = root;
+				file.setLastWrite(timestamp);
 				tthIndex[*file.tth] = &file;
 
 				setDirty();

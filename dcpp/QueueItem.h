@@ -76,7 +76,13 @@ public:
 		FLAG_XML_BZLIST = 0x100,
 
 		/** Only download a part of the file list */
-		FLAG_PARTIAL_LIST = 0x200
+		FLAG_PARTIAL_LIST = 0x200,
+
+		/** Request the complete subtree in a partial file list */
+		FLAG_RECURSIVE_LIST = 0x400,
+
+		/** A full-list request was merged while a partial-list transfer was already running. */
+		FLAG_DEFERRED_FULL_LIST = 0x800
 	};
 
 	class Source : public Flags {
