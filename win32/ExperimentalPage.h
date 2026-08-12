@@ -36,6 +36,7 @@ private:
 	ButtonPtr removeTemp;
 	ButtonPtr clearTemps;
 
+	void layoutTempShares();
 	void addIntItem(GridPtr target, const tstring& text, int setting, unsigned helpId,
 		const tstring& unit, int minimum, int maximum, int multiplier = 1);
 	void readScaledIntItems();

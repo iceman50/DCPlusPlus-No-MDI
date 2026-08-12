@@ -5,6 +5,7 @@
 * Add route-scoped, searchable temporary shares to all ADC and NMDC hubs and private chats, with asynchronous hashing, visible magnet links and file sizes, rich editor attachments and inline media on RTF0 routes, exact-TTH downloads and upload verification, session limits, and active-share management
 * Fix OLE file drops being rejected or discarded over chat controls, preserve multi-file order, refresh live acceptance settings, and report hashing failures or cancellations without leaving attachments pending
 * Consolidate RTF0, drag-and-drop temporary shares, MCN, hashing and defensive protocol controls under the Experimental settings root with active temporary-share management
+* Split Experimental settings into Chat and sharing, Transfers and hashing, and Protocol limits tabs with responsive temporary-share management
 * Prefer hub-provided ADC chat timestamps over local arrival times and mark them with the bundled OK icon
 * Add structured System Log severity levels and component areas with colored RichEdit messages, embedded resource icons and configurable styles
 * Accept hub GPA password challenges in every ADC connection state and enter VERIFY before responding

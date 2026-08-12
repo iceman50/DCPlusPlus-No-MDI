@@ -24,6 +24,7 @@
 #include <dwt/widgets/Label.h>
 #include <dwt/widgets/MessageBox.h>
 #include <dwt/widgets/Spinner.h>
+#include <dwt/widgets/TabView.h>
 
 #include "resource.h"
 #include "WinUtil.h"
@@ -47,20 +48,113 @@ const ColumnInfo tempColumns[] = {
 	{ N_("Path"), 220, false }
 };
 
+/** An opaque settings tab page that uses the same default background as its child grid. */
+class ExperimentalTabPage : public dwt::Container
+{
+public:
+	ExperimentalTabPage(dwt::Widget* parent, const tstring& title, size_t rows) :
+		dwt::Container(parent),
+		grid(nullptr)
+	{
+		dwt::Container::Seed seed;
+		seed.caption = title;
+		seed.style &= ~WS_VISIBLE;
+		create(seed);
+		setHelpId(IDH_EXPERIMENTALPAGE);
+
+		grid = addChild(Grid::Seed(rows, 1));
+		grid->setSpacing(10);
+		grid->column(0).mode = GridInfo::FILL;
+	}
+
+	GridPtr content() const { return grid; }
+
+	dwt::Point getPreferredSize() override {
+		return grid->getPreferredSize() + dwt::Point(14, 12);
+	}
+
+	void layout() override {
+		const auto size = getClientSize();
+		grid->resize(dwt::Rectangle(7, 4,
+			std::max<LONG>(0, size.x - 14), std::max<LONG>(0, size.y - 12)));
+	}
+
+private:
+	GridPtr grid;
+};
+
+/** TabView normally has no preferred size because it is used to fill application frames.
+ * Settings pages need one so that their shared ScrolledContainer remains a small-window fallback. */
+class ExperimentalTabView : public dwt::TabView
+{
+public:
+	typedef ExperimentalTabView* ObjectType;
+	typedef dwt::TabView::Seed Seed;
+
+	explicit ExperimentalTabView(dwt::Widget* parent) : dwt::TabView(parent) { }
+
+	ExperimentalTabPage* addPage(const tstring& title, size_t rows) {
+		auto page = new ExperimentalTabPage(this, title, rows);
+		pages.push_back(page);
+		add(page);
+		return page;
+	}
+
+	dwt::Point getPreferredSize() override {
+		dwt::Point contentSize;
+		for(auto page: pages) {
+			const auto size = page->getPreferredSize();
+			contentSize.x = std::max(contentSize.x, size.x);
+			contentSize.y = std::max(contentSize.y, size.y);
+		}
+
+		// Ensure that all single-line tab labels fit without scroll buttons at the preferred width.
+		LONG tabsRight = 0;
+		for(size_t i = 0; i < size(); ++i) {
+			RECT rect = { 0 };
+			if(TabCtrl_GetItemRect(handle(), static_cast<int>(i), &rect)) {
+				tabsRight = std::max(tabsRight, rect.right);
+			}
+		}
+		contentSize.x = std::max(contentSize.x, tabsRight);
+
+		RECT rect = { 0, 0, contentSize.x, contentSize.y };
+		TabCtrl_AdjustRect(handle(), TRUE, &rect);
+		return dwt::Point(rect.right - rect.left, rect.bottom - rect.top);
+	}
+
+private:
+	std::vector<ExperimentalTabPage*> pages;
+};
+
 }
 
 ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
-	PropPage(parent, 5, 1),
+	PropPage(parent, 1, 1),
 	tempShares(nullptr),
 	tempSummary(nullptr),
 	removeTemp(nullptr),
 	clearTemps(nullptr)
 {
 	setHelpId(IDH_EXPERIMENTALPAGE);
+	grid->row(0).mode = GridInfo::FILL;
+	grid->row(0).align = GridInfo::STRETCH;
 	grid->column(0).mode = GridInfo::FILL;
 
+	auto tabSeed = WinUtil::Seeds::tabs;
+	tabSeed.style &= ~(TCS_OWNERDRAWFIXED | TCS_MULTILINE | TCS_RAGGEDRIGHT | TCS_TOOLTIPS);
+	tabSeed.widthConfig = 0;
+	tabSeed.closeable = false;
+	auto tabs = dwt::WidgetCreator<ExperimentalTabView>::create(grid, tabSeed);
+	tabs->setHelpId(IDH_EXPERIMENTALPAGE);
+	grid->setWidget(tabs, 0, 0);
+
+	auto chatGrid = tabs->addPage(T_("Chat and sharing"), 2)->content();
+	chatGrid->row(1).mode = GridInfo::FILL;
+	chatGrid->row(1).align = GridInfo::STRETCH;
+
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Rich text and temporary shares")));
+		auto group = chatGrid->addChild(GroupBox::Seed(T_("Rich text and temporary shares")));
 		group->setHelpId(IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES);
 		auto cur = group->addChild(Grid::Seed(4, 1));
 		cur->column(0).mode = GridInfo::FILL;
@@ -86,12 +180,12 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 	}
 
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Active temporary shares")));
+		auto group = chatGrid->addChild(GroupBox::Seed(T_("Active temporary shares")));
 		group->setHelpId(IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES);
 		auto cur = group->addChild(Grid::Seed(3, 1));
 		cur->column(0).mode = GridInfo::FILL;
-		cur->row(0).mode = GridInfo::STATIC;
-		cur->row(0).size = 170;
+		cur->row(0).mode = GridInfo::FILL;
+		cur->row(0).size = cur->scale(110);
 		cur->row(0).align = GridInfo::STRETCH;
 		tempShares = cur->addChild(WinUtil::Seeds::Dialog::table);
 		tempShares->setHelpId(IDH_SETTINGS_EXPERIMENTAL_TEMP_SHARES);
@@ -107,10 +201,16 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		clearTemps->onClicked([this] { handleClearTemps(); });
 		buttons->addChild(Button::Seed(T_("Re&fresh")))->onClicked([this] { fillTempShares(); });
 		tempSummary = cur->addChild(Label::Seed(tstring()));
+
+		// Preserve the group's preferred height while allowing the table to consume extra tab space.
+		chatGrid->row(1).size = group->getPreferredSize().y;
+		tempShares->onWindowPosChanged([this](const dwt::Rectangle&) { layoutTempShares(); });
 	}
 
+	auto transferGrid = tabs->addPage(T_("Transfers and hashing"), 2)->content();
+
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Multi-connection transfers (MCN)")));
+		auto group = transferGrid->addChild(GroupBox::Seed(T_("Multi-connection transfers (MCN)")));
 		auto cur = group->addChild(Grid::Seed(2, 1));
 		cur->column(0).mode = GridInfo::FILL;
 		addIntItem(cur, T_("Maximum download connections per user"), SettingsManager::MAX_MCN_DOWNLOADS,
@@ -120,7 +220,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 	}
 
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Hashing and share database")));
+		auto group = transferGrid->addChild(GroupBox::Seed(T_("Hashing and share database")));
 		auto cur = group->addChild(Grid::Seed(5, 1));
 		cur->column(0).mode = GridInfo::FILL;
 		addIntItem(cur, T_("Maximum hash speed"), SettingsManager::MAX_HASH_SPEED,
@@ -149,8 +249,10 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		buttons->addChild(Button::Seed(T_("&Compact")))->onClicked([this] { handleCompactHashDb(); });
 	}
 
+	auto protocolGrid = tabs->addPage(T_("Protocol limits"), 1)->content();
+
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Protocol resource limits")));
+		auto group = protocolGrid->addChild(GroupBox::Seed(T_("Protocol resource limits")));
 		auto cur = group->addChild(Grid::Seed(11, 1));
 		cur->column(0).mode = GridInfo::FILL;
 		addIntItem(cur, T_("Queued protocol data limit"), SettingsManager::MAX_QUEUED_PROTOCOL_DATA,
@@ -187,10 +289,7 @@ ExperimentalPage::~ExperimentalPage() {
 
 void ExperimentalPage::layout() {
 	PropPage::layout();
-	if(tempShares) {
-		const auto width = tempShares->getWindowSize().x;
-		tempShares->setColumnWidth(4, std::max<LONG>(180, width - 610));
-	}
+	layoutTempShares();
 }
 
 void ExperimentalPage::write() {
@@ -219,6 +318,12 @@ void ExperimentalPage::write() {
 	clamp(SettingsManager::MAX_PARTIAL_LIST_BYTES, 1024);
 	clamp(SettingsManager::CHAT_LINK_MAX_LENGTH, 1);
 	clamp(SettingsManager::RICH_TEXT_MAX_SIZE, 1024);
+}
+
+void ExperimentalPage::layoutTempShares() {
+	if(!tempShares) return;
+	const auto width = tempShares->getWindowSize().x;
+	tempShares->setColumnWidth(4, std::max<LONG>(180, width - 610));
 }
 
 void ExperimentalPage::addIntItem(GridPtr target, const tstring& text, int setting,
