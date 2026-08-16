@@ -18,6 +18,7 @@
 #include <dcpp/ShareManager.h>
 #include <dcpp/version.h>
 
+#include <dwt/util/StringUtils.h>
 #include <dwt/widgets/CheckBox.h>
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/GroupBox.h>
@@ -197,6 +198,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		WinUtil::makeColumns(tempShares, tempColumns, 5);
 		tempShares->onGetEmptyText([] { return T_("No temporary attachment shares are active"); });
 		tempShares->onSelectionChanged([this] { handleTempSelectionChanged(); });
+		tempShares->onContextMenu([this](dwt::ScreenCoordinate pt) { return handleTempContextMenu(pt); });
 
 		auto buttons = cur->addChild(Grid::Seed(1, 4));
 		buttons->column(3).mode = GridInfo::FILL;
@@ -407,6 +409,43 @@ void ExperimentalPage::handleTempSelectionChanged() {
 	const auto any = tempShares->hasSelected();
 	removeTemp->setEnabled(any);
 	clearTemps->setEnabled(tempShares->size() != 0);
+}
+
+bool ExperimentalPage::handleTempContextMenu(dwt::ScreenCoordinate pt) {
+	if(pt.x() == -1 && pt.y() == -1) {
+		pt = tempShares->getContextMenuPos();
+	}
+
+	const auto selected = tempShares->countSelected();
+	auto menu = addChild(WinUtil::Seeds::menu);
+	menu->setTitle(selected == 1 ?
+		dwt::util::escapeMenu(tempShares->getText(tempShares->getSelected(), 0)) :
+		T_("Active temporary shares"), WinUtil::menuIcon(IDI_MAGNET));
+	menu->appendItem(T_("Copy magnet link to clipboard"), [this] { handleCopyTempMagnet(); },
+		WinUtil::menuIcon(IDI_MAGNET), selected == 1);
+	menu->appendItem(T_("&Remove"), [this] { handleRemoveTemps(); }, dwt::IconPtr(), selected != 0);
+	menu->open(pt);
+	return true;
+}
+
+void ExperimentalPage::handleCopyTempMagnet() {
+	const auto row = tempShares->getSelected();
+	if(row < 0) return;
+
+	try {
+		const auto path = Text::fromT(tempShares->getText(row, 4));
+		const auto route = Text::fromT(tempShares->getText(row, 2));
+		const TTHValue tth(Text::fromT(tempShares->getText(row, 3)));
+		const auto shares = ShareManager::getInstance()->getTempShares();
+		const auto share = std::find_if(shares.begin(), shares.end(), [&](const ShareManager::TempShareInfo& item) {
+			return item.tth == tth && Util::stricmp(item.realPath, path) == 0 &&
+				Util::stricmp(item.hubUrl, route) == 0;
+		});
+		if(share != shares.end()) {
+			WinUtil::copyMagnet(share->tth, Text::toT(Util::getFileName(share->realPath)), share->size);
+		}
+	} catch(...) {
+	}
 }
 
 void ExperimentalPage::handleRemoveTemps() {

@@ -48,6 +48,8 @@ private:
 	void writeScaledIntItems();
 	void fillTempShares();
 	void handleTempSelectionChanged();
+	bool handleTempContextMenu(dwt::ScreenCoordinate pt);
+	void handleCopyTempMagnet();
 	void handleRemoveTemps();
 	void handleClearTemps();
 	void handleVerifyHashDb(bool fullCheck);
