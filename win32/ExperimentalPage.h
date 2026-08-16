@@ -10,6 +10,8 @@
 #ifndef DCPLUSPLUS_WIN32_EXPERIMENTAL_PAGE_H
 #define DCPLUSPLUS_WIN32_EXPERIMENTAL_PAGE_H
 
+#include <memory>
+
 #include "PropPage.h"
 
 /** Experimental sharing, hashing, MCN, RTF0 and defensive protocol controls. */
@@ -35,6 +37,9 @@ private:
 	LabelPtr tempSummary;
 	ButtonPtr removeTemp;
 	ButtonPtr clearTemps;
+	LabelPtr hashDbStatus;
+	std::shared_ptr<int> hashDbCallbackToken;
+	bool hashDbMaintenanceRunning;
 
 	void layoutTempShares();
 	void addIntItem(GridPtr target, const tstring& text, int setting, unsigned helpId,
@@ -48,6 +53,9 @@ private:
 	void handleVerifyHashDb(bool fullCheck);
 	void handleOptimizeHashDb();
 	void handleCompactHashDb();
+	void setHashDbMaintenanceRunning(bool running, const tstring& status = tstring());
+	function<void (bool, const string&)> hashDbCompletion(
+		const tstring& successMessage, const tstring& failureMessage = tstring());
 };
 
 #endif // !defined(DCPLUSPLUS_WIN32_EXPERIMENTAL_PAGE_H)

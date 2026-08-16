@@ -61,6 +61,7 @@ public:
 	}
 	virtual ~HashManager() {
 		TimerManager::getInstance()->removeListener(this);
+		hashStoreMaintenance.join();
 		hasher.join();
 	}
 
@@ -99,14 +100,24 @@ public:
 	 * Rebuild hash data file
 	 */
 	void rebuild() { hasher.scheduleRebuild(); }
+	using HashStoreMaintenanceCallback = function<void (bool, const string&)>;
 	bool verifyHashStore(bool fullCheck = false);
 	void optimizeHashStore();
 	void compactHashStore();
+	void verifyHashStoreAsync(bool fullCheck, HashStoreMaintenanceCallback callback);
+	void optimizeHashStoreAsync(HashStoreMaintenanceCallback callback);
+	void compactHashStoreAsync(HashStoreMaintenanceCallback callback);
 
-	void startup(function<void (float)> progressF) { hasher.start(); store.load(progressF); }
+	void startup(function<void (float)> progressF) {
+		hashStoreMaintenance.start();
+		hasher.start();
+		store.load(progressF);
+	}
 
 	void shutdown() {
+		hashStoreMaintenance.shutdown();
 		hasher.shutdown();
+		hashStoreMaintenance.join();
 		hasher.join();
 		Lock l(cs);
 		store.save();
@@ -124,6 +135,22 @@ public:
 	bool isHashingPaused() const noexcept;
 
 private:
+	class HashStoreMaintenanceWorker : public Thread {
+	public:
+		HashStoreMaintenanceWorker() : stop(false) { }
+
+		void schedule(function<void ()> task);
+		void shutdown();
+
+	private:
+		int run() override;
+
+		std::deque<function<void ()>> tasks;
+		CriticalSection cs;
+		Semaphore s;
+		bool stop;
+	};
+
 	class Hasher : public Thread {
 	public:
 		Hasher() : stop(false), running(false), idle(true), paused(0), rebuild(false),
@@ -304,6 +331,9 @@ private:
 
 	friend class HashLoader;
 
+	void scheduleHashStoreMaintenance(function<bool ()> operation, HashStoreMaintenanceCallback callback);
+
+	HashStoreMaintenanceWorker hashStoreMaintenance;
 	Hasher hasher;
 	HashStore store;
 

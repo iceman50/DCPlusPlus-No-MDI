@@ -230,6 +230,78 @@ void HashManager::compactHashStore() {
 	store.compact();
 }
 
+void HashManager::scheduleHashStoreMaintenance(function<bool ()> operation, HashStoreMaintenanceCallback callback) {
+	hashStoreMaintenance.schedule([operation = move(operation), callback = move(callback)] {
+		bool success = false;
+		string error;
+		try {
+			success = operation();
+		} catch(const Exception& e) {
+			error = e.getError();
+		} catch(const std::exception& e) {
+			error = e.what();
+		} catch(...) {
+			error = _("Unknown hash database maintenance error");
+		}
+		if(callback) callback(success, error);
+	});
+}
+
+void HashManager::verifyHashStoreAsync(bool fullCheck, HashStoreMaintenanceCallback callback) {
+	scheduleHashStoreMaintenance([this, fullCheck] { return verifyHashStore(fullCheck); }, move(callback));
+}
+
+void HashManager::optimizeHashStoreAsync(HashStoreMaintenanceCallback callback) {
+	scheduleHashStoreMaintenance([this] {
+		optimizeHashStore();
+		return true;
+	}, move(callback));
+}
+
+void HashManager::compactHashStoreAsync(HashStoreMaintenanceCallback callback) {
+	scheduleHashStoreMaintenance([this] {
+		compactHashStore();
+		return true;
+	}, move(callback));
+}
+
+void HashManager::HashStoreMaintenanceWorker::schedule(function<void ()> task) {
+	{
+		Lock l(cs);
+		if(stop) return;
+		tasks.push_back(move(task));
+	}
+	s.signal();
+}
+
+void HashManager::HashStoreMaintenanceWorker::shutdown() {
+	{
+		Lock l(cs);
+		stop = true;
+		tasks.clear();
+	}
+	s.signal();
+}
+
+int HashManager::HashStoreMaintenanceWorker::run() {
+	setThreadPriority(Thread::LOW);
+	for(;;) {
+		s.wait();
+
+		function<void ()> task;
+		{
+			Lock l(cs);
+			if(stop) break;
+			if(tasks.empty()) continue;
+			task = move(tasks.front());
+			tasks.pop_front();
+		}
+
+		task();
+	}
+	return 0;
+}
+
 void HashManager::HashStore::addFile(const string& aFileName, uint32_t aTimeStamp, const TigerTree& tth, bool aUsed) {
 	if(!addTree(tth)) {
 		throw HashException(_("Unable to save hash data"));

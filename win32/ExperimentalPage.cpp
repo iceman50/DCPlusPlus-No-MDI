@@ -59,6 +59,7 @@ public:
 		dwt::Container::Seed seed;
 		seed.caption = title;
 		seed.style &= ~WS_VISIBLE;
+		seed.exStyle |= WS_EX_CONTROLPARENT;
 		create(seed);
 		setHelpId(IDH_EXPERIMENTALPAGE);
 
@@ -134,7 +135,10 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 	tempShares(nullptr),
 	tempSummary(nullptr),
 	removeTemp(nullptr),
-	clearTemps(nullptr)
+	clearTemps(nullptr),
+	hashDbStatus(nullptr),
+	hashDbCallbackToken(std::make_shared<int>(0)),
+	hashDbMaintenanceRunning(false)
 {
 	setHelpId(IDH_EXPERIMENTALPAGE);
 	grid->row(0).mode = GridInfo::FILL;
@@ -143,6 +147,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 
 	auto tabSeed = WinUtil::Seeds::tabs;
 	tabSeed.style &= ~(TCS_OWNERDRAWFIXED | TCS_MULTILINE | TCS_RAGGEDRIGHT | TCS_TOOLTIPS);
+	tabSeed.exStyle |= WS_EX_CONTROLPARENT;
 	tabSeed.widthConfig = 0;
 	tabSeed.closeable = false;
 	auto tabs = dwt::WidgetCreator<ExperimentalTabView>::create(grid, tabSeed);
@@ -241,12 +246,14 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		cache->setHelpId(IDH_SETTINGS_EXPERIMENTAL_SHARE_CACHE);
 		items.emplace_back(cache, SettingsManager::SHARE_CACHE, PropPage::T_BOOL);
 
-		auto buttons = cur->addChild(Grid::Seed(1, 4));
+		auto buttons = cur->addChild(Grid::Seed(2, 4));
 		buttons->column(3).mode = GridInfo::FILL;
 		buttons->addChild(Button::Seed(T_("&Verify")))->onClicked([this] { handleVerifyHashDb(false); });
 		buttons->addChild(Button::Seed(T_("Full &check")))->onClicked([this] { handleVerifyHashDb(true); });
 		buttons->addChild(Button::Seed(T_("&Optimize")))->onClicked([this] { handleOptimizeHashDb(); });
 		buttons->addChild(Button::Seed(T_("&Compact")))->onClicked([this] { handleCompactHashDb(); });
+		hashDbStatus = buttons->addChild(Label::Seed(_T(" ")));
+		buttons->setWidget(hashDbStatus, 1, 0, 1, 4);
 	}
 
 	auto protocolGrid = tabs->addPage(T_("Protocol limits"), 1)->content();
@@ -285,6 +292,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 }
 
 ExperimentalPage::~ExperimentalPage() {
+	hashDbCallbackToken.reset();
 }
 
 void ExperimentalPage::layout() {
@@ -423,38 +431,53 @@ void ExperimentalPage::handleClearTemps() {
 }
 
 void ExperimentalPage::handleVerifyHashDb(bool fullCheck) {
-	try {
-		const auto ok = HashManager::getInstance()->verifyHashStore(fullCheck);
-		dwt::MessageBox(this).show(ok ? T_("Hash database check passed") :
-			T_("Hash database check failed; see the system log for details"),
-			_T(APPNAME) _T(" ") _T(VERSIONSTRING), dwt::MessageBox::BOX_OK,
-			ok ? dwt::MessageBox::BOX_ICONINFORMATION : dwt::MessageBox::BOX_ICONEXCLAMATION);
-	} catch(const Exception& e) {
-		dwt::MessageBox(this).show(Text::toT(e.getError()), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
-	}
+	if(hashDbMaintenanceRunning) return;
+	setHashDbMaintenanceRunning(true, fullCheck ?
+		T_("Checking the hash database...") : T_("Verifying the hash database..."));
+	HashManager::getInstance()->verifyHashStoreAsync(fullCheck,
+		hashDbCompletion(T_("Hash database check passed"),
+			T_("Hash database check failed; see the system log for details")));
 }
 
 void ExperimentalPage::handleOptimizeHashDb() {
-	try {
-		HashManager::getInstance()->optimizeHashStore();
-		dwt::MessageBox(this).show(T_("Hash database optimized"), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONINFORMATION);
-	} catch(const Exception& e) {
-		dwt::MessageBox(this).show(Text::toT(e.getError()), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
-	}
+	if(hashDbMaintenanceRunning) return;
+	setHashDbMaintenanceRunning(true, T_("Optimizing the hash database..."));
+	HashManager::getInstance()->optimizeHashStoreAsync(hashDbCompletion(T_("Hash database optimized")));
 }
 
 void ExperimentalPage::handleCompactHashDb() {
+	if(hashDbMaintenanceRunning) return;
 	if(dwt::MessageBox(this).show(T_("Compact the hash database now?"), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
 		dwt::MessageBox::BOX_YESNO, dwt::MessageBox::BOX_ICONQUESTION) != IDYES) return;
-	try {
-		HashManager::getInstance()->compactHashStore();
-		dwt::MessageBox(this).show(T_("Hash database compacted"), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONINFORMATION);
-	} catch(const Exception& e) {
-		dwt::MessageBox(this).show(Text::toT(e.getError()), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
-			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
-	}
+	setHashDbMaintenanceRunning(true, T_("Compacting the hash database..."));
+	HashManager::getInstance()->compactHashStoreAsync(hashDbCompletion(T_("Hash database compacted")));
+}
+
+void ExperimentalPage::setHashDbMaintenanceRunning(bool running, const tstring& status) {
+	// Do not disable the clicked button while it owns focus. SettingsDialog's IsDialogMessage
+	// loop can otherwise spin in WM_GETDLGCODE; the flag guards duplicate operations instead.
+	hashDbMaintenanceRunning = running;
+	hashDbStatus->setText(status.empty() ? _T(" ") : status);
+}
+
+function<void (bool, const string&)> ExperimentalPage::hashDbCompletion(
+	const tstring& successMessage, const tstring& failureMessage)
+{
+	const auto pageHandle = handle();
+	std::weak_ptr<int> callbackToken(hashDbCallbackToken);
+	return [pageHandle, callbackToken, successMessage, failureMessage](bool success, const string& error) {
+		dwt::Application::instance().callAsync([pageHandle, callbackToken, successMessage, failureMessage, success, error] {
+			if(callbackToken.expired() || !::IsWindow(pageHandle)) return;
+			auto page = dwt::hwnd_cast<ExperimentalPage*>(pageHandle);
+			if(!page) return;
+
+			page->setHashDbMaintenanceRunning(false);
+			const auto failed = !error.empty() || !success;
+			const auto message = !error.empty() ? Text::toT(error) :
+				(success ? successMessage : failureMessage);
+			dwt::MessageBox(page).show(message, _T(APPNAME) _T(" ") _T(VERSIONSTRING),
+				dwt::MessageBox::BOX_OK, !error.empty() ? dwt::MessageBox::BOX_ICONSTOP :
+					(failed ? dwt::MessageBox::BOX_ICONEXCLAMATION : dwt::MessageBox::BOX_ICONINFORMATION));
+		});
+	};
 }

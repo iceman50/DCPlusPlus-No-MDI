@@ -3,6 +3,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
+#include <thread>
 
 #define private public
 #include <dcpp/HashManager.h>
@@ -445,6 +447,22 @@ TEST_F(HashStoreTest, completed_empty_sqlite_store_does_not_import_later_legacy_
 	EXPECT_EQ("1", metadataValue(db, "legacy_migration_complete"));
 	EXPECT_EQ(0, scalarInt(db, "SELECT COUNT(*) FROM files"));
 	EXPECT_EQ(0, scalarInt(db, "SELECT COUNT(*) FROM trees"));
+}
+
+TEST(HashStoreMaintenanceWorkerTest, runs_scheduled_tasks_off_the_calling_thread) {
+	HashManager::HashStoreMaintenanceWorker worker;
+	std::promise<std::thread::id> result;
+	auto future = result.get_future();
+	const auto callingThread = std::this_thread::get_id();
+
+	worker.start();
+	worker.schedule([&result] { result.set_value(std::this_thread::get_id()); });
+	const auto status = future.wait_for(std::chrono::seconds(5));
+	worker.shutdown();
+	worker.join();
+
+	ASSERT_EQ(std::future_status::ready, status);
+	EXPECT_NE(callingThread, future.get());
 }
 
 } // namespace
