@@ -440,6 +440,35 @@ TEST_F(ShareCacheTest, prepares_cached_unshared_attachment_with_exact_route_meta
 	EXPECT_FALSE(sm->validateChatAttachment(cached.tth, cached.size, route));
 }
 
+TEST_F(ShareCacheTest, protocol_documents_are_exposed_only_by_exact_tth_on_their_route) {
+	auto sm = ShareManager::getInstance();
+	const string route = "adc://bbs.example.invalid";
+	const string otherRoute = "adc://other.example.invalid";
+	const auto cached = cacheFile(configPath + "protocol document.bbs", "IBB0 IDdocument body");
+
+	ASSERT_TRUE(sm->addTTHOnlyShare(cached.path, cached.size, cached.timestamp, cached.tth, route));
+	EXPECT_TRUE(sm->getTempShares().empty());
+	EXPECT_TRUE(sm->search("protocol", SearchManager::SIZE_DONTCARE, 0,
+		SearchManager::TYPE_ANY, 10, route).empty());
+	EXPECT_TRUE(sm->search(StringList { "ANdocument", "EXbbs" }, 10, route).empty());
+
+	const auto exact = sm->search(StringList { "TR" + cached.tth.toBase32() }, 10, route);
+	ASSERT_EQ(exact.size(), 1U);
+	EXPECT_EQ(exact.front()->getTTH(), cached.tth);
+	EXPECT_TRUE(sm->search(StringList { "TR" + cached.tth.toBase32() }, 10, otherRoute).empty());
+
+	SettingsManager::getInstance()->set(SettingsManager::ENABLE_RTF_TEMP_SHARES, false);
+	EXPECT_EQ(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), route),
+		std::make_pair(cached.path, cached.size));
+	EXPECT_THROW(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), otherRoute), ShareException);
+	EXPECT_EQ(sm->clearTempShares(), 0U);
+	EXPECT_EQ(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), route),
+		std::make_pair(cached.path, cached.size));
+
+	EXPECT_TRUE(sm->removeTTHOnlyShare(cached.path, cached.tth, route));
+	EXPECT_THROW(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), route), ShareException);
+}
+
 TEST_F(ShareCacheTest, opened_file_verification_ignores_stale_same_metadata_cache_entries) {
 	const auto cached = cacheFile(configPath + "same metadata attachment.bin", "AAAAAAAAAAAAAAAA");
 	const string replacement = "BBBBBBBBBBBBBBBB";

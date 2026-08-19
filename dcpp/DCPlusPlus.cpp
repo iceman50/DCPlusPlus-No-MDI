@@ -19,6 +19,7 @@
 #include "DCPlusPlus.h"
 
 #include "ADLSearch.h"
+#include "BBSManager.h"
 #include "ClientManager.h"
 #include "ConnectionManager.h"
 #include "ConnectivityManager.h"
@@ -78,6 +79,7 @@ void startup() {
 	ThrottleManager::newInstance();
 	QueueManager::newInstance();
 	ShareManager::newInstance();
+	BBSManager::newInstance();
 	HttpManager::newInstance();
 	FavoriteManager::newInstance();
 	FinishedManager::newInstance();
@@ -165,6 +167,7 @@ void shutdown() {
 	ADLSearchManager::deleteInstance();
 	FinishedManager::deleteInstance();
 	HttpManager::deleteInstance();
+	BBSManager::deleteInstance();
 	ShareManager::deleteInstance();
 	CryptoManager::deleteInstance();
 	ThrottleManager::deleteInstance();

@@ -19,6 +19,7 @@
 #include "AdcHub.h"
 
 #include "AdcCommand.h"
+#include "BBSManager.h"
 #include "ChatMessage.h"
 #include "ClientManager.h"
 #include "ConnectionManager.h"
@@ -64,15 +65,41 @@ const string AdcHub::BLO0_SUPPORT("ADBLO0");
 const string AdcHub::ZLIF_SUPPORT("ADZLIF");
 const string AdcHub::HBRI_SUPPORT("ADHBRI");
 const string AdcHub::RTF0_SUPPORT("ADRTF0");
+const string AdcHub::BBS0_SUPPORT("ADBBS0");
 
 const vector<StringList> AdcHub::searchExts;
 
+namespace {
+
+bool getBBSParam(const AdcCommand& command, const char* name, bool required, string& value) noexcept {
+	bool found = false;
+	for(const auto& parameter: command.getParameters()) {
+		if(parameter.size() >= 2 && parameter[0] == name[0] && parameter[1] == name[1]) {
+			if(found) return false;
+			found = true;
+			value = parameter.substr(2);
+		}
+	}
+	return found || !required;
+}
+
+bool getBBSInteger(const AdcCommand& command, const char* name, bool required, int64_t& value) noexcept {
+	string text;
+	if(!getBBSParam(command, name, required, text)) return false;
+	if(text.empty()) return !required;
+	value = Util::toInt64(text);
+	return value >= 0;
+}
+
+}
+
 AdcHub::AdcHub(const string& aHubURL, bool secure) :
-	Client(aHubURL, '\n', secure), oldPassword(false), protocolNegotiated(false), passwordResponseSent(false), udp(Socket::TYPE_UDP), sid(0), supportsHBRI(false), supportsRTF0(false) {
+	Client(aHubURL, '\n', secure), oldPassword(false), protocolNegotiated(false), passwordResponseSent(false), udp(Socket::TYPE_UDP), sid(0), supportsHBRI(false), supportsRTF0(false), supportsTIGR(false), supportsBBS0(false) {
 	TimerManager::getInstance()->addListener(this);
 }
 
 AdcHub::~AdcHub() {
+	BBSManager::getInstance()->setHubSupported(getHubUrl(), false);
 	resetHBRI();
 	TimerManager::getInstance()->removeListener(this);
 	clearUsers();
@@ -243,6 +270,8 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 	bool tigrOk = false;
 	bool hbriChanged = false;
 	bool rtfChanged = false;
+	bool bbsAdvertised = false;
+	bool bbsRemoved = false;
 	for(auto& i: c.getParameters()) {
 		if(i == BAS0_SUPPORT) {
 			baseOk = true;
@@ -264,14 +293,28 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 		} else if(i == "RMRTF0") {
 			rtfChanged = rtfChanged || supportsRTF0;
 			supportsRTF0 = false;
+		} else if(i == BBS0_SUPPORT) {
+			bbsAdvertised = true;
+		} else if(i == "RMBBS0") {
+			bbsRemoved = true;
 		}
+	}
+
+	if(tigrOk) supportsTIGR = true;
+	if(bbsRemoved && supportsBBS0) {
+		supportsBBS0 = false;
+		BBSManager::getInstance()->setHubSupported(getHubUrl(), false);
+	}
+	if(bbsAdvertised && supportsTIGR && !supportsBBS0) {
+		supportsBBS0 = true;
+		BBSManager::getInstance()->setHubSupported(getHubUrl(), true);
 	}
 
 	if(!protocolNegotiation) {
 		if(hbriChanged) {
 			infoImpl();
 		}
-		if(hbriChanged || rtfChanged) {
+		if(hbriChanged || rtfChanged || bbsAdvertised || bbsRemoved) {
 			fire(ClientListener::HubUpdated(), this);
 		}
 		return;
@@ -287,6 +330,65 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 		fire(ClientListener::StatusMessage(), this, _("Hub probably uses an old version of ADC, please encourage the owner to upgrade"));
 	}
 	protocolNegotiated = true;
+}
+
+void AdcHub::handle(AdcCommand::BBD, AdcCommand& c) noexcept {
+	if(!supportsBBS0 || c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID) return;
+
+	string boardName, removed;
+	if(!getBBSParam(c, "BD", true, boardName) || !BBSManager::validBoardName(boardName) ||
+		!getBBSParam(c, "RM", false, removed)) return;
+	if(!removed.empty()) {
+		if(removed == "1") BBSManager::getInstance()->removeBoard(getHubUrl(), boardName);
+		return;
+	}
+
+	BBSBoard board;
+	board.name = boardName;
+	int64_t permissions = 0;
+	if(!getBBSInteger(c, "PE", true, permissions) || permissions > 31 ||
+		!getBBSInteger(c, "MS", true, board.maxSize)) return;
+	int64_t newest = 0, oldest = 0;
+	if(!getBBSInteger(c, "TS", true, newest) || !getBBSInteger(c, "OT", true, oldest)) return;
+	board.permissions = static_cast<uint32_t>(permissions);
+	board.newest = static_cast<uint64_t>(newest);
+	board.oldest = static_cast<uint64_t>(oldest);
+	getBBSParam(c, "NI", false, board.title);
+	getBBSParam(c, "DE", false, board.description);
+	if(!getBBSInteger(c, "NP", false, board.postCount)) return;
+	if(board.title.empty()) board.title = board.name;
+
+	auto manager = BBSManager::getInstance();
+	if(manager->updateBoard(getHubUrl(), std::move(board))) {
+		string error;
+		subscribeBBS(boardName, manager->getResumeTimestamp(getHubUrl(), boardName), error);
+		if(!error.empty()) manager->reportStatus(getHubUrl(), error);
+	}
+}
+
+void AdcHub::handle(AdcCommand::BBL, AdcCommand& c) noexcept {
+	if(!supportsBBS0 || c.getType() != AdcCommand::TYPE_INFO || c.getFrom() != AdcCommand::HUB_SID) return;
+
+	BBSEntry entry;
+	string removed;
+	int64_t timestamp = 0;
+	if(!getBBSParam(c, "TR", true, entry.tth) || entry.tth.size() != 39 || !Encoder::isBase32(entry.tth) ||
+		!getBBSParam(c, "BD", true, entry.board) || !BBSManager::validBoardName(entry.board) ||
+		!getBBSInteger(c, "TS", true, timestamp) || !getBBSParam(c, "RM", false, removed)) return;
+	entry.timestamp = static_cast<uint64_t>(timestamp);
+	entry.withdrawn = removed == "1";
+	if(!removed.empty() && !entry.withdrawn) return;
+
+	if(!entry.withdrawn) {
+		if(!getBBSInteger(c, "SI", true, entry.size) ||
+			!getBBSParam(c, "ID", true, entry.authorId) || entry.authorId.size() != 39 || !Encoder::isBase32(entry.authorId) ||
+			!getBBSParam(c, "TH", true, entry.thread) || entry.thread.size() != 39 || !Encoder::isBase32(entry.thread) ||
+			!getBBSParam(c, "NI", false, entry.nick) ||
+			!getBBSParam(c, "PA", false, entry.parent) ||
+			!getBBSParam(c, "SJ", false, entry.subject)) return;
+	}
+
+	BBSManager::getInstance()->updateEntry(getHubUrl(), std::move(entry));
 }
 
 void AdcHub::handle(AdcCommand::SID, AdcCommand& c) noexcept {
@@ -546,7 +648,8 @@ void AdcHub::handle(AdcCommand::STA, AdcCommand& c) noexcept {
 		return;
 	}
 
-	switch(Util::toInt(c.getParam(0).substr(1))) {
+	const auto errorCode = Util::toInt(c.getParam(0).substr(1));
+	switch(errorCode) {
 
 	case AdcCommand::ERROR_BAD_PASSWORD:
 		{
@@ -590,6 +693,11 @@ void AdcHub::handle(AdcCommand::STA, AdcCommand& c) noexcept {
 			}
 			return;
 		}
+	}
+
+	string failedCommand;
+	if(c.getParam("FC", 2, failedCommand) && (failedCommand == "BBL" || failedCommand == "BBP")) {
+		BBSManager::getInstance()->reportStatus(getHubUrl(), c.getParam(1));
 	}
 
 	fire(ClientListener::Message(), this, ChatMessage(c.getParam(1), u));
@@ -876,6 +984,120 @@ bool AdcHub::hubMessage(const string& aMessage, bool thirdPerson, bool explicitR
 		c.addParam("RT", "1");
 	send(c);
 	return true;
+}
+
+bool AdcHub::subscribeBBS(const string& board, uint64_t timestamp, string& error) {
+	if(!supportsBBS0 || state != STATE_NORMAL) {
+		error = _("This hub has not negotiated BBS0");
+		return false;
+	}
+	auto descriptor = BBSManager::getInstance()->getBoard(getHubUrl(), board);
+	if(!descriptor || !descriptor->canSubscribe()) {
+		error = _("The board is unavailable or cannot be subscribed to");
+		return false;
+	}
+	AdcCommand command(AdcCommand::CMD_BBL, AdcCommand::TYPE_HUB);
+	command.addParam("BD", board).addParam("TS", std::to_string(timestamp));
+	send(command);
+	BBSManager::getInstance()->setSubscribed(getHubUrl(), board, true);
+	return true;
+}
+
+bool AdcHub::unsubscribeBBS(const string& board, string& error) {
+	if(!supportsBBS0 || state != STATE_NORMAL) {
+		error = _("This hub has not negotiated BBS0");
+		return false;
+	}
+	if(!BBSManager::validBoardName(board)) {
+		error = _("The board name is invalid");
+		return false;
+	}
+	AdcCommand command(AdcCommand::CMD_BBL, AdcCommand::TYPE_HUB);
+	command.addParam("BD", board).addParam("RM", "1");
+	send(command);
+	BBSManager::getInstance()->setSubscribed(getHubUrl(), board, false);
+	return true;
+}
+
+bool AdcHub::requestBBSEntry(const string& board, const string& tth, string& error) {
+	if(!supportsBBS0 || state != STATE_NORMAL) {
+		error = _("This hub has not negotiated BBS0");
+		return false;
+	}
+	if(!BBSManager::validBoardName(board) || tth.size() != 39 || !Encoder::isBase32(tth)) {
+		error = _("The board name or post hash is invalid");
+		return false;
+	}
+	AdcCommand command(AdcCommand::CMD_BBL, AdcCommand::TYPE_HUB);
+	command.addParam("BD", board).addParam("TR", tth);
+	send(command);
+	return true;
+}
+
+bool AdcHub::postBBS(const string& board, const string& parent, const string& subject,
+	const string& body, bool richText, string& error)
+{
+	if(!supportsBBS0 || state != STATE_NORMAL) {
+		error = _("This hub has not negotiated BBS0");
+		return false;
+	}
+	auto descriptor = BBSManager::getInstance()->getBoard(getHubUrl(), board);
+	if(!descriptor) {
+		error = _("No such BBS board");
+		return false;
+	}
+	if((parent.empty() && !descriptor->canPost()) || (!parent.empty() && !descriptor->canReply())) {
+		error = parent.empty() ? _("You may not start a thread on this board") : _("You may not reply on this board");
+		return false;
+	}
+
+	string preparedBody = body;
+	if(richText && !RichText::prepareOutgoingMessage(preparedBody, true, getHubUrl())) {
+		error = _("The rich-text BBS post is invalid or exceeds the configured rich-text limit");
+		return false;
+	}
+
+	BBSDocument document;
+	const auto authorId = getMyIdentity().getUser()->getCID().toBase32();
+	if(!BBSManager::getInstance()->preparePost(getHubUrl(), authorId, parent, subject,
+		preparedBody, richText, descriptor->maxSize, document, error)) return false;
+
+	AdcCommand command(AdcCommand::CMD_BBP, AdcCommand::TYPE_HUB);
+	command.addParam("TR", document.tth).addParam("SI", std::to_string(document.size)).addParam("BD", board);
+	if(!parent.empty()) command.addParam("PA", parent);
+	if(!subject.empty()) command.addParam("SJ", subject);
+	send(command);
+	return true;
+}
+
+bool AdcHub::withdrawBBS(const string& board, const string& tth, string& error) {
+	if(!supportsBBS0 || state != STATE_NORMAL) {
+		error = _("This hub has not negotiated BBS0");
+		return false;
+	}
+	auto descriptor = BBSManager::getInstance()->getBoard(getHubUrl(), board);
+	auto entry = BBSManager::getInstance()->getEntry(getHubUrl(), board, tth);
+	if(!descriptor || !entry || entry->withdrawn) {
+		error = _("No active post with that hash exists on the board");
+		return false;
+	}
+	const auto own = entry->authorId == getMyIdentity().getUser()->getCID().toBase32();
+	if(!descriptor->canWithdrawAny() && !(own && descriptor->canWithdrawOwn())) {
+		error = _("You may not withdraw this post");
+		return false;
+	}
+	AdcCommand command(AdcCommand::CMD_BBP, AdcCommand::TYPE_HUB);
+	command.addParam("TR", tth).addParam("BD", board).addParam("RM", "1");
+	send(command);
+	return true;
+}
+
+bool AdcHub::fetchBBS(const string& board, const string& tth, string& error) {
+	if(!supportsBBS0 || state != STATE_NORMAL) {
+		error = _("This hub has not negotiated BBS0");
+		return false;
+	}
+	return BBSManager::getInstance()->requestDocument(getHubUrl(), board, tth, error);
 }
 
 bool AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson, bool echo,
@@ -1425,6 +1647,9 @@ void AdcHub::on(Connected c) noexcept {
 	forbiddenCommands.clear();
 	supportsHBRI = false;
 	supportsRTF0 = false;
+	supportsTIGR = false;
+	supportsBBS0 = false;
+	BBSManager::getInstance()->setHubSupported(getHubUrl(), false);
 
 	AdcCommand cmd(AdcCommand::CMD_SUP, AdcCommand::TYPE_HUB);
 	cmd.addParam(BAS0_SUPPORT).addParam(BASE_SUPPORT).addParam(TIGR_SUPPORT);
@@ -1441,6 +1666,7 @@ void AdcHub::on(Connected c) noexcept {
 	if(SETTING(ENABLE_RICH_TEXT)) {
 		cmd.addParam(RTF0_SUPPORT);
 	}
+	cmd.addParam(BBS0_SUPPORT);
 	
 	send(cmd);
 }
@@ -1460,6 +1686,8 @@ void AdcHub::on(Line l, const string& aLine) noexcept {
 }
 
 void AdcHub::on(Failed f, const string& aLine) noexcept {
+	supportsBBS0 = false;
+	BBSManager::getInstance()->setHubSupported(getHubUrl(), false);
 	resetHBRI();
 	clearUsers();
 	Client::on(f, aLine);

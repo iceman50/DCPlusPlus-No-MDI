@@ -84,7 +84,12 @@ public:
 		ERROR_FILE_PART_NOT_AVAILABLE = 52,
 		ERROR_SLOTS_FULL = 53,
 		ERROR_NO_CLIENT_HASH = 54,
-		ERROR_HBRI_TIMEOUT = 55
+		ERROR_HBRI_TIMEOUT = 55,
+		ERROR_BBS_GENERIC = 70,
+		ERROR_BBS_NO_BOARD = 71,
+		ERROR_BBS_POST_TOO_LARGE = 72,
+		ERROR_BBS_RATE_LIMIT = 75,
+		ERROR_BBS_NO_ENTRY = 76
 	};
 
 	enum Severity {
@@ -131,6 +136,11 @@ public:
 	C(ZOF, 'Z','O','F');
 	C(PMI, 'P','M','I');
 	C(TCP, 'T','C','P');
+	C(BBD, 'B','B','D');
+	C(BBL, 'B','B','L');
+	C(BBP, 'B','B','P');
+	// Reserved by BBS0 for the first line of a post document; never sent on a connection.
+	C(BB0, 'B','B','0');
 #undef C
 
 	static const uint32_t HUB_SID = 0xffffffff;		// No client will have this sid
@@ -250,6 +260,10 @@ public:
 				C(ZOF);
 				C(PMI);
 				C(TCP);
+				C(BBD);
+				C(BBL);
+				C(BBP);
+				C(BB0);
 			default:
 				dcdebug("Unknown ADC command: %.4s\n", c.getFourCC().c_str());
 				break;

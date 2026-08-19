@@ -20,6 +20,7 @@
 #include "HubFrame.h"
 
 #include <dcpp/AdcHub.h>
+#include <dcpp/BBSManager.h>
 #include <dcpp/ChatMessage.h>
 #include <dcpp/ClientManager.h>
 #include <dcpp/ConnectionManager.h>
@@ -27,6 +28,7 @@
 #include <dcpp/FavoriteManager.h>
 #include <dcpp/LogManager.h>
 #include <dcpp/SearchManager.h>
+#include <dcpp/SimpleXML.h>
 #include <dcpp/PluginManager.h>
 #include <dcpp/CryptoManager.h>
 #include <dcpp/RichText.h>
@@ -337,6 +339,7 @@ tabIcon(IDI_HUB)
 
 	client = ClientManager::getInstance()->getClient(url);
 	client->addListener(this);
+	BBSManager::getInstance()->addListener(this);
 	updateRichTextAvailability();
 	if(connect)
 		client->connect();
@@ -365,6 +368,7 @@ bool HubFrame::preClosing() {
 	}
 
 	FavoriteManager::getInstance()->removeListener(this);
+	BBSManager::getInstance()->removeListener(this);
 	client->removeListener(this);
 	disconnect(false);
 
@@ -528,6 +532,8 @@ void HubFrame::enterImpl(const tstring& s) {
 			if(!status.empty()) {
 				addStatus(status);
 			}
+		} else if(Util::stricmp(cmd.c_str(), _T("bbs")) == 0) {
+			handleBBSCommand(param, resetText);
 		} else if(Util::stricmp(cmd.c_str(), _T("rtf")) == 0) {
 			if(param.empty()) {
 				addStatus(T_("Usage: /rtf <message>"));
@@ -639,7 +645,7 @@ void HubFrame::enterImpl(const tstring& s) {
 						_T(", /join <hub-ip>, /showjoins, /favshowjoins, /close, /userlist, ")
 						_T("/conn[ection], /fav[orite], /removefav[orite], /info, ")
 						_T("/pm <user> [message], /getlist <user>, /ignore <user>, /unignore <user>, ")
-						_T("/log <status, system, downloads, uploads>, /rtf <message>, /topic")
+						_T("/log <status, system, downloads, uploads>, /rtf <message>, /bbs, /topic")
 					   );
 			}
 			else
@@ -675,6 +681,8 @@ void HubFrame::enterImpl(const tstring& s) {
 						+ _T("\r\n\t") + T_("Prints the current hub's topic. Useful if you want to copy the topic or it contains a link you'd like to easily open.")
 						+ _T("\r\n") _T("/rtf <message>")
 						+ _T("\r\n\t") + T_("Sends CommonMark rich text when this hub has negotiated ADC RTF0. Attachments and inline media must use ADC magnet URIs.")
+						+ _T("\r\n") _T("/bbs [help|<board>|read|post|reply|withdraw|subscribe|leave]")
+						+ _T("\r\n\t") + T_("Lists and interacts with durable ADC BBS0 bulletin boards. Use /bbs help for syntax.")
 
 					);
 			}
@@ -730,6 +738,234 @@ void HubFrame::enterImpl(const tstring& s) {
 	if(resetText) {
 		message->setText(Util::emptyStringT);
 	}
+}
+
+void HubFrame::handleBBSCommand(const tstring& parameter, bool& resetText) {
+	auto adc = dynamic_cast<AdcHub*>(client);
+	if(!adc) {
+		addStatus(T_("BBS0 is available only on ADC hubs."));
+		return;
+	}
+
+	string input = Text::fromT(parameter);
+	Util::trim(input);
+	auto takeWord = [](string& value) {
+		const auto end = value.find_first_of(" \t\r\n");
+		string word = end == string::npos ? value : value.substr(0, end);
+		value = end == string::npos ? Util::emptyString : value.substr(end + 1);
+		Util::trim(value);
+		return word;
+	};
+	auto splitPost = [](const string& value, string& subject, string& body) {
+		const auto separator = value.find('|');
+		if(separator == string::npos) return false;
+		subject = value.substr(0, separator);
+		body = value.substr(separator + 1);
+		Util::trim(subject);
+		while(!body.empty() && (body.front() == ' ' || body.front() == '\t')) body.erase(body.begin());
+		return true;
+	};
+
+	string action = input.empty() ? "list" : takeWord(input);
+	if(action == "help") {
+		addChat(T_("*** BBS0 commands:\r\n")
+			+ _T("/bbs — list boards\r\n")
+			+ _T("/bbs <board> — list the board's cached index\r\n")
+			+ _T("/bbs read <board> <TTH> — fetch and verify a post on demand\r\n")
+			+ _T("/bbs post <board> <subject> | <body> — start a plain-text thread\r\n")
+			+ _T("/bbs rtfpost <board> <subject> | <body> — start an RTF0 thread\r\n")
+			+ _T("/bbs reply <board> <parent-TTH> <subject> | <body> — reply\r\n")
+			+ _T("/bbs rtfreply <board> <parent-TTH> <subject> | <body> — rich-text reply\r\n")
+			+ _T("/bbs withdraw <board> <TTH> — withdraw an indexed post\r\n")
+			+ _T("/bbs subscribe <board> [timestamp] — replace the subscription cursor\r\n")
+			+ _T("/bbs leave <board> — cancel the live subscription"));
+		return;
+	}
+	if(action == "list") {
+		showBBSBoards();
+		return;
+	}
+
+	const bool knownAction = action == "read" || action == "post" || action == "rtfpost" ||
+		action == "reply" || action == "rtfreply" || action == "withdraw" ||
+		action == "subscribe" || action == "leave" || action == "entry";
+	if(!knownAction) {
+		showBBSBoard(action);
+		return;
+	}
+	if(!adc->supportsBBS()) {
+		addStatus(T_("This connection has not negotiated BBS0. Cached indexes remain available with /bbs <board>."));
+		resetText = false;
+		return;
+	}
+
+	string error;
+	if(action == "read") {
+		const auto board = takeWord(input);
+		const auto tth = takeWord(input);
+		if(board.empty() || tth.empty()) {
+			addStatus(T_("Usage: /bbs read <board> <TTH>"));
+			return;
+		}
+		if(adc->fetchBBS(board, tth, error)) {
+			addStatus(T_("Looking for the post by exact TTH. Reading may be visible to peers that serve it."));
+		}
+	} else if(action == "entry") {
+		const auto board = takeWord(input);
+		const auto tth = takeWord(input);
+		if(board.empty() || tth.empty()) {
+			addStatus(T_("Usage: /bbs entry <board> <TTH>"));
+			return;
+		}
+		adc->requestBBSEntry(board, tth, error);
+	} else if(action == "post" || action == "rtfpost") {
+		const auto board = takeWord(input);
+		string subject, body;
+		if(board.empty() || !splitPost(input, subject, body) || subject.empty()) {
+			addStatus(T_("Usage: /bbs post <board> <subject> | <body>"));
+			return;
+		}
+		if(adc->postBBS(board, Util::emptyString, subject, body, action == "rtfpost", error)) {
+			addStatus(T_("BBS post submitted; it is not published until the hub returns its IBBL entry."));
+			if(body.find("magnet:?") != string::npos) addStatus(T_("BBS attachments may be requested long after their original source leaves."));
+		}
+	} else if(action == "reply" || action == "rtfreply") {
+		const auto board = takeWord(input);
+		const auto parent = takeWord(input);
+		string subject, body;
+		if(board.empty() || parent.empty() || !splitPost(input, subject, body)) {
+			addStatus(T_("Usage: /bbs reply <board> <parent-TTH> <subject> | <body>"));
+			return;
+		}
+		if(adc->postBBS(board, parent, subject, body, action == "rtfreply", error)) {
+			addStatus(T_("BBS reply submitted; it is not published until the hub returns its IBBL entry."));
+			if(body.find("magnet:?") != string::npos) addStatus(T_("BBS attachments may be requested long after their original source leaves."));
+		}
+	} else if(action == "withdraw") {
+		const auto board = takeWord(input);
+		const auto tth = takeWord(input);
+		if(board.empty() || tth.empty()) {
+			addStatus(T_("Usage: /bbs withdraw <board> <TTH>"));
+			return;
+		}
+		if(adc->withdrawBBS(board, tth, error)) {
+			addStatus(T_("Withdrawal requested. Existing peer copies cannot be deleted."));
+		}
+	} else if(action == "subscribe") {
+		const auto board = takeWord(input);
+		const auto timestampText = takeWord(input);
+		uint64_t timestamp = 0;
+		if(!timestampText.empty()) {
+			if(!std::all_of(timestampText.begin(), timestampText.end(), [](char ch) { return ch >= '0' && ch <= '9'; })) {
+				addStatus(T_("The BBS subscription timestamp must be a non-negative integer."));
+				return;
+			}
+			timestamp = static_cast<uint64_t>(Util::toInt64(timestampText));
+		}
+		adc->subscribeBBS(board, timestamp, error);
+	} else if(action == "leave") {
+		adc->unsubscribeBBS(takeWord(input), error);
+	}
+
+	if(!error.empty()) {
+		addStatus(Text::toT(error));
+		resetText = false;
+	}
+}
+
+void HubFrame::showBBSBoards() {
+	const auto boards = BBSManager::getInstance()->getBoards(url);
+	if(boards.empty()) {
+		addStatus(T_("No cached BBS0 boards are available for this hub."));
+		return;
+	}
+
+	tstring output = T_("*** Bulletin boards:");
+	for(const auto& board: boards) {
+		const auto title = BBSManager::sanitizeDisplayText(board.title.empty() ? board.name : board.title);
+		output += _T("\r\n") + Text::toT(board.name) + _T(" — ") + Text::toT(title);
+		output += board.subscribed ? T_(" [subscribed]") : T_(" [not subscribed]");
+		if(board.gap) output += T_(" [history gap]");
+		if(board.postCount >= 0) output += str(TF_(" — %1% posts") % board.postCount);
+	}
+	output += T_("\r\nUse /bbs <board> to list its cached index or /bbs help for commands.");
+	addChat(output);
+}
+
+void HubFrame::showBBSBoard(const string& boardName) {
+	auto board = BBSManager::getInstance()->getBoard(url, boardName);
+	if(!board) {
+		addStatus(T_("No such cached BBS board."));
+		return;
+	}
+	auto entries = BBSManager::getInstance()->getEntries(url, boardName);
+	tstring output = _T("*** ") + Text::toT(BBSManager::sanitizeDisplayText(
+		board->title.empty() ? board->name : board->title));
+	if(!board->description.empty()) output += _T(" — ") + Text::toT(BBSManager::sanitizeDisplayText(board->description, 1024));
+	if(entries.empty()) {
+		output += T_("\r\nNo posts are cached in this board's index.");
+		addChat(output);
+		return;
+	}
+
+	const auto first = entries.size() > 50 ? entries.size() - 50 : 0;
+	for(size_t i = first; i < entries.size(); ++i) {
+		const auto& entry = entries[i];
+		auto document = BBSManager::getInstance()->getDocument(entry.tth);
+		const auto subject = BBSManager::sanitizeDisplayText(document ? document->subject : entry.subject);
+		const auto nick = BBSManager::sanitizeDisplayText(entry.nick.empty() ? entry.authorId : entry.nick, 128);
+		output += _T("\r\n") + Text::toT(entry.parent.empty() ? "• " : "↳ ") + Text::toT(subject.empty() ? _("(no subject)") : subject);
+		output += _T(" — ") + Text::toT(nick) + _T(" — ") + Text::toT(entry.tth);
+		if(!document) output += T_(" [unverified metadata]");
+	}
+	if(first != 0) output += str(TF_("\r\n(%1% older entries omitted from this view)") % first);
+	output += T_("\r\nUse /bbs read <board> <TTH> to fetch and verify a post.");
+	addChat(output);
+}
+
+void HubFrame::showBBSDocument(const string& board, const string& tth) {
+	auto entry = BBSManager::getInstance()->getEntry(url, board, tth);
+	auto document = BBSManager::getInstance()->getDocument(tth);
+	if(!entry || !document || entry->withdrawn) return;
+
+	const auto subject = BBSManager::sanitizeDisplayText(document->subject.empty() ? entry->subject : document->subject);
+	const auto nick = BBSManager::sanitizeDisplayText(entry->nick.empty() ? entry->authorId : entry->nick, 128);
+	string attribution = nick + " [hub CID " + entry->authorId + "]";
+	if(document->authorId != entry->authorId) {
+		attribution += " — document claims CID " + document->authorId;
+	} else {
+		attribution += " — document claim matches the hub submitter CID";
+	}
+
+	string indexedTime = _("unknown time");
+	const auto now = static_cast<uint64_t>(time(nullptr));
+	if(entry->timestamp <= now + 24 * 60 * 60) {
+		indexedTime = Util::formatTime("%Y-%m-%d %H:%M:%S", static_cast<time_t>(entry->timestamp));
+	} else {
+		indexedTime = _("unknown time (implausible hub timestamp)");
+	}
+
+	string tmp;
+	string boardHtml = board;
+	SimpleXML::escape(boardHtml, false);
+	string subjectHtml = subject;
+	SimpleXML::escape(subjectHtml, false);
+	string attributionHtml = indexedTime + " — " + attribution;
+	SimpleXML::escape(attributionHtml, false);
+	string html = "<span id=\"systemMessage\" style=\"white-space: pre-wrap;\"><b>[BBS " +
+		boardHtml + "] " + subjectHtml + "</b><br/>" + attributionHtml + "<br/><br/>";
+	if(document->richText == 1 && SETTING(ENABLE_RICH_TEXT)) {
+		auto rich = RichText::parse(document->body,
+			static_cast<size_t>(std::max(1, SETTING(CHAT_LINK_MAX_LENGTH))));
+		html += rich.valid ? rich.html : SimpleXML::escape(document->body, tmp, false);
+	} else {
+		html += SimpleXML::escape(document->body, tmp, false);
+	}
+	html += "</span>";
+
+	const auto plain = _T("[BBS ") + Text::toT(board) + _T("] ") + Text::toT(subject) + _T("\r\n") +
+		Text::toT(indexedTime + " — " + attribution) + _T("\r\n\r\n") + Text::toT(document->body);
+	addChatHTML(html, plain, Text::toT(nick), entry->authorId, static_cast<time_t>(entry->timestamp));
 }
 
 void HubFrame::clearUserList() {
@@ -1277,6 +1513,41 @@ void HubFrame::on(ClientLine, Client*, const string& line, int type) noexcept {
 	} else {
 		callAsync([=] { addChat(Text::toT(line)); });
 	}
+}
+
+void HubFrame::on(BBSManagerListener::BoardUpdated, const string& hubUrl, const string&) noexcept {
+	if(!hubHintsEqual(hubUrl, url)) return;
+	callAsync([this] { setDirty(SettingsManager::BOLD_HUB); });
+}
+
+void HubFrame::on(BBSManagerListener::EntryUpdated, const string& hubUrl, const string& board,
+	const string& tth) noexcept
+{
+	if(!hubHintsEqual(hubUrl, url)) return;
+	callAsync([this, board, tth] {
+		setDirty(SettingsManager::BOLD_HUB);
+		auto entry = BBSManager::getInstance()->getEntry(url, board, tth);
+		auto document = BBSManager::getInstance()->getDocument(tth);
+		if(entry && document && !entry->withdrawn && client->getMyIdentity().getUser() &&
+			entry->authorId == client->getMyIdentity().getUser()->getCID().toBase32() &&
+			entry->timestamp <= static_cast<uint64_t>(time(nullptr) + 120) &&
+			entry->timestamp + 120 >= static_cast<uint64_t>(time(nullptr)))
+		{
+			addStatus(Text::toT(str(F_("BBS post accepted and published: %1%") % tth)));
+		}
+	});
+}
+
+void HubFrame::on(BBSManagerListener::DocumentUpdated, const string& hubUrl, const string& board,
+	const string& tth) noexcept
+{
+	if(!hubHintsEqual(hubUrl, url)) return;
+	callAsync([this, board, tth] { showBBSDocument(board, tth); });
+}
+
+void HubFrame::on(BBSManagerListener::Status, const string& hubUrl, const string& line) noexcept {
+	if(!hubHintsEqual(hubUrl, url)) return;
+	callAsync([this, line] { addStatus(Text::toT(line)); });
 }
 
 

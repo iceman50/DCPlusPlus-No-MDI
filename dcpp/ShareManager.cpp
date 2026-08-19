@@ -434,29 +434,58 @@ bool ShareManager::addTempShare(const string& realPath, int64_t size, uint32_t t
 		if(file.getSize() != size || file.getLastModified() != timestamp) return false;
 		const auto current = HashManager::getInstance()->getTTH(realPath, size, timestamp);
 		if(!current || *current != tth) return false;
-		return addValidatedTempShare(realPath, size, timestamp, tth, hubUrl);
+		return addValidatedTempShare(realPath, size, timestamp, tth, hubUrl, false);
+	} catch(...) {
+		return false;
+	}
+}
+
+bool ShareManager::addTTHOnlyShare(const string& realPath, int64_t size, uint32_t timestamp,
+	const TTHValue& tth, const string& hubUrl) noexcept
+{
+	if(realPath.empty() || hubUrl.empty() || size < 0) return false;
+	try {
+		File file(realPath, File::READ, File::OPEN);
+		if(file.getSize() != size || file.getLastModified() != timestamp) return false;
+		file.close();
+		auto current = HashManager::getInstance()->getTTH(realPath, size, timestamp);
+		if(!current) {
+			if(!HashManager::getInstance()->verifyFileTTH(realPath, size, tth)) return false;
+			current = HashManager::getInstance()->getTTH(realPath, size, timestamp);
+		}
+		if(!current || *current != tth) return false;
+		return addValidatedTempShare(realPath, size, timestamp, tth, hubUrl, true);
 	} catch(...) {
 		return false;
 	}
 }
 
 bool ShareManager::addValidatedTempShare(const string& realPath, int64_t size, uint32_t timestamp,
-	const TTHValue& tth, const string& hubUrl) noexcept
+	const TTHValue& tth, const string& hubUrl, bool exactOnly) noexcept
 {
-	if(!SETTING(ENABLE_RTF_TEMP_SHARES) || realPath.empty() || hubUrl.empty() || size < 0) return false;
+	if((!exactOnly && !SETTING(ENABLE_RTF_TEMP_SHARES)) || realPath.empty() || hubUrl.empty() || size < 0) return false;
 	Lock l(cs);
 	auto existing = std::find_if(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
-		return item.tth == tth && Util::stricmp(item.hubUrl, hubUrl) == 0;
+		return item.tth == tth && item.exactOnly == exactOnly && Util::stricmp(item.hubUrl, hubUrl) == 0;
 	});
 	if(existing != tempShares.end()) {
 		// Reuse is an access: move the entry to the newest end so it isn't the next
 		// item evicted immediately after being inserted into another draft.
 		tempShares.erase(existing);
-		tempShares.push_back({ realPath, hubUrl, tth, size, timestamp });
+		tempShares.push_back({ realPath, hubUrl, tth, size, timestamp, exactOnly });
 	} else {
-		const auto maxTempShares = static_cast<size_t>(std::max(1, SETTING(RTF_TEMP_SHARE_LIMIT)));
-		while(tempShares.size() >= maxTempShares) tempShares.erase(tempShares.begin());
-		tempShares.push_back({ realPath, hubUrl, tth, size, timestamp });
+		const auto maxTempShares = exactOnly ? size_t(1024) :
+			static_cast<size_t>(std::max(1, SETTING(RTF_TEMP_SHARE_LIMIT)));
+		auto count = static_cast<size_t>(std::count_if(tempShares.begin(), tempShares.end(),
+			[exactOnly](const TempShareInfo& item) { return item.exactOnly == exactOnly; }));
+		while(count >= maxTempShares) {
+			auto oldest = std::find_if(tempShares.begin(), tempShares.end(),
+				[exactOnly](const TempShareInfo& item) { return item.exactOnly == exactOnly; });
+			if(oldest == tempShares.end()) break;
+			tempShares.erase(oldest);
+			--count;
+		}
+		tempShares.push_back({ realPath, hubUrl, tth, size, timestamp, exactOnly });
 	}
 	return true;
 }
@@ -466,14 +495,16 @@ bool ShareManager::isTempShare(const TTHValue& tth, const string& realPath,
 {
 	Lock l(cs);
 	return std::any_of(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
-		return item.tth == tth && Util::stricmp(item.realPath, realPath) == 0 &&
+		return !item.exactOnly && item.tth == tth && Util::stricmp(item.realPath, realPath) == 0 &&
 			Util::stricmp(item.hubUrl, hubUrl) == 0;
 	});
 }
 
 vector<ShareManager::TempShareInfo> ShareManager::getTempShares() const {
 	Lock l(cs);
-	return tempShares;
+	vector<TempShareInfo> result;
+	for(const auto& item: tempShares) if(!item.exactOnly) result.push_back(item);
+	return result;
 }
 
 bool ShareManager::removeTempShare(const string& realPath, const TTHValue& tth,
@@ -482,7 +513,19 @@ bool ShareManager::removeTempShare(const string& realPath, const TTHValue& tth,
 	Lock l(cs);
 	const auto oldSize = tempShares.size();
 	tempShares.erase(std::remove_if(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
-		return item.tth == tth && Util::stricmp(item.realPath, realPath) == 0 &&
+		return !item.exactOnly && item.tth == tth && Util::stricmp(item.realPath, realPath) == 0 &&
+			Util::stricmp(item.hubUrl, hubUrl) == 0;
+	}), tempShares.end());
+	return tempShares.size() != oldSize;
+}
+
+bool ShareManager::removeTTHOnlyShare(const string& realPath, const TTHValue& tth,
+	const string& hubUrl) noexcept
+{
+	Lock l(cs);
+	const auto oldSize = tempShares.size();
+	tempShares.erase(std::remove_if(tempShares.begin(), tempShares.end(), [&](const TempShareInfo& item) {
+		return item.exactOnly && item.tth == tth && Util::stricmp(item.realPath, realPath) == 0 &&
 			Util::stricmp(item.hubUrl, hubUrl) == 0;
 	}), tempShares.end());
 	return tempShares.size() != oldSize;
@@ -504,8 +547,10 @@ size_t ShareManager::clearTempShares() noexcept {
 		// A finisher either adds before this lock and is cleared here, or observes the
 		// new generation and cannot add after Clear has completed.
 		Lock shareLock(cs);
-		count = tempShares.size();
-		tempShares.clear();
+		count = static_cast<size_t>(std::count_if(tempShares.begin(), tempShares.end(),
+			[](const TempShareInfo& item) { return !item.exactOnly; }));
+		tempShares.erase(std::remove_if(tempShares.begin(), tempShares.end(),
+			[](const TempShareInfo& item) { return !item.exactOnly; }), tempShares.end());
 	}
 	for(auto& request: cancelled) {
 		deliverChatAttachmentCallback(std::move(request), nullopt,
@@ -800,7 +845,8 @@ bool ShareManager::validateChatAttachment(const TTHValue& tth, int64_t size,
 				return true;
 			}
 			if(!hubUrl.empty()) {
-				if(const auto item = findTempShare(tth, &hubUrl); item && item->size == size) temporary = *item;
+				const bool chatOnly = false;
+				if(const auto item = findTempShare(tth, &hubUrl, &chatOnly); item && item->size == size) temporary = *item;
 			}
 		}
 		if(!temporary) return false;
@@ -813,7 +859,8 @@ bool ShareManager::validateChatAttachment(const TTHValue& tth, int64_t size,
 		if(!current || *current != tth) return false;
 
 		Lock l(cs);
-		const auto item = findTempShare(tth, &hubUrl);
+		const bool chatOnly = false;
+		const auto item = findTempShare(tth, &hubUrl, &chatOnly);
 		return item && item->size == temporary->size && item->timestamp == temporary->timestamp &&
 			Util::stricmp(item->realPath, temporary->realPath) == 0;
 	} catch(...) {
@@ -1029,11 +1076,12 @@ const ShareManager::Directory::File& ShareManager::findFile(const string& virtua
 }
 
 const ShareManager::TempShareInfo* ShareManager::findTempShare(const TTHValue& tth,
-	const string* hubUrl) const noexcept
+	const string* hubUrl, const bool* exactOnly) const noexcept
 {
-	if(!SETTING(ENABLE_RTF_TEMP_SHARES)) return nullptr;
 	for(auto i = tempShares.rbegin(); i != tempShares.rend(); ++i) {
-		if(i->tth == tth && (!hubUrl || Util::stricmp(i->hubUrl, *hubUrl) == 0)) return &*i;
+		if(!i->exactOnly && !SETTING(ENABLE_RTF_TEMP_SHARES)) continue;
+		if(i->tth == tth && (!hubUrl || Util::stricmp(i->hubUrl, *hubUrl) == 0) &&
+			(!exactOnly || i->exactOnly == *exactOnly)) return &*i;
 	}
 	return nullptr;
 }
@@ -2690,9 +2738,7 @@ SearchResultList ShareManager::search(SearchQuery&& query, size_t maxResults) no
 void ShareManager::appendTempSearchResults(SearchResultList& results, SearchQuery& query,
 	size_t maxResults, const string& hubUrl) noexcept
 {
-	if(results.size() >= maxResults || query.isDirectory || hubUrl.empty() ||
-		!SETTING(ENABLE_RTF_TEMP_SHARES))
-	{
+	if(results.size() >= maxResults || query.isDirectory || hubUrl.empty()) {
 		return;
 	}
 
@@ -2706,6 +2752,8 @@ void ShareManager::appendTempSearchResults(SearchResultList& results, SearchQuer
 
 	for(const auto& item: candidates) {
 		if(results.size() >= maxResults) break;
+		if(item.exactOnly && !query.root) continue;
+		if(!item.exactOnly && !SETTING(ENABLE_RTF_TEMP_SHARES)) continue;
 
 		if(query.root) {
 			if(item.tth != *query.root) continue;
@@ -2721,7 +2769,18 @@ void ShareManager::appendTempSearchResults(SearchResultList& results, SearchQuer
 		const auto duplicate = std::any_of(results.begin(), results.end(), [&](const SearchResultPtr& result) {
 			return result->getType() == SearchResult::TYPE_FILE && result->getTTH() == item.tth;
 		});
-		if(duplicate || !validateChatAttachment(item.tth, item.size, hubUrl)) continue;
+		bool valid = false;
+		if(item.exactOnly) {
+			try {
+				File file(item.realPath, File::READ, File::OPEN | File::SHARED);
+				valid = file.getSize() == item.size && file.getLastModified() == item.timestamp;
+				file.close();
+				valid = valid && HashManager::getInstance()->verifyFileTTH(item.realPath, item.size, item.tth);
+			} catch(...) { valid = false; }
+		} else {
+			valid = validateChatAttachment(item.tth, item.size, hubUrl);
+		}
+		if(duplicate || !valid) continue;
 
 		results.push_back(new SearchResult(SearchResult::TYPE_FILE, item.size,
 			Util::getFileName(item.realPath), item.tth));

@@ -1,3 +1,6 @@
+== 08-18-2026 - 0.8841 !!!Experimental!!! ==
+* Add ADC BBS0 durable bulletin boards with dynamic board discovery, persistent replay/resume indexes, posts, replies and withdrawals, canonical TTH-verified plain or rich-text documents, explicit exact-TTH retrieval and route-scoped serving, and a /bbs command interface
+
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
 * Accept shorter Base32 ADC password salts used by older hubsofts while rejecting empty and undecodable challenges
 * Add the bundled md4c library for standards-compliant CommonMark and GitHub-style table parsing

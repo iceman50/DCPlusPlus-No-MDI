@@ -21,8 +21,8 @@
 #define FULL_APPNAME "DC++ Experimental"
 
 // don't forget to update the .rc file as well!
-#define VERSIONSTRING "0.8834"
-#define VERSIONFLOAT 0.8834
+#define VERSIONSTRING "0.8841"
+#define VERSIONFLOAT 0.8841
 
 namespace dcpp {
 extern const std::string fullVersionString;

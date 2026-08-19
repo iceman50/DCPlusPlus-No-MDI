@@ -235,6 +235,44 @@ bool validResultParams(const StringList& params) noexcept {
 	return true;
 }
 
+bool validBBSParams(uint32_t command, const StringList& params) noexcept {
+	for(const auto& param: params) {
+		if(!isNamedParam(param) || param.size() == 2) {
+			return false;
+		}
+
+		const auto code = AdcCommand::toCode(param.c_str());
+		const auto value = param.substr(2);
+		const auto hash =
+			(code == AdcCommand::toCode("TR") && (command == AdcCommand::CMD_BBL || command == AdcCommand::CMD_BBP)) ||
+			(code == AdcCommand::toCode("PA") && (command == AdcCommand::CMD_BBL || command == AdcCommand::CMD_BBP || command == AdcCommand::CMD_BB0)) ||
+			(code == AdcCommand::toCode("TH") && command == AdcCommand::CMD_BBL);
+		if(hash) {
+			if(value.size() != 39 || !isBase32(value)) return false;
+			continue;
+		}
+		if(code == AdcCommand::toCode("ID") && (command == AdcCommand::CMD_BBL || command == AdcCommand::CMD_BB0)) {
+			if(value.size() != 39 || !isBase32(value)) return false;
+			continue;
+		}
+		const auto integer =
+			(command == AdcCommand::CMD_BBD && (code == AdcCommand::toCode("PE") || code == AdcCommand::toCode("MS") ||
+				code == AdcCommand::toCode("TS") || code == AdcCommand::toCode("OT") || code == AdcCommand::toCode("NP"))) ||
+			(command == AdcCommand::CMD_BBL && (code == AdcCommand::toCode("SI") || code == AdcCommand::toCode("TS"))) ||
+			(command == AdcCommand::CMD_BBP && code == AdcCommand::toCode("SI")) ||
+			(command == AdcCommand::CMD_BB0 && (code == AdcCommand::toCode("DA") || code == AdcCommand::toCode("RT")));
+		if(integer) {
+			if(!isNonNegativeInteger(value)) return false;
+			continue;
+		}
+		if(code == AdcCommand::toCode("RM") && command != AdcCommand::CMD_BB0) {
+			if(value != "1") return false;
+			continue;
+		}
+	}
+	return true;
+}
+
 unsigned contextMask(uint32_t command) noexcept {
 	const unsigned fromHub = 1U << AdcCommand::CONTEXT_FROM_HUB;
 	const unsigned toHub = 1U << AdcCommand::CONTEXT_TO_HUB;
@@ -264,6 +302,10 @@ unsigned contextMask(uint32_t command) noexcept {
 	case AdcCommand::CMD_ZOF: return fromHub | toHub | client;
 	case AdcCommand::CMD_PMI: return client;
 	case AdcCommand::CMD_TCP: return fromHub | toHub;
+	case AdcCommand::CMD_BBD: return fromHub;
+	case AdcCommand::CMD_BBL: return fromHub | toHub;
+	case AdcCommand::CMD_BBP: return toHub;
+	case AdcCommand::CMD_BB0: return 0;
 	default: return fromHub | toHub | client | udp;
 	}
 }
@@ -498,7 +540,7 @@ bool AdcCommand::isValidSyntax() const noexcept {
 			if(code == toCode("QP") && !isNonNegativeInteger(parameters[i].substr(2))) {
 				return false;
 			}
-			if(code == toCode("FC") && parameters[i].size() != 6) {
+			if(code == toCode("FC") && parameters[i].size() != 5 && parameters[i].size() != 6) {
 				return false;
 			}
 		}
@@ -604,6 +646,11 @@ bool AdcCommand::isValidSyntax() const noexcept {
 	case CMD_PMI:
 	case CMD_TCP:
 		return areNamedParams(parameters, 0);
+	case CMD_BBD:
+	case CMD_BBL:
+	case CMD_BBP:
+	case CMD_BB0:
+		return validBBSParams(cmdInt, parameters);
 	default:
 		return true;
 	}

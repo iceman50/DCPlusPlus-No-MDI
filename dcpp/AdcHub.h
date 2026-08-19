@@ -42,6 +42,14 @@ public:
 	virtual bool privateMessage(const OnlineUser& user, const string& aMessage, bool thirdPerson = false,
 		bool echo = true, bool explicitRichText = false);
 	bool supportsRichText() const noexcept override { return supportsRTF0; }
+	bool supportsBBS() const noexcept { return supportsBBS0; }
+	bool subscribeBBS(const string& board, uint64_t timestamp, string& error);
+	bool unsubscribeBBS(const string& board, string& error);
+	bool requestBBSEntry(const string& board, const string& tth, string& error);
+	bool postBBS(const string& board, const string& parent, const string& subject,
+		const string& body, bool richText, string& error);
+	bool withdrawBBS(const string& board, const string& tth, string& error);
+	bool fetchBBS(const string& board, const string& tth, string& error);
 	virtual void sendUserCmd(const UserCommand& command, const ParamMap& params);
 	virtual void search(int aSizeMode, int64_t aSize, int aFileType, const string& aString, const string& aToken, const StringList& aExtList, const string& aKey = Util::emptyString);
 	virtual void password(const string& pwd);
@@ -78,6 +86,7 @@ public:
 	static const string ZLIF_SUPPORT;
 	static const string HBRI_SUPPORT;
 	static const string RTF0_SUPPORT;
+	static const string BBS0_SUPPORT;
 	static const string SUDP_FEATURE;
 
 private:
@@ -102,6 +111,8 @@ private:
 	std::unordered_set<uint32_t> forbiddenCommands;
 	bool supportsHBRI;
 	bool supportsRTF0;
+	bool supportsTIGR;
+	bool supportsBBS0;
 	std::unique_ptr<HBRIValidator> hbriValidator;
 
 	static const vector<StringList> searchExts;
@@ -134,6 +145,8 @@ private:
 	void handle(AdcCommand::ZON, AdcCommand& c) noexcept;
 	void handle(AdcCommand::ZOF, AdcCommand& c) noexcept;
 	void handle(AdcCommand::TCP, AdcCommand& c) noexcept;
+	void handle(AdcCommand::BBD, AdcCommand& c) noexcept;
+	void handle(AdcCommand::BBL, AdcCommand& c) noexcept;
 
 	template<typename T> void handle(T, AdcCommand&) { }
 

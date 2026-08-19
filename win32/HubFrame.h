@@ -23,6 +23,7 @@
 #include <dcpp/forward.h>
 #include <dcpp/OnlineUser.h>
 #include <dcpp/ClientListener.h>
+#include <dcpp/BBSManager.h>
 #include <dcpp/User.h>
 #include <dcpp/FavoriteManagerListener.h>
 
@@ -39,6 +40,7 @@ class HubFrame :
 	public MDIChildFrame<HubFrame>,
 	public IRecent<HubFrame>,
 	private ClientListener,
+	private BBSManagerListener,
 	private FavoriteManagerListener,
 	public AspectChat<HubFrame>,
 	public AspectUserInfo<HubFrame>,
@@ -273,6 +275,10 @@ private:
 	void sendLogin();
 	bool handleLoginKeyDown(int c);
 	void onPrivateMessage(const ChatMessage& message);
+	void handleBBSCommand(const tstring& param, bool& resetText);
+	void showBBSBoards();
+	void showBBSBoard(const string& board);
+	void showBBSDocument(const string& board, const string& tth);
 
 	// FavoriteManagerListener
 	virtual void on(FavoriteManagerListener::UserAdded, const FavoriteUser& /*aUser*/) noexcept;
@@ -294,6 +300,12 @@ private:
 	virtual void on(NickTaken, Client*) noexcept;
 	virtual void on(SearchFlood, Client*, const string&) noexcept;
 	virtual void on(ClientLine, Client*, const string& line, int type) noexcept;
+
+	// BBSManagerListener
+	virtual void on(BBSManagerListener::BoardUpdated, const string&, const string&) noexcept;
+	virtual void on(BBSManagerListener::EntryUpdated, const string&, const string&, const string&) noexcept;
+	virtual void on(BBSManagerListener::DocumentUpdated, const string&, const string&, const string&) noexcept;
+	virtual void on(BBSManagerListener::Status, const string&, const string&) noexcept;
 	void onStatusMessage(const string& line, int flags);
 
 	// Icon management

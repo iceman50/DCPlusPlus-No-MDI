@@ -75,6 +75,8 @@ public:
 		TTHValue tth;
 		int64_t size;
 		uint32_t timestamp;
+		/** Exact-only entries are protocol documents and never match name/size searches. */
+		bool exactOnly;
 	};
 	struct ChatAttachmentInfo {
 		string realPath;
@@ -113,6 +115,11 @@ public:
 	 * are searchable and uploadable only on that route, but never appear in file lists. */
 	bool addTempShare(const string& realPath, int64_t size, uint32_t timestamp,
 		const TTHValue& tth, const string& hubUrl) noexcept;
+	/** Register a verified protocol document that is visible only to exact-TTH searches/transfers. */
+	bool addTTHOnlyShare(const string& realPath, int64_t size, uint32_t timestamp,
+		const TTHValue& tth, const string& hubUrl) noexcept;
+	bool removeTTHOnlyShare(const string& realPath, const TTHValue& tth,
+		const string& hubUrl) noexcept;
 	bool isTempShare(const TTHValue& tth, const string& realPath, const string& hubUrl) const noexcept;
 	vector<TempShareInfo> getTempShares() const;
 	bool removeTempShare(const string& realPath, const TTHValue& tth, const string& hubUrl) noexcept;
@@ -383,9 +390,10 @@ private:
 	std::list<StringMatch> cachedFilterSkiplistPaths;
 
 	const Directory::File& findFile(const string& virtualFile) const;
-	const TempShareInfo* findTempShare(const TTHValue& tth, const string* hubUrl = nullptr) const noexcept;
+	const TempShareInfo* findTempShare(const TTHValue& tth, const string* hubUrl = nullptr,
+		const bool* exactOnly = nullptr) const noexcept;
 	bool addValidatedTempShare(const string& realPath, int64_t size, uint32_t timestamp,
-		const TTHValue& tth, const string& hubUrl) noexcept;
+		const TTHValue& tth, const string& hubUrl, bool exactOnly = false) noexcept;
 	void finishChatAttachment(PendingChatAttachment request, const TTHValue& tth) noexcept;
 	void failChatAttachments(const string& realPath, int64_t size, uint32_t timestamp,
 		uint64_t hashJobId, const string& error) noexcept;
