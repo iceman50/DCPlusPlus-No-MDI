@@ -37,7 +37,10 @@ namespace { ::RECT padding = { 7, 4, 7, 8 }; }
 
 PropPage::PropPage(dwt::Widget* parent, int rows, int cols) : dwt::Container(parent), grid(0) {
 	{
-		Seed seed(0, WS_EX_CONTROLPARENT | WS_EX_TRANSPARENT);
+		/* Property pages paint an opaque dialog surface. WS_EX_TRANSPARENT makes
+		 * USER32 repaint the ScrolledContainer behind every child transition,
+		 * which is especially visible with a manually painted dark palette. */
+		Seed seed(0, WS_EX_CONTROLPARENT);
 		seed.style &= ~WS_VISIBLE;
 		create(seed);
 	}

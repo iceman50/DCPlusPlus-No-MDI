@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -114,4 +114,3 @@ void ModalDialog::kill() {
 	// do nothing
 }
 }
-

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -98,6 +98,8 @@ public:
 	bool empty() const;
 	unsigned size() const;
 
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
+
 protected:
 	// Protected to avoid direct instantiation
 	explicit Rebar(Widget* parent);
@@ -106,6 +108,8 @@ protected:
 private:
 	friend class ChainingDispatcher;
 	static const TCHAR windowClass[];
+
+	void handlePainting(NMCUSTOMDRAW& data);
 };
 
 }

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -477,6 +477,7 @@ protected:
 	/// Adds or Removes extended list view styles from the list view
 	void addRemoveTableExtendedStyle( DWORD addStyle, bool add );
 	void setFontImpl();
+	void appearanceChanged() override;
 
 	// Protected to avoid direct instantiation, you can inherit and use
 	// WidgetFactory class which is friend
@@ -490,6 +491,8 @@ private:
 	bool grouped;
 
 	Theme theme;
+	HeaderPtr header;
+	void attachHeader();
 
 	// Edit row index and Edit column index, only used when grid is in "edit mode"
 	int itsEditRow;
@@ -532,6 +535,7 @@ private:
 
 	// aspects::Colorable
 	void setColorImpl(COLORREF text, COLORREF background);
+	void clearColorImpl();
 
 	// aspects::Selection
 	int getSelectedImpl() const;

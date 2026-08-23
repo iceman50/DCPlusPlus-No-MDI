@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -127,6 +127,10 @@ public:
 protected:
 	// Constructor Taking pointer to parent
 	explicit Spinner(Widget* parent);
+
+	/** Retain the native up-down state machine and replace only its visual
+	 * rendering in manual appearance mode. */
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
 
 	// Protected to avoid direct instantiation, you can inherit and use
 	// WidgetFactory class which is friend

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -90,11 +90,37 @@ template<typename CanvasType>
 class BufferedCanvas : public CanvasType
 {
 public:
+	/** Create a buffer using the historical sizing behavior.
+	  *
+	  * width and height extend the default screen-sized bitmap. New painting code
+	  * that has a bounded update rectangle should use the rectangle overload.
+	  */
 	template<typename InitT> // InitT can be a widget pointer or an HDC
 	BufferedCanvas(InitT initT, long width = 0, long height = 0) :
-	CanvasType(initT)
+	CanvasType(initT), itsSource(0), itsBitmap(0), itsOldBitmap(0)
 	{
 		init(this->CanvasType::itsHdc, width, height);
+	}
+
+	/** Create a buffer whose bitmap is exactly the size of rectangle.
+	  *
+	  * The memory canvas uses the same logical coordinates as the source canvas:
+	  * drawing at rectangle.pos writes at the top-left of the bitmap. This allows
+	  * existing painting code to draw with widget-relative coordinates without
+	  * allocating a bitmap large enough to contain the rectangle's offset.
+	  *
+	  * Pass rectangle to blast after drawing. Empty rectangles are accepted and
+	  * result in an empty blit.
+	  */
+	template<typename InitT> // InitT can be a widget pointer or an HDC
+	BufferedCanvas(InitT initT, const Rectangle& rectangle) :
+	CanvasType(initT), itsSource(0), itsBitmap(0), itsOldBitmap(0)
+	{
+		init(this->CanvasType::itsHdc,
+			rectangle.width() > 0 ? rectangle.width() : 1,
+			rectangle.height() > 0 ? rectangle.height() : 1, false);
+		::SetViewportOrgEx(this->CanvasType::itsHdc,
+			-static_cast<int>(rectangle.x()), -static_cast<int>(rectangle.y()), 0);
 	}
 
 	/// Destructor will free up the contained HDC
@@ -102,17 +128,29 @@ public:
 	  * Destructor will not flush the contained operations to the contained Canvas
 	  */
 	virtual ~BufferedCanvas() {
-		// delete buffer bitmap
-		::DeleteObject(::SelectObject(this->CanvasType::itsHdc, itsOldBitmap));
+		if(this->CanvasType::itsHdc) {
+			// restore and delete the buffer bitmap
+			if(itsOldBitmap) {
+				::SelectObject(this->CanvasType::itsHdc, itsOldBitmap);
+			}
+			if(itsBitmap) {
+				::DeleteObject(itsBitmap);
+			}
 
-		// delete buffer
-		::DeleteDC(this->CanvasType::itsHdc);
+			// delete buffer
+			::DeleteDC(this->CanvasType::itsHdc);
+		}
 
 		// set back source
 		this->CanvasType::itsHdc = itsSource;
 	}
 
-	/// BitBlasts buffer into specified rectangle of source
+	/** BitBlasts buffer into the specified rectangle of the source canvas.
+	  *
+	  * rectangle is expressed in source-canvas coordinates. When the exact-size
+	  * constructor is used, rectangle must be contained by the rectangle passed
+	  * to that constructor.
+	  */
 	void blast(const Rectangle& rectangle) {
 		// note; ::BitBlt might fail with ERROR_INVALID_HANDLE when the desktop isn't visible
 		::BitBlt(itsSource, rectangle.x(), rectangle.y(), rectangle.width(), rectangle.height(), this->CanvasType::itsHdc,
@@ -121,20 +159,31 @@ public:
 
 private:
 	/// Creates and inits back-buffer for the given source
-	void init(HDC source, long width, long height) {
-		// the buffer might have to be larger than the screen size
-		width += this->getDeviceCaps(HORZRES);
-		height += this->getDeviceCaps(VERTRES);
+	void init(HDC source, long width, long height, bool addScreenSize = true) {
+		if(addScreenSize) {
+			// Preserve the original constructor's coordinate range and sizing behavior.
+			width += this->getDeviceCaps(HORZRES);
+			height += this->getDeviceCaps(VERTRES);
+		}
 
 		// create memory buffer for the source and reset itsHDC
 		itsSource = source;
 		this->CanvasType::itsHdc = ::CreateCompatibleDC(source);
 
 		// create and select bitmap for buffer
-		itsOldBitmap = (HBITMAP)::SelectObject(this->CanvasType::itsHdc, ::CreateCompatibleBitmap(source, width, height));
+		if(this->CanvasType::itsHdc) {
+			itsBitmap = ::CreateCompatibleBitmap(source, width, height);
+			if(itsBitmap) {
+				auto oldBitmap = ::SelectObject(this->CanvasType::itsHdc, itsBitmap);
+				if(oldBitmap != HGDI_ERROR) {
+					itsOldBitmap = reinterpret_cast<HBITMAP>(oldBitmap);
+				}
+			}
+		}
 	}
 
 	HDC itsSource; /// Buffer source
+	HBITMAP itsBitmap; /// Buffer bitmap
 	HBITMAP itsOldBitmap; /// Buffer old bitmap
 };
 

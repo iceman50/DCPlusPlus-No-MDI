@@ -1253,15 +1253,6 @@ BOOL CALLBACK updateFont(HWND hwnd, LPARAM prevFont) {
 	return TRUE;
 }
 
-BOOL CALLBACK updateColors(HWND hwnd, LPARAM) {
-	dwt::Control* widget = dwt::hwnd_cast<dwt::Control*>(hwnd);
-	if(widget) {
-		// not every widget is custom colored; those that are also catch ID_UPDATECOLOR (see WinUtil::setColor).
-		widget->sendCommand(ID_UPDATECOLOR);
-	}
-	return TRUE;
-}
-
 } // unnamed namespace
 
 void MainWindow::handleSettings() {
@@ -1357,18 +1348,7 @@ void MainWindow::handleSettings() {
 			WinUtil::updateDownloadFont();
 		}
 
-		bool newColors = false;
-		if(static_cast<COLORREF>(SETTING(TEXT_COLOR)) != WinUtil::textColor) {
-			WinUtil::textColor = SETTING(TEXT_COLOR);
-			newColors = true;
-		}
-		if(static_cast<COLORREF>(SETTING(BACKGROUND_COLOR)) != WinUtil::bgColor) {
-			WinUtil::bgColor = SETTING(BACKGROUND_COLOR);
-			newColors = true;
-		}
-		if(newColors) {
-			::EnumChildWindows(handle(), updateColors, 0);
-		}
+		WinUtil::refreshTheme();
 
 		if(SETTING(ALWAYS_TRAY) != prevTray)
 			notifier->setVisible(SETTING(ALWAYS_TRAY));

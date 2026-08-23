@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2026, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -24,7 +24,9 @@
 
 #include <dwt/widgets/TaskDialog.h>
 
+#include <dwt/Application.h>
 #include <dwt/DWTException.h>
+#include <dwt/util/win32/NativeDialogAppearance.h>
 
 #include <sstream>
 
@@ -242,6 +244,8 @@ TaskDialog::Result TaskDialog::show() {
 
 	Result result;
 	BOOL checked = FALSE;
+	util::win32::NativeDialogAppearance appearance(
+		Application::instance().getAppearance());
 	auto status = ::TaskDialogIndirect(&config, &result.button, &result.radioButton, &checked);
 	if(FAILED(status)) {
 		std::ostringstream message;

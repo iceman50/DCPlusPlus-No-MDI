@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -109,6 +109,8 @@ protected:
 	// Constructor Taking pointer to parent
 	explicit ToolTip( Widget * parent );
 
+	virtual void appearanceChanged();
+
 	// To assure nobody accidentally deletes any heaped object of this type, parent
 	// is supposed to do so when parent is killed...
 	virtual ~ToolTip()
@@ -119,10 +121,16 @@ protected:
 private:
 	friend class ChainingDispatcher;
 	static const TCHAR windowClass[];
+	COLORREF tipBackgroundColor;
+	COLORREF tipTextColor;
+	bool tipBackgroundColorExplicit;
+	bool tipTextColorExplicit;
 };
 
 inline ToolTip::ToolTip(Widget *parent)
-	: BaseType(parent, ChainingDispatcher::superClass<ToolTip>())
+	: BaseType(parent, ChainingDispatcher::superClass<ToolTip>()),
+	tipBackgroundColor(NaC), tipTextColor(NaC),
+	tipBackgroundColorExplicit(false), tipTextColorExplicit(false)
 {
 	dwtassert(parent, "Can't have a ToolTip without a parent...");
 }

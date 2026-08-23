@@ -24,6 +24,7 @@
 #include <dcpp/SettingsManager.h>
 
 #include <dwt/util/GDI.h>
+#include <dwt/util/HoldRedraw.h>
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/ScrolledContainer.h>
 #include <dwt/widgets/ToolTip.h>
@@ -211,6 +212,7 @@ bool SettingsDialog::initDialog() {
 		ts.exStyle &= ~WS_EX_CLIENTEDGE;
 		ts.lines = 6;
 		help = helpGrid->addChild(ts);
+		WinUtil::setColor(help);
 		help->onRaw([this](WPARAM w, LPARAM) { return helpDlgCode(w); }, dwt::Message(WM_GETDLGCODE));
 
 		cur = cur->addChild(Grid::Seed(1, 3));
@@ -374,16 +376,27 @@ void SettingsDialog::handleSelectionChanged() {
 			return;
 		}
 
-		// move to the top of the Z order so the ScrolledContainer thinks this is the only child.
-		if(currentPage) {
-			currentPage->setVisible(false);
+		auto pageHost = page->getParent();
+		{
+			/* Page creation, scroll-range changes and ShowWindow each invalidate
+			 * overlapping parts of the host. Suppress those intermediate paints,
+			 * size the new page while it is hidden, and expose it only after the
+			 * ScrolledContainer has its final geometry. */
+			dwt::util::HoldRedraw hold(pageHost);
+			if(currentPage) {
+				currentPage->setVisible(false);
+			}
+
+			// The ScrolledContainer treats its first child in Z order as active.
+			page->setZOrder(HWND_TOP);
+			currentPage = page;
+			pageHost->layout();
+			page->setVisible(true);
 		}
-		page->setZOrder(HWND_TOP);
-		page->setVisible(true);
-		currentPage = page;
+		pageHost->redrawWindow(RDW_INVALIDATE | RDW_ERASE | RDW_FRAME |
+			RDW_ALLCHILDREN);
 
 		updateTitle();
-		layout();
 	}
 }
 

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -49,6 +49,11 @@ public:
 	virtual ~Theme();
 
 	void load(const tstring& classes, Widget* w_, bool handleThemeChanges = true);
+	/** Close and reopen the stored visual-style class. */
+	void reload();
+	/** Close the current visual-style handle without forgetting its class. */
+	void unload();
+	bool isLoaded() const { return theme != 0; }
 
 	/**
 	* @param drawParent if false, you have to call isThemeBackgroundPartiallyTransparent and handle
@@ -78,6 +83,7 @@ private:
 
 	HTHEME theme;
 	Widget* w;
+	tstring classes;
 };
 
 }

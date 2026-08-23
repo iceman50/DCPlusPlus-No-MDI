@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -93,6 +93,10 @@ public:
 protected:
 	/// Constructor Taking pointer to parent
 	explicit GroupBox( Widget * parent );
+
+	/** Paint group-box chrome from the active appearance palette when native
+	 * visual styles cannot represent it. */
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
 
 	// Protected to avoid direct instantiation, you can inherit and use
 	// WidgetFactory class which is friend

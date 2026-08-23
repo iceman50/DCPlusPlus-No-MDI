@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -38,6 +38,8 @@
 
 #include "Widget.h"
 
+#include <memory>
+
 namespace dwt {
 
 /// Helper creational class
@@ -56,6 +58,7 @@ public:
 	{
 		typename WidgetType::ObjectType retVal(new WidgetType);
 		retVal->create( cs );
+		finalize(retVal);
 		return retVal;
 	}
 
@@ -63,6 +66,7 @@ public:
 	{
 		typename WidgetType::ObjectType retVal(new WidgetType( parent ));
 		retVal->create( cs );
+		finalize(retVal);
 		return retVal;
 	}
 
@@ -71,6 +75,7 @@ public:
 	{
 		typename WidgetType::ObjectType retVal(new WidgetType( parent ));
 		retVal->create( container, cs );
+		finalize(retVal);
 		return retVal;
 	}
 
@@ -78,6 +83,7 @@ public:
 	{
 		typename WidgetType::ObjectType retVal( new WidgetType( parent ) );
 		retVal->create();
+		finalize(retVal);
 		return retVal;
 	}
 
@@ -86,8 +92,21 @@ public:
 	{
 		typename WidgetType::ObjectType w(new WidgetType(parent));
 		w->setHandle(hwnd);
+		finalize(w);
 		return w;
 	}
+
+private:
+	static void finalize(Widget* object) {
+		object->finalizeAppearance();
+	}
+
+	template<typename ObjectType>
+	static void finalize(const std::unique_ptr<ObjectType>& object) {
+		finalize(object.get());
+	}
+
+	static void finalize(...) { }
 };
 
 }

@@ -29,31 +29,41 @@
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <dwt/widgets/MessageBox.h>
+#ifndef DWT_WIDGETS_APPEARANCEDRAW_H
+#define DWT_WIDGETS_APPEARANCEDRAW_H
 
-#include <dwt/Application.h>
-#include <dwt/util/check.h>
-#include <dwt/util/win32/NativeDialogAppearance.h>
+#include <dwt/Appearance.h>
+#include <dwt/CanvasClasses.h>
 
 namespace dwt {
 
-MessageBox::MessageBox(Widget* parent) :
-parent(parent)
-{
-	dwtassert(parent, "A MessageBox must have a valid parent");
+class Button;
+class ComboBox;
+class GroupBox;
+class Header;
+class Spinner;
+class StatusBar;
+class ToolBar;
+
+/** Private renderers for native controls whose visual styles cannot consume a
+ * caller-supplied dark palette. Input, metrics and accessibility remain owned by
+ * the underlying Windows control; these functions replace painting only. */
+namespace appearance_detail {
+
+LRESULT drawButton(Button& button, NMCUSTOMDRAW& data, const Appearance::Palette& palette);
+LRESULT drawHeader(Header& header, NMCUSTOMDRAW& data, const Appearance::Palette& palette);
+LRESULT drawToolBar(ToolBar& toolbar, NMTBCUSTOMDRAW& data, const Appearance::Palette& palette);
+
+void drawGroupBox(GroupBox& group, Canvas& canvas, const Appearance::Palette& palette);
+void drawComboBox(ComboBox& combo, Canvas& canvas, const Appearance::Palette& palette);
+void drawSpinner(Spinner& spinner, Canvas& canvas, const Appearance::Palette& palette);
+void drawStatusBar(StatusBar& status, Canvas& canvas, const Appearance::Palette& palette);
+
+bool canDrawComboBox(const ComboBox& combo);
+bool canDrawStatusBar(const StatusBar& status);
+
 }
 
-MessageBox::RetVal MessageBox::show(const tstring& message, const tstring& title, Buttons buttons, Icon icon) {
-	auto root = getParent()->getRoot();
-	if(!root || !root->getEnabled()) {
-		return RETBOX_CANCEL;
-	}
-
-	util::win32::NativeDialogAppearance appearance(
-		Application::instance().getAppearance());
-	const auto flags = static_cast<UINT>(buttons) | static_cast<UINT>(icon);
-	return static_cast<RetVal>(::MessageBox(getParent()->handle(),
-		message.c_str(), title.c_str(), flags));
 }
 
-}
+#endif

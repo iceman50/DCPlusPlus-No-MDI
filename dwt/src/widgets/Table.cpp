@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -40,6 +40,7 @@
 #include <dwt/dwt_vsstyle.h>
 #include <dwt/dwt_vssym32.h>
 #include <dwt/WidgetCreator.h>
+#include <dwt/widgets/Header.h>
 #include <dwt/widgets/ToolTip.h>
 
 namespace dwt {
@@ -72,6 +73,7 @@ void Table::create( const Seed & cs )
 	}
 
 	BaseType::create(cs);
+	attachHeader();
 	setFont(cs.font);
 	if(cs.lvStyle != 0)
 		setTableStyle(cs.lvStyle);
@@ -107,6 +109,7 @@ void Table::setFontImpl() {
 Table::Table(dwt::Widget* parent) :
 BaseType(parent, ChainingDispatcher::superClass<Table>()),
 grouped(false),
+header(nullptr),
 itsEditRow(0),
 itsEditColumn(0),
 itsXMousePosition(0),
@@ -117,6 +120,38 @@ sortColumn(-1),
 sortType(SORT_CALLBACK),
 ascending(true)
 {
+}
+
+void Table::attachHeader() {
+	if(header || !handle()) {
+		return;
+	}
+	if(HWND headerHandle = ListView_GetHeader(handle())) {
+		header = WidgetCreator<Header>::attach(this, headerHandle);
+		header->onDestroy([this] { header = nullptr; });
+	}
+}
+
+void Table::appearanceChanged() {
+	attachHeader();
+	if(!hasExplicitColors()) {
+		clearColorImpl();
+	}
+	if(isManualAppearance()) {
+		theme.unload();
+	} else {
+		theme.reload();
+	}
+	BaseType::appearanceChanged();
+}
+
+void Table::clearColorImpl() {
+	const auto& appearance = getAppearance();
+	const auto text = isManualAppearance() ? appearance.getPalette().text :
+		Color::predefined(COLOR_WINDOWTEXT);
+	const auto background = isManualAppearance() ? appearance.getPalette().background :
+		Color::predefined(COLOR_WINDOW);
+	setColorImpl(text, background);
 }
 
 void Table::setSort(int aColumn, SortType aType, bool aAscending) {
@@ -454,7 +489,7 @@ void Table::initGroupSupport() {
 	/* fiddle with the painting of group headers to allow custom colors that match the background (the
 	theme will be respected). */
 
-	theme.load(VSCLASS_LISTVIEW, this);
+	theme.load(VSCLASS_LISTVIEW, this, false);
 
 	onCustomDraw([this](NMLVCUSTOMDRAW& data) -> LRESULT {
 		if(data.dwItemType != LVCDI_GROUP)
@@ -595,6 +630,7 @@ void Table::setView( int view ) {
 		return;
 	}
 	sendMessage(LVM_SETVIEW, view);
+	attachHeader();
 }
 
 int Table::getView() const {

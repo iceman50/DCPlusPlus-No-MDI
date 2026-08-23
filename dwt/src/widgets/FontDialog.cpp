@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -32,9 +32,11 @@
 #include <dwt/widgets/FontDialog.h>
 
 #include <dlgs.h>
+#include <dwt/Application.h>
 #include <dwt/CanvasClasses.h>
 #include <dwt/resources/Brush.h>
 #include <dwt/util/win32/ApiHelpers.h>
+#include <dwt/util/win32/NativeDialogAppearance.h>
 
 namespace dwt {
 
@@ -146,6 +148,8 @@ bool FontDialog::open(LOGFONT& font, COLORREF& color, Options* options, DWORD fl
 		cf.lpfnHook = CFHookProc;
 	}
 
+	util::win32::NativeDialogAppearance appearance(
+		Application::instance().getAppearance());
 	if(::ChooseFont(&cf)) {
 		font = *cf.lpLogFont;
 		if(!options || options->color) {

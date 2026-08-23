@@ -101,6 +101,9 @@ const string SettingsManager::settingTags[] =
 	"GlobalWindow", "GlobalLimit", "PeerLimit", "PeerWindow", "MaxTrackedPeers",
 	"MaxSUDPPacket", "MaxSUDPKeys", "MaxPartialListBytes", "HashDbWriteBatchSize",
 	"ChatLinkMaxLength", "RichTextMaxSize", "RTFTempShareLimit",
+	"ThemeMode", "ThemeBackgroundColor", "ThemeSurfaceColor", "ThemeTextColor",
+	"ThemeDisabledTextColor", "ThemeBorderColor", "ThemeAccentColor",
+	"ThemeHighlightTextColor",
 	"SENTRY",
 	// Bools
 	"AddFinishedInstantly", "AdlsBreakOnFirst",
@@ -238,6 +241,14 @@ SettingsManager::SettingsManager() {
 	setDefault(CHAT_LINK_MAX_LENGTH, 256);
 	setDefault(RICH_TEXT_MAX_SIZE, 64 * 1024);
 	setDefault(RTF_TEMP_SHARE_LIMIT, 256);
+	setDefault(THEME_MODE, THEME_SYSTEM);
+	setDefault(THEME_BACKGROUND_COLOR, RGB(32, 32, 32));
+	setDefault(THEME_SURFACE_COLOR, RGB(45, 45, 48));
+	setDefault(THEME_TEXT_COLOR, RGB(241, 241, 241));
+	setDefault(THEME_DISABLED_TEXT_COLOR, RGB(160, 160, 160));
+	setDefault(THEME_BORDER_COLOR, RGB(73, 73, 73));
+	setDefault(THEME_ACCENT_COLOR, RGB(0, 120, 215));
+	setDefault(THEME_HIGHLIGHT_TEXT_COLOR, RGB(255, 255, 255));
 	setDefault(MAX_DOWNLOAD_SPEED, 0);
 	setDefault(HASH_DB_VERIFY_STARTUP, false);
 	setDefault(HASH_DB_COMPACT_ON_REBUILD, false);

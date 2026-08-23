@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -330,6 +330,8 @@ private:
 
 	// aspects::Colorable
 	void setColorImpl(COLORREF text, COLORREF background);
+	void clearColorImpl();
+	void appearanceChanged() override;
 
 	// aspects::Selection
 	HTREEITEM getSelectedImpl() const;
@@ -354,6 +356,8 @@ private:
 	void setColumnWidthImpl( unsigned column, int width );
 
 	LRESULT draw(NMTVCUSTOMDRAW& x);
+	LRESULT drawAppearance(NMTVCUSTOMDRAW& x);
+	void paintAppearanceLabel(NMTVCUSTOMDRAW& x);
 	LRESULT prePaint(NMTVCUSTOMDRAW &nmdc);
 	LRESULT prePaintItem(NMTVCUSTOMDRAW &nmcd);
 	LRESULT postPaintItem(NMTVCUSTOMDRAW &nmcd);

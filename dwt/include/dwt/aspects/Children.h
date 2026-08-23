@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -81,11 +81,14 @@ public:
 
 	private:
 	    static Widget* next(Widget *parent, Widget *child) {
-	    	do {
-				child = hwnd_cast<Widget*>(::FindWindowEx(parent->handle(), child ? child->handle() : nullptr, nullptr, nullptr));
-			} while(child && !dynamic_cast<ChildWidget*>(child));
-
-	    	return child;
+			HWND current = child ? child->handle() : nullptr;
+			while((current = ::FindWindowEx(parent->handle(), current, nullptr, nullptr)) != nullptr) {
+				auto widget = hwnd_cast<Widget*>(current);
+				if(widget && dynamic_cast<ChildWidget*>(widget)) {
+					return widget;
+				}
+			}
+			return nullptr;
 	    }
 
 	    Widget* cur;

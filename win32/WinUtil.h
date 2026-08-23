@@ -177,6 +177,7 @@ public:
 
 	static void init();
 	static void uninit();
+	static void refreshTheme();
 
 	static void initSeeds();
 

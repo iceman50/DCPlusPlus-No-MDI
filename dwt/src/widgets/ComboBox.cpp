@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -34,6 +34,8 @@
 #include <dwt/WidgetCreator.h>
 #include <dwt/widgets/TextBox.h>
 
+#include "AppearanceDraw.h"
+
 namespace dwt {
 
 const TCHAR ComboBox::windowClass[] = WC_COMBOBOX;
@@ -59,6 +61,11 @@ void ComboBox::create( const Seed & cs ) {
 	setFont(cs.font);
 	if(cs.extended)
 		sendMessage(CB_SETEXTENDEDUI, TRUE);
+
+	/* Combo boxes create their edit and drop-list HWNDs internally. Wrapping them
+	keeps their color handling and appearance lifetime within DWT. */
+	getListBox();
+	getTextBox();
 }
 
 tstring ComboBox::getValue( int index ) {
@@ -102,6 +109,71 @@ TextBoxPtr ComboBox::getTextBox() {
 		}
 	}
 	return textBox;
+}
+
+void ComboBox::setColorImpl(COLORREF text, COLORREF background) {
+	BaseType::setColorImpl(text, background);
+	if(handle()) {
+		if(auto list = getListBox()) {
+			list->setColor(text, background);
+		}
+		if(auto edit = getTextBox()) {
+			edit->setColor(text, background);
+		}
+	}
+}
+
+void ComboBox::clearColorImpl() {
+	BaseType::clearColorImpl();
+	if(handle()) {
+		if(auto list = getListBox()) {
+			list->clearColor();
+		}
+		if(auto edit = getTextBox()) {
+			edit->clearColor();
+		}
+	}
+}
+
+bool ComboBox::handleMessage(const MSG& msg, LRESULT& retVal) {
+	const bool handled = BaseType::handleMessage(msg, retVal);
+	if(handled || !isManualAppearance() ||
+		getAppearancePolicy() == AppearancePolicy::Native ||
+		!appearance_detail::canDrawComboBox(*this)) {
+		return handled;
+	}
+
+	switch(msg.message) {
+	case WM_ERASEBKGND:
+		retVal = TRUE;
+		return true;
+
+	case WM_PAINT:
+		{
+			RECT update = { };
+			if(!::GetUpdateRect(handle(), &update, FALSE)) {
+				::GetClientRect(handle(), &update);
+			}
+			const Rectangle paint(update);
+			BufferedCanvas<PaintCanvas> canvas(this, paint);
+			appearance_detail::drawComboBox(*this, canvas,
+				getAppearance().getPalette());
+			canvas.blast(paint);
+			retVal = 0;
+			return true;
+		}
+
+	case WM_PRINTCLIENT:
+		if(msg.wParam) {
+			FreeCanvas canvas(reinterpret_cast<HDC>(msg.wParam));
+			appearance_detail::drawComboBox(*this, canvas,
+				getAppearance().getPalette());
+			retVal = 0;
+			return true;
+		}
+		break;
+	}
+	return false;
 }
 
 Point ComboBox::getPreferredSize() {

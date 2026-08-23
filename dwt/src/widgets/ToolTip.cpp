@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -30,6 +30,10 @@
 */
 
 #include <dwt/widgets/ToolTip.h>
+
+#include <dwt/Appearance.h>
+
+#include <uxtheme.h>
 
 namespace dwt {
 
@@ -113,10 +117,14 @@ Rectangle ToolTip::getMargin() const {
 }
 
 void ToolTip::setTipBackgroundColor(COLORREF color) {
+	tipBackgroundColor = color;
+	tipBackgroundColorExplicit = true;
 	sendMessage(TTM_SETTIPBKCOLOR, color);
 }
 
 void ToolTip::setTipTextColor(COLORREF color) {
+	tipTextColor = color;
+	tipTextColorExplicit = true;
 	sendMessage(TTM_SETTIPTEXTCOLOR, color);
 }
 
@@ -141,6 +149,37 @@ void ToolTip::onGetTip(F f) {
 		}
 		return true;
 	});
+}
+
+void ToolTip::appearanceChanged() {
+	const auto& appearance = getAppearance();
+	COLORREF background;
+	COLORREF foreground;
+	if(appearance.isHighContrast()) {
+		background = ::GetSysColor(COLOR_INFOBK);
+		foreground = ::GetSysColor(COLOR_INFOTEXT);
+	} else if(isManualAppearance()) {
+		background = tipBackgroundColorExplicit ? tipBackgroundColor :
+			appearance.getPalette().surface;
+		foreground = tipTextColorExplicit ? tipTextColor :
+			appearance.getPalette().text;
+	} else {
+		background = tipBackgroundColorExplicit ? tipBackgroundColor :
+			::GetSysColor(COLOR_INFOBK);
+		foreground = tipTextColorExplicit ? tipTextColor :
+			::GetSysColor(COLOR_INFOTEXT);
+	}
+
+	if(isManualAppearance()) {
+		// Native tooltip behavior and sizing are retained, while visual-style
+		// bitmaps are disabled so the palette messages are honored on Windows 7.
+		::SetWindowTheme(handle(), L"", L"");
+	} else {
+		::SetWindowTheme(handle(), nullptr, nullptr);
+	}
+	sendMessage(TTM_SETTIPBKCOLOR, background);
+	sendMessage(TTM_SETTIPTEXTCOLOR, foreground);
+	BaseType::appearanceChanged();
 }
 
 }

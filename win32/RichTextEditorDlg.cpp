@@ -80,21 +80,16 @@ RichTextEditorDlg::~RichTextEditorDlg() {
 }
 
 bool RichTextEditorDlg::handleInitDialog() {
-	WinUtil::setColor(this);
-
 	grid = addChild(Grid::Seed(7, 1));
 	grid->column(0).mode = GridInfo::FILL;
 	grid->setSpacing(6);
-	WinUtil::setColor(grid);
 
 	auto sourceLabel = grid->addChild(Label::Seed(T_("Markdown source")));
-	WinUtil::setColor(sourceLabel);
 	grid->setWidget(sourceLabel, 0, 0);
 
 	TextBox::Seed sourceSeed = WinUtil::Seeds::Dialog::textBox;
 	sourceSeed.style |= ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL;
 	source = grid->addChild(sourceSeed);
-	WinUtil::setColor(source);
 	grid->setWidget(source, 1, 0);
 	grid->row(1).mode = GridInfo::STATIC;
 	grid->row(1).size = 165;
@@ -106,7 +101,7 @@ bool RichTextEditorDlg::handleInitDialog() {
 	source->setFileDropEnabled(!hubUrl.empty() && SETTING(ENABLE_RTF_TEMP_SHARES));
 
 	auto builder = grid->addChild(Grid::Seed(2, 7));
-	WinUtil::setColor(builder);
+	builder->setSpacing(grid->getSpacing());
 	grid->setWidget(builder, 2, 0);
 	for(size_t i = 0; i < 7; ++i) builder->column(i).mode = GridInfo::FILL;
 
@@ -156,7 +151,6 @@ bool RichTextEditorDlg::handleInitDialog() {
 	addBuilderButton(T_("Inline media..."), [this] { insertAttachment(true); });
 
 	auto previewLabel = grid->addChild(Label::Seed(T_("Live preview")));
-	WinUtil::setColor(previewLabel);
 	grid->setWidget(previewLabel, 3, 0);
 
 	RichTextBox::Seed previewSeed = WinUtil::Seeds::richTextBox;
@@ -172,11 +166,12 @@ bool RichTextEditorDlg::handleInitDialog() {
 	grid->row(4).align = GridInfo::STRETCH;
 
 	validation = grid->addChild(Label::Seed());
-	WinUtil::setColor(validation);
 	grid->setWidget(validation, 5, 0);
 
 	auto buttons = grid->addChild(Grid::Seed(1, 2));
-	WinUtil::setColor(buttons);
+	buttons->column(0).mode = GridInfo::FILL;
+	buttons->column(0).align = GridInfo::BOTTOM_RIGHT;
+	buttons->setSpacing(grid->getSpacing());
 	grid->setWidget(buttons, 6, 0);
 	auto dialogButtons = WinUtil::addDlgButtons(buttons,
 		[this] { handleUse(); },

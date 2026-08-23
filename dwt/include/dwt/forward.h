@@ -2,7 +2,7 @@
 
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -40,6 +40,14 @@
 #include <functional>
 
 namespace dwt {
+
+class Appearance;
+enum class AppearancePolicy;
+
+namespace aspects {
+template<typename WidgetType>
+class Colorable;
+}
 
 template< class WidgetType >
 class WidgetCreator;

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -35,6 +35,8 @@
 #include <dwt/widgets/ToolTip.h>
 
 #include <numeric>
+
+#include "AppearanceDraw.h"
 
 namespace dwt {
 
@@ -181,20 +183,81 @@ bool StatusBar::handleMessage(const MSG& msg, LRESULT& retVal) {
 		tip->relayEvent(msg);
 	}
 
-	return BaseType::handleMessage(msg, retVal);
+	const bool handled = BaseType::handleMessage(msg, retVal);
+	if(msg.message == WM_SETFONT || msg.message == WM_DPICHANGED ||
+		msg.message == WM_DPICHANGED_AFTERPARENT) {
+		updatePartSizes();
+	}
+	if(handled || !isManualAppearance() ||
+		getAppearancePolicy() == AppearancePolicy::Native) {
+		return handled;
+	}
+
+	switch(msg.message) {
+	case WM_ERASEBKGND:
+		if(!appearance_detail::canDrawStatusBar(*this)) {
+			break;
+		}
+		retVal = TRUE;
+		return true;
+
+	case WM_PAINT:
+		{
+			if(!appearance_detail::canDrawStatusBar(*this)) {
+				break;
+			}
+			RECT update = { };
+			if(!::GetUpdateRect(handle(), &update, FALSE)) {
+				::GetClientRect(handle(), &update);
+			}
+			const Rectangle paint(update);
+			BufferedCanvas<PaintCanvas> canvas(this, paint);
+			appearance_detail::drawStatusBar(*this, canvas,
+				getAppearance().getPalette());
+			canvas.blast(paint);
+			retVal = 0;
+			return true;
+		}
+
+	case WM_PRINTCLIENT:
+		if(msg.wParam && appearance_detail::canDrawStatusBar(*this)) {
+			FreeCanvas canvas(reinterpret_cast<HDC>(msg.wParam));
+			appearance_detail::drawStatusBar(*this, canvas,
+				getAppearance().getPalette());
+			retVal = 0;
+			return true;
+		}
+		break;
+	}
+	return false;
+}
+
+unsigned StatusBar::Part::preferredSize(StatusBar* bar) const {
+	unsigned newSize = 0;
+	if(icon) {
+		/* The appearance renderer draws status icons at the DPI-aware system
+		 * small-icon size. Resource dimensions may still describe their 96-DPI
+		 * source image, so reserve whichever width is larger. */
+		newSize += static_cast<unsigned>(std::max<long>(icon->getSize().x,
+			bar->getSystemMetric(SM_CXSMICON)));
+	}
+	if(!text.empty()) {
+		if(icon) {
+			newSize += static_cast<unsigned>(bar->scale(4));
+		}
+		newSize += bar->getTextSize(text).x;
+	}
+	if(newSize > 0) {
+		/* Keep this in step with drawStatusBar: five pixels before the content,
+		 * four after it, and one pixel of rounding room for DrawText. */
+		newSize += static_cast<unsigned>(bar->scale(5) + bar->scale(4) +
+			std::max(1, bar->scale(1)));
+	}
+	return newSize;
 }
 
 void StatusBar::Part::updateSize(StatusBar* bar, bool alwaysResize) {
-	unsigned newSize = 0;
-	if(icon)
-		newSize += icon->getSize().x;
-	if(!text.empty()) {
-		if(icon)
-			newSize += 4; // spacing between icon & text
-		newSize += bar->getTextSize(text).x;
-	}
-	if(newSize > 0)
-		newSize += 10; // add margins
+	const auto newSize = preferredSize(bar);
 	if(newSize > desiredSize || (alwaysResize && newSize != desiredSize)) {
 		desiredSize = newSize;
 		bar->layoutSections();
@@ -220,6 +283,25 @@ StatusBar::Part& StatusBar::getPart(unsigned part) {
 	return *raw;
 }
 
+void StatusBar::updatePartSizes() {
+	bool changed = false;
+	for(size_t i = 0; i < parts.size(); ++i) {
+		if(i == fill) {
+			continue;
+		}
+		if(auto part = dynamic_cast<Part*>(parts[i].get())) {
+			const auto size = part->preferredSize(this);
+			if(size > part->desiredSize) {
+				part->desiredSize = size;
+				changed = true;
+			}
+		}
+	}
+	if(changed) {
+		layoutSections();
+	}
+}
+
 void StatusBar::layoutSections() {
 	layoutSections(getClientSize());
 }
@@ -236,36 +318,79 @@ void StatusBar::layoutSections(const Point& sz) {
 		sizes[i] = parts[i]->desiredSize;
 
 	sizes[fill] = 0;
-
-	const auto total = std::accumulate(sizes.begin(), sizes.end(), 0);
-	if(total + fillMin < width) {
-		// cool, there's enough room to fit all the parts.
-		for(auto& part: parts) {
-			part->actualSize = part->desiredSize;
-		}
-		parts[fill]->actualSize = sizes[fill] = width - total;
-
-		// transform sizes into offsets
+	auto setParts = [&](const std::vector<unsigned>& widths) {
+		std::vector<unsigned> edges(widths.size());
 		unsigned offset = 0;
-		for(auto& size: sizes) {
-			offset += size;
-			size = offset;
+		for(size_t i = 0; i < widths.size(); ++i) {
+			offset += widths[i];
+			edges[i] = offset;
 		}
 
-	} else {
-		// only show the "fill" part if the status bar is too narrow.
+		/* A -1 edge extends underneath a sizing grip, so reserve the grip
+		 * explicitly. */
+		edges.back() = hasSizeGrip ? width : static_cast<unsigned>(-1);
+		sendMessage(SB_SETPARTS, edges.size(),
+			reinterpret_cast<LPARAM>(edges.data()));
+	};
+	auto collapseParts = [&] {
 		for(auto& part: parts) { part->actualSize = 0; }
 		parts[fill]->actualSize = width;
 		for(size_t i = 0; i < sizes.size(); ++i) {
-			// SB_SETPARTS expects right-edge coordinates. Parts before the fill
-			// part collapse at the left edge; parts after it collapse at the right.
+			/* SB_SETPARTS expects right-edge coordinates. Parts before the fill
+			 * part collapse at the left edge; parts after it collapse at the
+			 * right. */
 			sizes[i] = i < fill ? 0 : width;
 		}
-	}
+		sizes.back() = hasSizeGrip ? width : static_cast<unsigned>(-1);
+		sendMessage(SB_SETPARTS, sizes.size(),
+			reinterpret_cast<LPARAM>(sizes.data()));
+	};
 
-	// A -1 edge extends underneath a sizing grip, so reserve the grip explicitly.
-	sizes.back() = hasSizeGrip ? width : static_cast<unsigned>(-1);
-	sendMessage(SB_SETPARTS, sizes.size(), reinterpret_cast<LPARAM>(sizes.data()));
+	const auto total = std::accumulate(sizes.begin(), sizes.end(), 0);
+	if(total + fillMin < width) {
+		/* SB_SETPARTS accepts right-edge coordinates, but the rectangles
+		 * returned by SB_GETRECT are narrower because the common control
+		 * applies its own outer and inter-part borders. Apply an initial
+		 * layout, measure that loss for every fixed part, then reserve it in
+		 * the assigned widths. This keeps the content width independent of
+		 * the active Windows theme and common-controls version. */
+		sizes[fill] = width - total;
+		setParts(sizes);
+
+		unsigned correction = 0;
+		for(size_t i = 0; i < sizes.size(); ++i) {
+			if(i == fill || !parts[i]->desiredSize) {
+				continue;
+			}
+
+			RECT rect = { };
+			if(sendMessage(SB_GETRECT, static_cast<WPARAM>(i),
+				reinterpret_cast<LPARAM>(&rect))) {
+				const auto actual = static_cast<unsigned>(
+					std::max(0L, rect.right - rect.left));
+				if(actual < parts[i]->desiredSize) {
+					const auto missing = parts[i]->desiredSize - actual;
+					sizes[i] += missing;
+					correction += missing;
+				}
+			}
+		}
+
+		if(correction && sizes[fill] < fillMin + correction) {
+			collapseParts();
+		} else {
+			sizes[fill] -= correction;
+			for(size_t i = 0; i < sizes.size(); ++i) {
+				parts[i]->actualSize = sizes[i];
+			}
+			if(correction) {
+				setParts(sizes);
+			}
+		}
+	} else {
+		/* Only show the fill part if the status bar is too narrow. */
+		collapseParts();
+	}
 
 	// reposition embedded widgets.
 	for(auto i = parts.begin(); i != parts.end(); ++i) {

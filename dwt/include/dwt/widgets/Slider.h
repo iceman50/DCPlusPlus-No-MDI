@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -219,9 +219,13 @@ public:
 	  */
 	void assignBuddy( bool beginning, Widget * buddy );
 
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
+
 protected:
 	// Constructor Taking pointer to parent
 	explicit Slider( Widget * parent );
+
+	virtual void appearanceChanged();
 
 	// Protected to avoid direct instantiation, you can inherit and use
 	// WidgetFactory class which is friend
@@ -230,6 +234,8 @@ protected:
 private:
 	friend class ChainingDispatcher;
 	static const TCHAR windowClass[];
+
+	void handlePainting(NMCUSTOMDRAW& data);
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -48,11 +48,10 @@ public:
 				return false;
 			}
 			auto newRet = f(*data);
-			/* make sure multiple custom draw handlers can be applied to the same control without
-			stepping on each other. */
-			if(!ret || ret == CDRF_DODEFAULT) {
-				ret = newRet;
-			}
+			/* Custom-draw notification flags are composable. Keep every stage request
+			instead of silently discarding later handlers after the first non-zero
+			result; CDRF_SKIPDEFAULT naturally remains authoritative when present. */
+			ret |= newRet;
 			return true;
 		});
 	}

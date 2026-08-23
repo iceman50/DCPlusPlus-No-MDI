@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2001-2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -10,6 +10,7 @@
 #include "stdafx.h"
 #include "ExperimentalPage.h"
 
+#include <iterator>
 #include <limits>
 
 #include <dcpp/File.h>
@@ -19,17 +20,23 @@
 #include <dcpp/version.h>
 
 #include <dwt/util/StringUtils.h>
+#include <dwt/Appearance.h>
 #include <dwt/widgets/CheckBox.h>
+#include <dwt/widgets/ColorDialog.h>
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/GroupBox.h>
 #include <dwt/widgets/Label.h>
+#include <dwt/widgets/LoadDialog.h>
 #include <dwt/widgets/MessageBox.h>
+#include <dwt/widgets/SaveDialog.h>
 #include <dwt/widgets/Spinner.h>
 #include <dwt/widgets/TabView.h>
 
 #include "resource.h"
+#include "ThemeManager.h"
 #include "WinUtil.h"
 
+using dwt::ColorDialog;
 using dwt::Grid;
 using dwt::GridInfo;
 using dwt::Label;
@@ -133,6 +140,8 @@ private:
 
 ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 	PropPage(parent, 1, 1),
+	themeMode(nullptr),
+	themePreset(nullptr),
 	tempShares(nullptr),
 	tempSummary(nullptr),
 	removeTemp(nullptr),
@@ -288,6 +297,59 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 			IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES, T_("KiB"), 1, MAX_KIB_SETTING, BYTES_PER_KIB);
 	}
 
+	auto themeGrid = tabs->addPage(T_("Theme"), 3)->content();
+
+	{
+		auto group = themeGrid->addChild(GroupBox::Seed(T_("Application theme")));
+		group->setHelpId(IDH_EXPERIMENTALPAGE);
+		auto cur = group->addChild(Grid::Seed(1, 2));
+		cur->column(0).mode = GridInfo::FILL;
+		cur->addChild(Label::Seed(T_("Color mode")));
+		themeMode = cur->addChild(WinUtil::Seeds::Dialog::comboBox);
+		themeMode->addValue(T_("Follow Windows"));
+		themeMode->addValue(T_("Light"));
+		themeMode->addValue(T_("Dark"));
+		themeMode->setSelected(std::clamp(SETTING(THEME_MODE),
+			static_cast<int>(SettingsManager::THEME_SYSTEM), static_cast<int>(SettingsManager::THEME_DARK)));
+	}
+
+	{
+		auto group = themeGrid->addChild(GroupBox::Seed(T_("Dark theme palette")));
+		group->setHelpId(IDH_EXPERIMENTALPAGE);
+		auto cur = group->addChild(Grid::Seed(2, 1));
+		cur->column(0).mode = GridInfo::FILL;
+
+		auto preset = cur->addChild(Grid::Seed(1, 6));
+		preset->column(1).mode = GridInfo::FILL;
+		preset->addChild(Label::Seed(T_("Palette preset")));
+		themePreset = preset->addChild(WinUtil::Seeds::Dialog::comboBox);
+		themePreset->onSelectionChanged([this] { applyThemePreset(); });
+		preset->addChild(Button::Seed(T_("Save XML...")))->onClicked([this] { saveCustomTheme(); });
+		preset->addChild(Button::Seed(T_("Import XML...")))->onClicked([this] { importTheme(); });
+		preset->addChild(Button::Seed(T_("Open folder")))->onClicked([this] { openThemeDirectory(); });
+		preset->addChild(Button::Seed(T_("Reload")))->onClicked([this] { reloadThemePresets(); });
+
+		auto colors = cur->addChild(Grid::Seed(8, 3));
+		colors->column(0).mode = GridInfo::FILL;
+		colors->column(1).size = 90;
+		colors->column(1).mode = GridInfo::STATIC;
+
+		addThemeColor(colors, T_("Window background"), SettingsManager::THEME_BACKGROUND_COLOR);
+		addThemeColor(colors, T_("Control surface"), SettingsManager::THEME_SURFACE_COLOR);
+		addThemeColor(colors, T_("Primary text"), SettingsManager::THEME_TEXT_COLOR);
+		addThemeColor(colors, T_("Disabled text"), SettingsManager::THEME_DISABLED_TEXT_COLOR);
+		addThemeColor(colors, T_("Borders and separators"), SettingsManager::THEME_BORDER_COLOR);
+		addThemeColor(colors, T_("Selection and accent"), SettingsManager::THEME_ACCENT_COLOR);
+		addThemeColor(colors, T_("Selected text"), SettingsManager::THEME_HIGHLIGHT_TEXT_COLOR);
+
+		auto reset = colors->addChild(Button::Seed(T_("Reset palette")));
+		colors->setWidget(reset, 7, 2);
+		reset->onClicked([this] { resetThemeColors(); });
+		reloadThemePresets();
+	}
+
+	themeGrid->addChild(Label::Seed(T_("High contrast always uses Windows system colors. Chat, transfer and other semantic colors remain under Appearance > Styles.")));
+
 	PropPage::read(items);
 	readScaledIntItems();
 	fillTempShares();
@@ -307,6 +369,10 @@ void ExperimentalPage::write() {
 	writeScaledIntItems();
 
 	auto settings = SettingsManager::getInstance();
+	settings->set(SettingsManager::THEME_MODE, themeMode->getSelected());
+	for(const auto& item: themeColors) {
+		settings->set(static_cast<SettingsManager::IntSetting>(item.setting), static_cast<int>(item.color));
+	}
 	auto clamp = [settings](SettingsManager::IntSetting setting, int minimum) {
 		if(settings->get(setting) < minimum) settings->set(setting, minimum);
 	};
@@ -328,6 +394,159 @@ void ExperimentalPage::write() {
 	clamp(SettingsManager::MAX_PARTIAL_LIST_BYTES, 1024);
 	clamp(SettingsManager::CHAT_LINK_MAX_LENGTH, 1);
 	clamp(SettingsManager::RICH_TEXT_MAX_SIZE, 1024);
+}
+
+void ExperimentalPage::addThemeColor(GridPtr target, const tstring& text, int setting) {
+	const size_t row = themeColors.size();
+	target->addChild(Label::Seed(text));
+
+	Label::Seed previewSeed;
+	previewSeed.style |= SS_CENTER;
+	previewSeed.exStyle |= WS_EX_CLIENTEDGE;
+	auto preview = target->addChild(previewSeed);
+
+	auto choose = target->addChild(Button::Seed(T_("Choose...")));
+	const auto index = themeColors.size();
+	choose->onClicked([this, index] { chooseThemeColor(index); });
+	themeColors.push_back({ preview, setting, static_cast<COLORREF>(
+		SettingsManager::getInstance()->get(static_cast<SettingsManager::IntSetting>(setting))) });
+	target->setWidget(preview, row, 1);
+	target->setWidget(choose, row, 2);
+	updateThemeColor(index);
+}
+
+void ExperimentalPage::chooseThemeColor(size_t index) {
+	auto& item = themeColors.at(index);
+	ColorDialog::ColorParams params(item.color);
+	if(ColorDialog(this).open(params)) {
+		item.color = params.getColor();
+		updateThemeColor(index);
+		updateThemePresetSelection();
+	}
+}
+
+void ExperimentalPage::resetThemeColors() {
+	applyThemePalette(dwt::Appearance::defaultPalette());
+}
+
+void ExperimentalPage::updateThemeColor(size_t index) {
+	auto& item = themeColors.at(index);
+	const auto luminance = GetRValue(item.color) * 299 + GetGValue(item.color) * 587 + GetBValue(item.color) * 114;
+	item.preview->setText(Text::toT("#" + Util::cssColor(item.color)));
+	item.preview->setColor(luminance < 150000 ? RGB(255, 255, 255) : RGB(0, 0, 0), item.color);
+	item.preview->redraw(true);
+}
+
+void ExperimentalPage::reloadThemePresets(const std::string& selectedPath) {
+	const auto current = currentThemePalette();
+	themePresets = ThemeManager::getThemes();
+	themePreset->clear();
+	int selected = -1;
+	for(size_t i = 0; i < themePresets.size(); ++i) {
+		const auto& theme = themePresets[i];
+		themePreset->addValue(theme.name + (theme.path.empty() ? dwt::tstring() : T_(" (XML)")));
+		if(!selectedPath.empty() && Util::stricmp(theme.path, selectedPath) == 0) selected = static_cast<int>(i);
+	}
+	themePreset->addValue(T_("Custom"));
+	if(selected < 0) {
+		for(size_t i = 0; i < themePresets.size(); ++i) {
+			const auto& palette = themePresets[i].palette;
+			if(palette.background == current.background && palette.surface == current.surface && palette.text == current.text &&
+				palette.disabledText == current.disabledText && palette.border == current.border && palette.accent == current.accent &&
+				palette.highlightText == current.highlightText) {
+				selected = static_cast<int>(i);
+				break;
+			}
+		}
+	}
+	themePreset->setSelected(selected < 0 ? static_cast<int>(themePresets.size()) : selected);
+	if(!selectedPath.empty() && selected >= 0) applyThemePalette(themePresets[selected].palette);
+}
+
+void ExperimentalPage::applyThemePreset() {
+	const auto selected = themePreset->getSelected();
+	if(selected >= 0 && static_cast<size_t>(selected) < themePresets.size()) applyThemePalette(themePresets[selected].palette);
+}
+
+void ExperimentalPage::applyThemePalette(const dwt::Appearance::Palette& palette) {
+	const COLORREF colors[] = { palette.background, palette.surface, palette.text, palette.disabledText, palette.border, palette.accent, palette.highlightText };
+	for(size_t i = 0; i < themeColors.size() && i < std::size(colors); ++i) {
+		themeColors[i].color = colors[i];
+		updateThemeColor(i);
+	}
+	updateThemePresetSelection();
+}
+
+dwt::Appearance::Palette ExperimentalPage::currentThemePalette() const {
+	if(themeColors.size() < 7) return dwt::Appearance::defaultPalette();
+	return { themeColors[0].color, themeColors[1].color, themeColors[2].color, themeColors[3].color, themeColors[4].color, themeColors[5].color, themeColors[6].color };
+}
+
+void ExperimentalPage::updateThemePresetSelection() {
+	if(!themePreset) return;
+	const auto current = currentThemePalette();
+	for(size_t i = 0; i < themePresets.size(); ++i) {
+		const auto& palette = themePresets[i].palette;
+		if(palette.background == current.background && palette.surface == current.surface && palette.text == current.text &&
+			palette.disabledText == current.disabledText && palette.border == current.border && palette.accent == current.accent &&
+			palette.highlightText == current.highlightText) {
+			themePreset->setSelected(static_cast<int>(i));
+			return;
+		}
+	}
+	themePreset->setSelected(static_cast<int>(themePresets.size()));
+}
+
+void ExperimentalPage::saveCustomTheme() {
+	const auto directory = ThemeManager::getDirectory();
+	File::ensureDirectory(directory);
+	tstring target = _T("Custom theme.xml");
+	if(!dwt::SaveDialog(this).addFilter(T_("DC++ theme files"), _T("*.xml")).setDefaultExtension(_T("xml"))
+		.setInitialDirectory(Text::toT(directory)).setTitle(T_("Save custom theme")).open(target)) {
+		updateThemePresetSelection();
+		return;
+	}
+
+	try {
+		const auto savedPath = ThemeManager::saveTheme(Text::fromT(target), currentThemePalette());
+		const auto installedPath = ThemeManager::getImportPath(savedPath);
+		if(Util::stricmp(savedPath, installedPath) != 0 && File::getSize(installedPath) != -1 &&
+			dwt::MessageBox(this).show(T_("A theme with this file name already exists in the Themes directory. Replace it?"), T_("Save custom theme"),
+				dwt::MessageBox::BOX_YESNO, dwt::MessageBox::BOX_ICONQUESTION) != IDYES) {
+			reloadThemePresets();
+			return;
+		}
+		reloadThemePresets(ThemeManager::importTheme(savedPath));
+	} catch(const Exception& e) {
+		dwt::MessageBox(this).show(T_("Unable to save the theme:\r\n") + Text::toT(e.getError()), T_("Save custom theme"),
+			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
+		updateThemePresetSelection();
+	}
+}
+
+void ExperimentalPage::importTheme() {
+	tstring source;
+	if(!dwt::LoadDialog(this).addFilter(T_("DC++ theme files"), _T("*.xml")).addFilter(T_("All files"), _T("*.*"))
+		.setInitialDirectory(Text::toT(ThemeManager::getDirectory())).open(source)) return;
+
+	try {
+		const auto sourcePath = Text::fromT(source);
+		ThemeManager::load(sourcePath);
+		const auto target = ThemeManager::getImportPath(sourcePath);
+		if(Util::stricmp(sourcePath, target) != 0 && File::getSize(target) != -1 &&
+			dwt::MessageBox(this).show(T_("A theme with this file name already exists. Replace it?"), T_("Import theme"),
+				dwt::MessageBox::BOX_YESNO, dwt::MessageBox::BOX_ICONQUESTION) != IDYES) return;
+		reloadThemePresets(ThemeManager::importTheme(sourcePath));
+	} catch(const Exception& e) {
+		dwt::MessageBox(this).show(T_("Unable to import the theme:\r\n") + Text::toT(e.getError()), T_("Import theme"),
+			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
+	}
+}
+
+void ExperimentalPage::openThemeDirectory() {
+	const auto directory = ThemeManager::getDirectory();
+	File::ensureDirectory(directory);
+	WinUtil::openFile(Text::toT(directory));
 }
 
 void ExperimentalPage::layoutTempShares() {

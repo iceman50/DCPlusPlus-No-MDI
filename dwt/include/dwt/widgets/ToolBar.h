@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -208,6 +208,8 @@ protected:
 	virtual ~ToolBar()
 	{}
 
+	/** Preserve command and application custom-draw handling before supplying
+	 * framework-owned toolbar chrome. */
 	virtual bool handleMessage( const MSG & msg, LRESULT & retVal );
 
 private:

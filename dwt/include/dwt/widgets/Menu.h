@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -38,7 +38,10 @@
 
 #include "../CanvasClasses.h"
 #include "../Dispatchers.h"
+#include "../Appearance.h"
 #include <dwt/Theme.h>
+
+#include <optional>
 
 namespace dwt {
 
@@ -59,9 +62,9 @@ class Menu
 
 	typedef Dispatchers::VoidVoid<> Dispatcher;
 
-	static struct Colors {
+	struct Colors {
 		Colors();
-		void reset();
+		void update(const Appearance& appearance);
 
 		COLORREF text;
 		COLORREF gray;
@@ -70,7 +73,7 @@ class Menu
 		COLORREF highlightBackground;
 		COLORREF highlightText;
 		COLORREF titleText;
-	} colors;
+	};
 
 public:
 	typedef Menu ThisType;
@@ -225,7 +228,8 @@ public:
 	template<typename T>
 	static bool handlePainting(T& t) {
 		ItemDataWrapper* wrapper = reinterpret_cast<ItemDataWrapper*>(t.itemData);
-		return wrapper->menu->handlePainting(t, *wrapper);
+		return wrapper && wrapper->menu ?
+			wrapper->menu->handlePainting(t, *wrapper) : false;
 	}
 
 protected:
@@ -279,15 +283,22 @@ private:
 	bool handlePainting(DRAWITEMSTRUCT& drawInfo, ItemDataWrapper& wrapper);
 	bool handlePainting(MEASUREITEMSTRUCT& measureInfo, ItemDataWrapper& wrapper);
 
-	LRESULT handleNCPaint(UINT message, WPARAM wParam, long menuWidth);
+	LRESULT handleNCPaint(UINT message, WPARAM wParam, LPARAM lParam);
 
 	Menu* getRootMenu() { return parentMenu ? parentMenu->getRootMenu() : this; }
+	const Menu* getRootMenu() const { return parentMenu ? parentMenu->getRootMenu() : this; }
+	Colors& getColors() { return getRootMenu()->colors; }
+	const Colors& getColors() const { return getRootMenu()->colors; }
+	void updateAppearance();
+	void applyBackground();
+	void setOwnerDrawn(bool value);
 
 	Menu* parentMenu; /// only defined for sub-menus; this is a link to their container menu
 	HMENU itsHandle;
 	Widget* parent;
 
 	bool ownerDrawn;
+	bool requestedOwnerDrawn;
 	bool popup;
 	bool commandMessages;
 
@@ -302,6 +313,13 @@ private:
 	commands_type commands; // just a pointer because sub-menus don't need this
 
 	Theme theme;
+	Colors colors;
+	BrushPtr backgroundBrush;
+	Appearance* appearance;
+	Appearance::CallbackIter appearanceCallback;
+	bool observingAppearance;
+	std::optional<Widget::CallbackIter> ncPaintCallback;
+	std::optional<Widget::CallbackIter> ncActivateCallback;
 
 	Point iconSize;
 

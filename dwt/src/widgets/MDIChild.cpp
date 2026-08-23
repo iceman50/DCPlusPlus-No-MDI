@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -57,6 +57,8 @@ void MDIChild::createMDIChild( const Seed& cs ) {
 	if(active) {
 		getParent()->sendMessage(WM_MDIACTIVATE, (WPARAM)active);
 	}
+	::PostMessage(handle(), ::RegisterWindowMessage(
+		_T("dwt.Widget.FinalizeAppearance")), 0, 0);
 }
 
 bool MDIChild::handleMessage(const MSG& msg, LRESULT& retVal) {

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -31,8 +31,13 @@
 
 #include <dwt/widgets/Header.h>
 
+#include <dwt/WidgetCreator.h>
+#include <dwt/widgets/Button.h>
+#include <dwt/widgets/TextBox.h>
+
 #include <algorithm>
-#include <uxtheme.h>
+
+#include "AppearanceDraw.h"
 
 namespace dwt {
 
@@ -117,29 +122,70 @@ int Header::insert(const tstring& header, int width, LPARAM lParam, int after) {
 
 namespace {
 
-BOOL CALLBACK styleHeaderFilterChild(HWND child, LPARAM fontParam) {
-	if(fontParam) {
-		::SendMessage(child, WM_SETFONT, static_cast<WPARAM>(fontParam), TRUE);
+struct HeaderFilterStyle {
+	Header* header;
+	HFONT font;
+	bool clearColors;
+};
+
+BOOL CALLBACK styleHeaderFilterChild(HWND child, LPARAM contextParam) {
+	auto& context = *reinterpret_cast<HeaderFilterStyle*>(contextParam);
+	if(context.font) {
+		::SendMessage(child, WM_SETFONT,
+			reinterpret_cast<WPARAM>(context.font), TRUE);
 	}
-	::SetWindowTheme(child, L"Explorer", nullptr);
+
+	/* Filter controls are private HWNDs created by the header. Attach them so
+	DWT's ordinary color dispatch and appearance lifetime apply to them too. */
+	Control* wrapper = hwnd_cast<Control*>(child);
+	if(!wrapper) {
+		TCHAR name[32] = { };
+		::GetClassName(child, name, static_cast<int>(_countof(name)));
+		if(::lstrcmpi(name, WC_EDIT) == 0) {
+			wrapper = WidgetCreator<TextBox>::attach(context.header, child);
+		} else if(::lstrcmpi(name, WC_BUTTON) == 0) {
+			wrapper = WidgetCreator<Button>::attach(context.header, child);
+		}
+	}
+	if(wrapper) {
+		if(context.header->hasExplicitColors()) {
+			wrapper->setColor(context.header->getExplicitTextColor(),
+				context.header->getExplicitBackgroundColor());
+		} else if(context.clearColors) {
+			wrapper->clearColor();
+		}
+	}
+	::InvalidateRect(child, nullptr, TRUE);
 	return TRUE;
 }
 
 }
 
-void Header::applyFilterStyles() {
+void Header::applyFilterStyles(bool clearColors) {
 	if(!handle()) {
 		return;
 	}
 
 	auto font = getFont();
+	HeaderFilterStyle context = { this,
+		font ? font->handle() : nullptr, clearColors };
 	::EnumChildWindows(handle(), styleHeaderFilterChild,
-		reinterpret_cast<LPARAM>(font ? font->handle() : nullptr));
+		reinterpret_cast<LPARAM>(&context));
 }
 
 void Header::setFontImpl() {
 	BaseType::setFontImpl();
 	applyFilterStyles();
+}
+
+void Header::setColorImpl(COLORREF text, COLORREF background) {
+	BaseType::setColorImpl(text, background);
+	applyFilterStyles();
+}
+
+void Header::clearColorImpl() {
+	BaseType::clearColorImpl();
+	applyFilterStyles(true);
 }
 
 void Header::setFilterBar(bool value) {
@@ -152,15 +198,32 @@ bool Header::handleMessage(const MSG& msg, LRESULT& retVal) {
 	if(msg.message == WM_PARENTNOTIFY && LOWORD(msg.wParam) == WM_CREATE) {
 		auto font = getFont();
 		if(HWND child = reinterpret_cast<HWND>(msg.lParam)) {
+			HeaderFilterStyle context = { this,
+				font ? font->handle() : nullptr, false };
 			styleHeaderFilterChild(child,
-				reinterpret_cast<LPARAM>(font ? font->handle() : nullptr));
+				reinterpret_cast<LPARAM>(&context));
 		}
 		applyFilterStyles();
 	} else if(msg.message == WM_THEMECHANGED || msg.message == WM_SETTINGCHANGE ||
 		msg.message == WM_SYSCOLORCHANGE) {
 		applyFilterStyles();
 	}
-	return handled;
+
+	if(msg.message != WM_NOTIFY || !msg.lParam ||
+		reinterpret_cast<NMHDR*>(msg.lParam)->code != NM_CUSTOMDRAW ||
+		!isManualAppearance() ||
+		getAppearancePolicy() == AppearancePolicy::Native) {
+		return handled;
+	}
+	/* Application custom draw owns any stage for which it returned a
+	non-default result. */
+	if(handled && retVal != 0 && retVal != CDRF_DODEFAULT) {
+		return true;
+	}
+	retVal = appearance_detail::drawHeader(*this,
+		*reinterpret_cast<NMCUSTOMDRAW*>(msg.lParam),
+		getAppearance().getPalette());
+	return retVal != CDRF_DODEFAULT || handled;
 }
 
 int Header::findDataImpl(LPARAM data, int start) {

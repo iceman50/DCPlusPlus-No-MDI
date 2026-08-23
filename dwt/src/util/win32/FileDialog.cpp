@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2026, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -22,7 +22,9 @@
 
 #include <dwt/util/win32/FileDialog.h>
 
+#include <dwt/Application.h>
 #include <dwt/DWTException.h>
+#include <dwt/util/win32/NativeDialogAppearance.h>
 
 #include <sstream>
 
@@ -533,6 +535,9 @@ bool showFileDialogItems(const FileDialogOptions& options, std::vector<FileDialo
 		}
 	}
 
+	/* IFileDialog owns a DirectUI client surface. Preserve that composition while
+	 * NativeDialogAppearance themes the conventional frame and child controls. */
+	NativeDialogAppearance appearance(Application::instance().getAppearance(), true);
 	result = dialog->Show(options.owner);
 	if(adviseCookie) {
 		dialog->Unadvise(adviseCookie);

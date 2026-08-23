@@ -1,3 +1,4 @@
+<!-- Copyright (C) 2001-2026 iceman50 -->
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="https://www.w3.org/1999/xhtml">
 <head>
@@ -8,8 +9,40 @@
 <body>
 <h1>Experimental</h1>
 <p>This page is a top-level Settings category immediately above <em>Plugins</em> and collects experimental sharing, transfer,
-hashing, RTF0, and defensive protocol controls. The controls are divided among the <em>Chat and sharing</em>,
-<em>Transfers and hashing</em>, and <em>Protocol limits</em> tabs.</p>
+hashing, RTF0, defensive protocol, and application theme controls. The controls are divided among the
+<em>Chat and sharing</em>, <em>Transfers and hashing</em>, <em>Protocol limits</em>, and <em>Theme</em> tabs.</p>
+
+<h2>Application theme</h2>
+<dl style="margin-left: 40px;">
+  <dt>Color mode</dt>
+  <dd><em>Follow Windows</em> uses the system application preference where Windows provides one. <em>Light</em> and
+  <em>Dark</em> select a mode explicitly. On Windows 7 and Windows 8, <em>Follow Windows</em> uses the native light
+  appearance because those versions do not expose an application dark preference.</dd>
+  <dt>Dark theme palette</dt>
+  <dd>The preset list provides several built-in dark palettes and every valid XML theme found in the per-user
+  <code>Themes</code> directory. <em>Save XML</em> writes the current palette and installs it in that directory, while
+  <em>Import XML</em> validates an existing file and copies it there. <em>Custom</em> represents a palette that does not
+  match a loaded preset and does not save it automatically.
+  <em>Open folder</em> opens the directory so XML files can be added or edited directly; use <em>Reload</em> afterward.
+  Editing an individual color selects <em>Custom</em>. The reset button restores the default dark palette. Palette selection sets the background,
+  surface, text, disabled-text, border, accent, and selected-text colors used by the dark theme. DC++ uses the same manual palette renderer on Windows 7 and later;
+  it does not require a Windows 10 dark visual style. Native control behavior, dimensions, input, and accessibility
+  are retained while DWT paints windows, menus, tabs, buttons, check boxes, group boxes, lists, headers, status and
+  tool bars, scroll bars, and other framework chrome. The renderer reproduces hot, pressed, checked, default,
+  disabled, keyboard-cue, and focus states. Chat formatting and other colors selected under
+  <em>Appearance &gt; Styles</em> remain application content and are not replaced by the chrome palette.</dd>
+  <dt>Theme XML format</dt>
+  <dd>Theme files are UTF-8 XML documents no larger than 64 KiB. Each color is an RGB value in <code>#RRGGBB</code> form:
+  <pre>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;DCPlusPlusTheme Name="Example dark"&gt;
+  &lt;Palette Background="#202020" Surface="#2D2D30" Text="#F1F1F1"
+    DisabledText="#A0A0A0" Border="#494949" Accent="#0078D7"
+    HighlightText="#FFFFFF" /&gt;
+&lt;/DCPlusPlusTheme&gt;</pre></dd>
+  <dt>High contrast</dt>
+  <dd>Windows high contrast takes precedence over every color-mode and palette choice. DC++ then uses the
+  current Windows system colors so contrast and accessibility choices remain under operating-system control.</dd>
+</dl>
 
 <h2>Rich text and temporary shares</h2>
 <dl style="margin-left: 40px;">

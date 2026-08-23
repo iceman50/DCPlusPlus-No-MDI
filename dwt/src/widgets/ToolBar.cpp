@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -31,6 +31,11 @@
 
 #include <dwt/widgets/ToolBar.h>
 
+#include <dwt/WidgetCreator.h>
+#include <dwt/widgets/ToolTip.h>
+
+#include "AppearanceDraw.h"
+
 namespace dwt {
 
 const TCHAR ToolBar::windowClass[] = TOOLBARCLASSNAME;
@@ -58,6 +63,14 @@ void ToolBar::create(const Seed& cs) {
 
 	//// Telling the toolbar what the size of the TBBUTTON struct is
 	sendMessage(TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON));
+
+	/* TBSTYLE_TOOLTIPS creates a private tooltip HWND. Attaching it makes it
+	participate in framework appearance updates without changing toolbar input. */
+	if(HWND tooltip = reinterpret_cast<HWND>(sendMessage(TB_GETTOOLTIPS))) {
+		if(!hwnd_cast<Widget*>(tooltip)) {
+			WidgetCreator<ToolTip>::attach(this, tooltip);
+		}
+	}
 
 	onRaw([this](WPARAM, LPARAM lParam) { return handleDropDown(lParam); }, Message(WM_NOTIFY, TBN_DROPDOWN));
 	onRaw([this](WPARAM, LPARAM lParam) { return handleToolTip(lParam); }, Message(WM_NOTIFY, TBN_GETINFOTIP));
@@ -216,7 +229,21 @@ bool ToolBar::handleMessage( const MSG & msg, LRESULT & retVal ) {
 			}
 		}
 	}
-	return BaseType::handleMessage(msg, retVal);
+	const bool handled = BaseType::handleMessage(msg, retVal);
+	if(msg.message != WM_NOTIFY || !msg.lParam ||
+		reinterpret_cast<NMHDR*>(msg.lParam)->code != NM_CUSTOMDRAW ||
+		!isManualAppearance() ||
+		getAppearancePolicy() == AppearancePolicy::Native) {
+		return handled;
+	}
+
+	if(handled && retVal != 0 && retVal != CDRF_DODEFAULT) {
+		return true;
+	}
+	retVal = appearance_detail::drawToolBar(*this,
+		*reinterpret_cast<NMTBCUSTOMDRAW*>(msg.lParam),
+		getAppearance().getPalette());
+	return retVal != CDRF_DODEFAULT || handled;
 }
 
 LRESULT ToolBar::handleDropDown(LPARAM lParam) {

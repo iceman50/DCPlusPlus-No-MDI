@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -37,7 +37,10 @@
 #define DWT_aspects_Colorable_h
 
 #include "../Message.h"
+#include "../Widget.h"
 #include "../resources/Brush.h"
+
+#include <optional>
 
 namespace dwt { namespace aspects {
 
@@ -49,14 +52,35 @@ class Colorable {
 	WidgetType& W() { return *static_cast<WidgetType*>(this); }
 
 public:
+	Colorable() : colorsExplicit(false), textColor(NaC), backgroundColor(NaC) { }
+
 	void setColor(COLORREF text, COLORREF background) {
+		colorsExplicit = true;
+		textColor = text;
+		backgroundColor = background;
 		W().setColorImpl(text, background);
+	}
+
+	/** Return true when colors were explicitly supplied by the application. */
+	bool hasExplicitColors() const { return colorsExplicit; }
+	COLORREF getExplicitTextColor() const { return textColor; }
+	COLORREF getExplicitBackgroundColor() const { return backgroundColor; }
+
+	/** Return the widget to application appearance or native color inheritance. */
+	void clearColor() {
+		colorsExplicit = false;
+		textColor = backgroundColor = NaC;
+		W().clearColorImpl();
 	}
 
 protected:
 	virtual void setColorImpl(COLORREF text, COLORREF background) {
+		if(colorCallback) {
+			W().clearInternalCallback(Message(WM_CTLCOLOR), *colorCallback);
+		}
 		BrushPtr brush { new Brush { background } };
-		W().setCallback(Message(WM_CTLCOLOR), [text, background, brush](const MSG& msg, LRESULT& ret) -> bool {
+		colorCallback = W().addInternalCallback(Message(WM_CTLCOLOR),
+			[text, background, brush](const MSG& msg, LRESULT& ret) -> bool {
 			HDC dc = reinterpret_cast<HDC>(msg.wParam);
 			::SetTextColor(dc, text);
 			::SetBkColor(dc, background);
@@ -64,6 +88,24 @@ protected:
 			return true;
 		});
 	}
+
+	virtual void clearColorImpl() {
+		if(colorCallback) {
+			W().clearInternalCallback(Message(WM_CTLCOLOR), *colorCallback);
+			colorCallback.reset();
+		}
+		if(W().handle()) {
+			::InvalidateRect(W().handle(), nullptr, TRUE);
+		}
+	}
+
+private:
+	bool colorsExplicit;
+	COLORREF textColor;
+	COLORREF backgroundColor;
+	/* Framework color plumbing uses Widget's internal callback channel so public
+	callback replacement cannot invalidate this iterator. */
+	std::optional<Widget::CallbackIter> colorCallback;
 };
 
 } }

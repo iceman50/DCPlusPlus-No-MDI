@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2022, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -30,6 +30,8 @@
 */
 
 #include <dwt/widgets/Link.h>
+
+#include <dwt/Appearance.h>
 
 namespace dwt {
 
@@ -73,6 +75,45 @@ Point Link::getPreferredSize() {
 	SIZE size = { 0 };
 	sendMessage(LM_GETIDEALSIZE, getRoot()->getClientSize().x, reinterpret_cast<LPARAM>(&size));
 	return Point(size.cx, size.cy);
+}
+
+bool Link::handleMessage(const MSG& msg, LRESULT& retVal) {
+	auto handled = BaseType::handleMessage(msg, retVal);
+	if(!isManualAppearance() || msg.message != WM_NOTIFY ||
+		!msg.lParam || (retVal && retVal != CDRF_DODEFAULT)) {
+		return handled;
+	}
+
+	auto data = reinterpret_cast<NMCUSTOMDRAW*>(msg.lParam);
+	if(data->hdr.code == NM_CUSTOMDRAW && handleCustomDraw(*data, retVal)) {
+		return true;
+	}
+	return handled;
+}
+
+bool Link::handleCustomDraw(NMCUSTOMDRAW& data, LRESULT& retVal) {
+	if(data.dwDrawStage == CDDS_PREPAINT) {
+		retVal = CDRF_NOTIFYITEMDRAW;
+		return true;
+	}
+	if(data.dwDrawStage != CDDS_ITEMPREPAINT) {
+		return false;
+	}
+
+	const auto& palette = getAppearance().getPalette();
+	auto foreground = hasExplicitColors() ? getExplicitTextColor() : palette.accent;
+	const auto background = hasExplicitColors() ?
+		getExplicitBackgroundColor() : palette.background;
+	if(!getEnabled() || (data.uItemState & CDIS_DISABLED)) {
+		foreground = palette.disabledText;
+	} else if(data.uItemState & (CDIS_HOT | CDIS_SELECTED)) {
+		foreground = Appearance::blend(foreground, palette.highlightText, 64);
+	}
+	::SetTextColor(data.hdc, foreground);
+	::SetBkColor(data.hdc, background);
+	::SetBkMode(data.hdc, TRANSPARENT);
+	retVal = CDRF_NEWFONT;
+	return true;
 }
 
 }

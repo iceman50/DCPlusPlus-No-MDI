@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -34,6 +34,8 @@
 #include <dwt/CanvasClasses.h>
 #include <dwt/resources/ImageList.h>
 #include <dwt/util/check.h>
+
+#include "AppearanceDraw.h"
 
 namespace dwt {
 
@@ -194,6 +196,25 @@ void Button::onFocusChanged(std::function<void (bool)> f) {
 
 bool Button::isHot() const {
 	return (sendMessage(BM_GETSTATE) & BST_HOT) != 0;
+}
+
+bool Button::handleMessage(const MSG& msg, LRESULT& retVal) {
+	const bool handled = BaseType::handleMessage(msg, retVal);
+	if(msg.message != WM_NOTIFY || !msg.lParam ||
+		reinterpret_cast<NMHDR*>(msg.lParam)->code != NM_CUSTOMDRAW ||
+		!isManualAppearance() ||
+		getAppearancePolicy() == AppearancePolicy::Native) {
+		return handled;
+	}
+
+	/* A non-default result belongs to an application custom-draw callback. */
+	if(handled && retVal != 0 && retVal != CDRF_DODEFAULT) {
+		return true;
+	}
+	retVal = appearance_detail::drawButton(*this,
+		*reinterpret_cast<NMCUSTOMDRAW*>(msg.lParam),
+		getAppearance().getPalette());
+	return retVal != CDRF_DODEFAULT || handled;
 }
 
 Point Button::getPreferredSize() {

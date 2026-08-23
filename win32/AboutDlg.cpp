@@ -254,11 +254,11 @@ bool AboutDlg::handleInitDialog() {
 
 		cur->addChild(Label::Seed(WinUtil::createIcon(IDI_DCPP, 48)));
 
-		ls.caption = _T(FULL_APPNAME) _T(" v") _T(VERSIONSTRING) _T("\n(c) Copyright 2001-2025 Jacek Sieka\n");
-		ls.caption += T_("Ex-main project contributors: Todd Pederzani, poy\nEx-codeveloper: Per Lind\303\251n\nOriginal DC++ logo design: Martin Skogevall\nGraphics: Radox and various GPL and CC authors\n\nDC++ is licenced under GPL.");
+		ls.caption = _T(FULL_APPNAME) _T(" v") _T(VERSIONSTRING) _T("\n(c) Copyright 2026 iceman50\n");
+		ls.caption += T_("Based on DC++");
 		cur->addChild(ls);
 
-		cur->addChild(Link::Seed(_T("https://dcplusplus.sourceforge.io/"), true));
+		cur->addChild(Link::Seed(_T("https://github.com/iceman50/DCPlusPlus-No-MDI"), true));
 
 		auto ts = WinUtil::Seeds::Dialog::textBox;
 		ts.style |= ES_READONLY;

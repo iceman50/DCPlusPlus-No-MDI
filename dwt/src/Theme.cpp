@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -37,7 +37,7 @@
 
 namespace dwt {
 
-Theme::Theme() : theme(0)
+Theme::Theme() : theme(0), w(nullptr)
 {
 }
 
@@ -47,16 +47,27 @@ Theme::~Theme() {
 
 void Theme::load(const tstring& classes, Widget* w_, bool handleThemeChanges) {
 	w = w_;
+	this->classes = classes;
 	dwtassert(w, "Theme: no widget set");
 
-	open(classes);
+	reload();
 
 	if(handleThemeChanges) {
-		w->addCallback(Message(WM_THEMECHANGED), Dispatchers::VoidVoid<0, false>([this, classes] {
-			close();
-			open(classes);
+		w->addCallback(Message(WM_THEMECHANGED), Dispatchers::VoidVoid<0, false>([this] {
+			reload();
 		}));
 	}
+}
+
+void Theme::reload() {
+	close();
+	if(w && !classes.empty()) {
+		open(classes);
+	}
+}
+
+void Theme::unload() {
+	close();
 }
 
 void Theme::drawBackground(Canvas& canvas, int part, int state, const Rectangle& rect, bool drawParent, std::optional<Rectangle> clip) {

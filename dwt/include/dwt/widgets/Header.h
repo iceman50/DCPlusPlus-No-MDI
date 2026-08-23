@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -154,8 +154,10 @@ private:
 	static const TCHAR windowClass[];
 	ImageListPtr imageList;
 
-	void applyFilterStyles();
+	void applyFilterStyles(bool clearColors = false);
 	void setFontImpl();
+	virtual void setColorImpl(COLORREF text, COLORREF background);
+	virtual void clearColorImpl();
 
 	// aspects::Collection
 	void eraseImpl(int row);

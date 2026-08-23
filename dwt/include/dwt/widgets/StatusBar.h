@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -142,6 +142,8 @@ public:
 
 	int refresh();
 
+	/** Dispatch application paint callbacks first, then render status parts from
+	 * the active appearance palette when manual mode is enabled. */
 	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
 
 protected:
@@ -179,6 +181,7 @@ private:
 		F rightClickF;
 		F dblClickF;
 
+		unsigned preferredSize(StatusBar* bar) const;
 		void updateSize(StatusBar* bar, bool alwaysResize);
 	};
 
@@ -201,6 +204,7 @@ private:
 	enum { MAX_LINES = 10 }; /// @todo configurable?
 
 	Part& getPart(unsigned part);
+	void updatePartSizes();
 	void layoutSections();
 	void layoutSections(const Point& sz);
 	Part* getClickedPart();

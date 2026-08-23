@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -52,7 +52,13 @@ public:
 	}
 
 	Control* getChild() {
-		return hwnd_cast<Control*>(::GetWindow(static_cast<WidgetType*>(this)->handle(), GW_CHILD));
+		for(HWND child = ::GetWindow(static_cast<WidgetType*>(this)->handle(), GW_CHILD);
+			child; child = ::GetWindow(child, GW_HWNDNEXT)) {
+			if(auto control = hwnd_cast<Control*>(child)) {
+				return control;
+			}
+		}
+		return nullptr;
 	}
 };
 

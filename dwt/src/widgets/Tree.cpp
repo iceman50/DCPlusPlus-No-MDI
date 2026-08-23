@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -34,8 +34,11 @@
 #include <algorithm>
 
 #include <dwt/DWTException.h>
+#include <dwt/resources/Brush.h>
 #include <dwt/widgets/Header.h>
 #include <dwt/WidgetCreator.h>
+
+#include <uxtheme.h>
 
 namespace dwt {
 
@@ -65,6 +68,9 @@ void Tree::create( const Seed & cs )
 
 	BaseType::create(mySeed);
 	tree = WidgetCreator<TreeView>::create(this, treeSeed);
+	/* The composite owns item colors and custom drawing, while the embedded
+	TreeView still needs framework chrome such as scroll decorations. */
+	tree->setAppearancePolicy(AppearancePolicy::FrameworkChrome);
 
 	if(treeSeed.tvExStyle) {
 		setExtendedStyle(treeSeed.tvExStyle, treeSeed.tvExStyle);
@@ -89,13 +95,16 @@ void Tree::create( const Seed & cs )
 	forwardMsg(Message(WM_SETREDRAW));
 
 	tree->onCustomDraw([this](NMTVCUSTOMDRAW& x) {
+		LRESULT result = drawAppearance(x);
 		if(customDraw) {
-			auto result = customDraw(x);
-			if(result && result != CDRF_DODEFAULT) {
-				return result;
+			auto customResult = customDraw(x);
+			if(customResult == CDRF_SKIPDEFAULT) {
+				return customResult;
 			}
+			result |= customResult;
 		}
-		return draw(x);
+		result |= draw(x);
+		return result;
 	});
 
 	// Establish a real default GUI font on the composite and forward it to the
@@ -113,6 +122,32 @@ void Tree::create( const Seed & cs )
 		}
 	});
 	layout();
+}
+
+void Tree::appearanceChanged() {
+	if(!tree || !tree->handle()) {
+		return;
+	}
+	if(isManualAppearance()) {
+		::SetWindowTheme(treeHandle(), L"", L"");
+	} else {
+		::SetWindowTheme(treeHandle(), nullptr, nullptr);
+	}
+	if(!hasExplicitColors()) {
+		clearColorImpl();
+	}
+	setLineColor(isManualAppearance() ? getAppearance().getPalette().border :
+		CLR_DEFAULT);
+	BaseType::appearanceChanged();
+	::InvalidateRect(treeHandle(), nullptr, TRUE);
+}
+
+void Tree::clearColorImpl() {
+	const auto& appearance = getAppearance();
+	setColorImpl(isManualAppearance() ? appearance.getPalette().text :
+		Color::predefined(COLOR_WINDOWTEXT),
+		isManualAppearance() ? appearance.getPalette().background :
+		Color::predefined(COLOR_WINDOW));
 }
 
 void Tree::setFontImpl() {
@@ -717,6 +752,110 @@ LRESULT Tree::postPaintItem(NMTVCUSTOMDRAW& nmcd) {
 
 LRESULT Tree::postPaint(NMTVCUSTOMDRAW& nmcd) {
 	return CDRF_DODEFAULT;
+}
+
+LRESULT Tree::drawAppearance(NMTVCUSTOMDRAW& data) {
+	if(!isManualAppearance()) {
+		return CDRF_DODEFAULT;
+	}
+
+	auto palette = getAppearance().getPalette();
+	if(hasExplicitColors()) {
+		palette.text = getExplicitTextColor();
+		palette.background = getExplicitBackgroundColor();
+		palette.surface = palette.background;
+		palette.disabledText = Appearance::blend(
+			palette.text, palette.background, 145);
+	}
+	switch(data.nmcd.dwDrawStage) {
+	case CDDS_PREPAINT:
+		return CDRF_NOTIFYITEMDRAW;
+	case CDDS_ITEMPREPAINT:
+		{
+			const bool selected = (data.nmcd.uItemState & CDIS_SELECTED) != 0;
+			const bool disabled = (data.nmcd.uItemState & CDIS_DISABLED) != 0 ||
+				!getEnabled();
+			data.clrText = selected ? palette.highlightText :
+				disabled ? palette.disabledText : palette.text;
+			data.clrTextBk = selected ? palette.accent : palette.background;
+			return CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT;
+		}
+	case CDDS_ITEMPOSTPAINT:
+		paintAppearanceLabel(data);
+		return CDRF_DODEFAULT;
+	default:
+		return CDRF_DODEFAULT;
+	}
+}
+
+void Tree::paintAppearanceLabel(NMTVCUSTOMDRAW& data) {
+	const auto item = reinterpret_cast<HTREEITEM>(data.nmcd.dwItemSpec);
+	if(!item) {
+		return;
+	}
+
+	RECT nativeLabel = { 0 };
+	if(!TreeView_GetItemRect(treeHandle(), item, &nativeLabel, TRUE)) {
+		return;
+	}
+
+	TCHAR text[1024] = { 0 };
+	TVITEM value = { TVIF_HANDLE | TVIF_TEXT | TVIF_STATE, item };
+	value.stateMask = TVIS_SELECTED | TVIS_DROPHILITED;
+	value.pszText = text;
+	value.cchTextMax = static_cast<int>(_countof(text));
+	if(!TreeView_GetItem(treeHandle(), &value)) {
+		return;
+	}
+
+	auto palette = getAppearance().getPalette();
+	if(hasExplicitColors()) {
+		palette.text = getExplicitTextColor();
+		palette.background = getExplicitBackgroundColor();
+		palette.surface = palette.background;
+		palette.disabledText = Appearance::blend(
+			palette.text, palette.background, 145);
+	}
+	const bool selected = (data.nmcd.uItemState & CDIS_SELECTED) != 0 ||
+		(value.state & (TVIS_SELECTED | TVIS_DROPHILITED)) != 0;
+	const bool hot = (data.nmcd.uItemState & CDIS_HOT) != 0;
+	const bool enabled = getEnabled();
+	const auto background = selected ? palette.accent : hot ?
+		Appearance::blend(palette.background, palette.accent, 18) :
+		palette.background;
+	const auto foreground = selected ? palette.highlightText : enabled ?
+		palette.text : palette.disabledText;
+
+	RECT nativeClient = { 0 };
+	::GetClientRect(treeHandle(), &nativeClient);
+	Rectangle label(nativeLabel);
+	label.pos.x = std::max<long>(nativeClient.left, label.left() - scale(2));
+	label.size.x = std::max<long>(0,
+		std::min<long>(nativeClient.right, nativeLabel.right + scale(2)) - label.left());
+
+	FreeCanvas canvas(data.nmcd.hdc);
+	canvas.fill(label, Brush(background));
+	if(getFont()) {
+		auto selectFont = canvas.select(*getFont());
+		auto transparent = canvas.setBkMode(true);
+		canvas.setTextColor(foreground);
+		Rectangle textBounds(nativeLabel);
+		canvas.drawText(text, textBounds,
+			DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	} else {
+		auto transparent = canvas.setBkMode(true);
+		canvas.setTextColor(foreground);
+		Rectangle textBounds(nativeLabel);
+		canvas.drawText(text, textBounds,
+			DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	}
+
+	const auto uiState = static_cast<UINT>(
+		::SendMessage(treeHandle(), WM_QUERYUISTATE, 0, 0));
+	if(selected && ::GetFocus() == treeHandle() && !(uiState & UISF_HIDEFOCUS)) {
+		RECT focus = label.toRECT();
+		::DrawFocusRect(canvas.handle(), &focus);
+	}
 }
 
 LRESULT Tree::draw(NMTVCUSTOMDRAW& nmcd) {

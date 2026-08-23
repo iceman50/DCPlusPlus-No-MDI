@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -39,7 +39,9 @@
 #include "WindowsHeaders.h"
 #include "tstring.h"
 #include "CommandLine.h"
+#include "Appearance.h"
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <queue>
 
@@ -85,6 +87,10 @@ public:
 	/** Use this static function to access the Application object.
 	  */
 	static Application& instance();
+
+	/** Return the application-wide widget appearance service. */
+	Appearance& getAppearance() { return *appearance; }
+	const Appearance& getAppearance() const { return *appearance; }
 
 	/// Returns the path to the process
 	/** NOTE! <br>
@@ -210,6 +216,8 @@ private:
 	bool dispatchingAsync;
 
 	FilterList filters;
+
+	std::unique_ptr<Appearance> appearance;
 
 	/// The application should quit
 	bool quit;

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -146,6 +146,8 @@ public:
 	COLORREF setBarColor(COLORREF color);
 	COLORREF setBackgroundColor(COLORREF color);
 
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
+
 protected:
 	/// CTOR Taking pointer to parent
 	explicit ProgressBar( Widget * parent );
@@ -159,6 +161,12 @@ private:
 	friend class ChainingDispatcher;
 	static const TCHAR windowClass[];
 	unsigned stepSize;
+	COLORREF barColor;
+	COLORREF backgroundColor;
+	bool barColorExplicit;
+	bool backgroundColorExplicit;
+
+	void handlePainting(NMCUSTOMDRAW& data);
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -218,7 +226,11 @@ inline int ProgressBar::getPosition()
 
 inline ProgressBar::ProgressBar( dwt::Widget * parent ) :
 BaseType(parent, ChainingDispatcher::superClass<ProgressBar>()),
-stepSize(10)
+stepSize(10),
+barColor(NaC),
+backgroundColor(NaC),
+barColorExplicit(false),
+backgroundColorExplicit(false)
 {
 }
 
@@ -233,14 +245,6 @@ inline void ProgressBar::setState(State state) {
 
 inline ProgressBar::State ProgressBar::getState() const {
 	return static_cast<State>(sendMessage(PBM_GETSTATE));
-}
-
-inline COLORREF ProgressBar::setBarColor(COLORREF color) {
-	return static_cast<COLORREF>(sendMessage(PBM_SETBARCOLOR, 0, color));
-}
-
-inline COLORREF ProgressBar::setBackgroundColor(COLORREF color) {
-	return static_cast<COLORREF>(sendMessage(PBM_SETBKCOLOR, 0, color));
 }
 
 }

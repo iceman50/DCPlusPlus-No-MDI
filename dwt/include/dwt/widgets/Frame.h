@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -103,12 +103,29 @@ protected:
 
 	// Protected to avoid direct instantiation, you can inherit but NOT instantiate
 	// directly
-	virtual ~Frame()
-	{}
+	virtual ~Frame();
+
+	/** Apply the application appearance to frame-owned client and non-client areas. */
+	virtual void appearanceChanged() override;
+
+	/** Preserve the native frame contract while painting manual-mode chrome. */
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal) override;
 
 private:
+	bool handleEraseBackground(HDC dc);
+	bool handleCaptionInput(const MSG& msg, LRESULT& retVal);
+	bool isManualFrame() const;
+	void paintNonClient();
+	void redrawNonClient();
+	void updateCaptionAppearance();
+
 	IconPtr smallIcon;
 	IconPtr largeIcon;
+	int hotCaptionButton;
+	int pressedCaptionButton;
+	bool captionActive;
+	bool trackingCaptionMouse;
+	bool manualNonClient;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -161,13 +178,6 @@ inline void Frame::setSmallIcon(const IconPtr& icon) {
 inline void Frame::setLargeIcon(const IconPtr& icon) {
 	largeIcon = icon;
 	sendMessage(WM_SETICON, ICON_BIG, largeIcon ? reinterpret_cast<LPARAM>(largeIcon->handle()) : 0);
-}
-
-inline Frame::Frame(Widget * parent, Dispatcher& dispatcher) :
-Composite(parent, dispatcher),
-smallIcon(0),
-largeIcon(0)
-{
 }
 
 }

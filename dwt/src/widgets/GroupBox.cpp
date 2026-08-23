@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -35,6 +35,8 @@
 
 #include <dwt/widgets/GroupBox.h>
 #include <dwt/Point.h>
+
+#include "AppearanceDraw.h"
 
 namespace dwt {
 
@@ -121,6 +123,46 @@ void GroupBox::handleEnabled(bool enabled) {
 	auto child = getChild();
 	if(child)
 		child->setEnabled(enabled);
+}
+
+bool GroupBox::handleMessage(const MSG& msg, LRESULT& retVal) {
+	const bool handled = BaseType::handleMessage(msg, retVal);
+	if(handled || !isManualAppearance() ||
+		getAppearancePolicy() == AppearancePolicy::Native) {
+		return handled;
+	}
+
+	switch(msg.message) {
+	case WM_ERASEBKGND:
+		retVal = TRUE;
+		return true;
+
+	case WM_PAINT:
+		{
+			RECT update = { };
+			if(!::GetUpdateRect(handle(), &update, FALSE)) {
+				::GetClientRect(handle(), &update);
+			}
+			const Rectangle paint(update);
+			BufferedCanvas<PaintCanvas> canvas(this, paint);
+			appearance_detail::drawGroupBox(*this, canvas,
+				getAppearance().getPalette());
+			canvas.blast(paint);
+			retVal = 0;
+			return true;
+		}
+
+	case WM_PRINTCLIENT:
+		if(msg.wParam) {
+			FreeCanvas canvas(reinterpret_cast<HDC>(msg.wParam));
+			appearance_detail::drawGroupBox(*this, canvas,
+				getAppearance().getPalette());
+			retVal = 0;
+			return true;
+		}
+		break;
+	}
+	return false;
 }
 
 }

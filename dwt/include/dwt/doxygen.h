@@ -1,4 +1,5 @@
 /*  Definitions for doxygen
+	Copyright (c) 2007-2026, iceman50
 	(Never included by c++ compilers)
 */
 
@@ -110,6 +111,33 @@
 
 /** \defgroup EventHandlersTree Event Handlers for Tree
   * \EventHandlerGenericInfo
+  */
+
+/** \defgroup Appearance Application appearance
+  * Application-wide light, dark, and high-contrast behavior.
+  */
+
+/** \page appearance Configuring application appearance
+  *
+  * DWT retains native window behavior, metrics, input, and accessibility while
+  * manually painting framework chrome in dark mode. The renderer is available on
+  * Windows 7 and later and does not depend on an operating-system dark visual
+  * style. Windows high contrast always takes precedence over the selected mode and
+  * palette.
+  *
+  * Configure the service once on the GUI thread, normally before creating the main
+  * window:
+  * \code
+  * auto palette = dwt::Appearance::defaultPalette();
+  * palette.accent = RGB(0, 120, 215);
+  * dwt::Application::instance().getAppearance().configure(
+  *     dwt::Appearance::Mode::Dark, palette);
+  * \endcode
+  *
+  * Widgets participate automatically. Use dwt::AppearancePolicy::ApplicationContent
+  * for a surface whose application-defined formatting must be preserved, or call
+  * setColor() to provide explicit foreground and background colors. Calling
+  * clearColor() returns a colorable widget to appearance inheritance.
   */
 
 

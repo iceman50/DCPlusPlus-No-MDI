@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -153,6 +153,12 @@ public:
 
 protected:
 	ComboBox(Widget* parent);
+
+	/** Paint the non-client-like combo frame and drop button while retaining the
+	 * native edit and list windows for input and item behavior. */
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
+	virtual void setColorImpl(COLORREF text, COLORREF background);
+	virtual void clearColorImpl();
 
 	// Protected to avoid direct instantiation, you can inherit and use
 	// WidgetFactory class which is friend

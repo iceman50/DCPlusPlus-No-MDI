@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -42,6 +42,7 @@
 #include <dwt/util/win32/Version.h>
 #include <dwt/DWTException.h>
 #include <dwt/resources/Brush.h>
+#include <dwt/resources/Pen.h>
 #include <dwt/Texts.h>
 
 namespace dwt {
@@ -212,24 +213,27 @@ void TabView::create(const Seed & cs) {
 		}
 
 		if(cs.tabStyle == Seed::WinBrowser) {
-			theme.load(std::wstring(L"BrowserTab::") + std::wstring(VSCLASS_TAB), this);
+			theme.load(std::wstring(L"BrowserTab::") + std::wstring(VSCLASS_TAB), this,
+				false);
 			if(!theme)
 				theme.load(VSCLASS_TAB, this, false);
 		} else
-			theme.load(VSCLASS_TAB, this);
+			theme.load(VSCLASS_TAB, this, false);
 
 		if(!(cs.style & TCS_BUTTONS)) {
 			// we don't want pre-drawn borders to get in the way here, so we fully take over painting.
 			onPainting([this](PaintCanvas& pc) { handlePainting(pc); });
 		}
 
-		// TCS_HOTTRACK seems to have no effect in owner-drawn tabs, so do the tracking ourselves.
-		onMouseMove([this](const MouseEvent& me) { return handleMouseMove(me); });
-
 	} else {
 		if(widthConfig <= 3)
 			widthConfig = 0;
 	}
+
+	/* Manual appearance also paints tab views which were created with native
+	styles. Track hover for both kinds; returning false preserves USER32's
+	normal mouse processing whenever native painting is active. */
+	onMouseMove([this](const MouseEvent& me) { return handleMouseMove(me); });
 
 	icons = new ImageList(scale(Point(16, 16)));
 	TabCtrl_SetImageList(handle(), icons->handle());
@@ -860,12 +864,21 @@ bool TabView::handlePainting(DRAWITEMSTRUCT& info, TabInfo* ti) {
 	return true;
 }
 
-void TabView::handlePainting(PaintCanvas& canvas) {
-	Rectangle rect { canvas.getPaintRect() };
+void TabView::handlePainting(PaintCanvas& target) {
+	Rectangle rect { target.getPaintRect() };
 	if(rect.width() == 0 || rect.height() == 0)
 		return;
+	std::unique_ptr<BufferedCanvas<FreeCanvas>> buffer;
+	Canvas* canvas = &target;
+	if(isManualAppearance()) {
+		buffer.reset(new BufferedCanvas<FreeCanvas>(target.handle(), rect));
+		canvas = buffer.get();
+	}
 
-	auto bkMode(canvas.setBkMode(true));
+	auto bkMode(canvas->setBkMode(true));
+	if(isManualAppearance()) {
+		canvas->fill(rect, Brush(getAppearance().getPalette().surface));
+	}
 
 	int sel = getSelected();
 	Rectangle selRect;
@@ -873,8 +886,8 @@ void TabView::handlePainting(PaintCanvas& canvas) {
 	for(size_t i = 0; i < size(); ++i) {
 		RECT rc;
 		if(TabCtrl_GetItemRect(handle(), i, &rc) &&
-			(rc.right >= rect.left() || rc.left <= rect.right()) &&
-			(rc.bottom >= rect.top() || rc.top <= rect.bottom()))
+			rc.right >= rect.left() && rc.left <= rect.right() &&
+			rc.bottom >= rect.top() && rc.top <= rect.bottom())
 		{
 			if(static_cast<int>(i) == sel) {
 				rc.top -= 2;
@@ -883,14 +896,18 @@ void TabView::handlePainting(PaintCanvas& canvas) {
 				rc.right += 1;
 				selRect = Rectangle(rc);
 			} else {
-				draw(canvas, static_cast<unsigned>(i), Rectangle(rc), false);
+				draw(*canvas, static_cast<unsigned>(i), Rectangle(rc), false);
 			}
 		}
 	}
 
 	// draw the selected tab last because it might need to step on others
 	if(selRect.height() > 0)
-		draw(canvas, sel, std::move(selRect), true);
+		draw(*canvas, sel, std::move(selRect), true);
+
+	if(buffer) {
+		buffer->blast(rect);
+	}
 }
 
 void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSelected) {
@@ -900,8 +917,34 @@ void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSele
 
 	bool isHighlighted = static_cast<int>(index) == highlighted || ti->marked;
 
+	const auto manual = isManualAppearance();
 	int part = 0, state = 0;
-	if(theme) {
+	if(manual) {
+		const auto& palette = getAppearance().getPalette();
+		COLORREF background = isSelected ? palette.background : palette.surface;
+		if(isHighlighted && getEnabled()) {
+			background = Appearance::blend(background, palette.accent,
+				isSelected ? 28 : 20);
+		}
+		canvas.fill(rect, Brush(background));
+		{
+			Pen border(isSelected ? palette.accent : palette.border,
+				Pen::Solid, 1);
+			Brush hollow(static_cast<HBRUSH>(::GetStockObject(HOLLOW_BRUSH)), false);
+			auto selectBorder = canvas.select(border);
+			auto selectHollow = canvas.select(hollow);
+			auto outline = rect;
+			outline.size -= Point(1, 1);
+			canvas.rectangle(outline);
+		}
+		if(isSelected) {
+			auto marker = rect;
+			marker.pos += Point(1, 1);
+			marker.size.x = std::max(0L, marker.size.x - 2);
+			marker.size.y = scale(2);
+			canvas.fill(marker, Brush(palette.accent));
+		}
+	} else if(theme) {
 		part = TABP_TABITEM;
 		state = isSelected ? TIS_SELECTED : isHighlighted ? TIS_HOT : TIS_NORMAL;
 
@@ -911,7 +954,7 @@ void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSele
 		canvas.fill(rect, Brush(isSelected ? Brush::Window : isHighlighted ? Brush::HighLight : Brush::BtnFace));
 	}
 
-	if(isSelected && theme && !hasStyle(TCS_BUTTONS)) {
+	if(isSelected && theme && !manual && !hasStyle(TCS_BUTTONS)) {
 		rect.pos.y += 1;
 		rect.size.y -= 1;
 	}
@@ -938,7 +981,11 @@ void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSele
 	const tstring text = ti->w->getText();
 	const unsigned dtFormat = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_WORD_ELLIPSIS;
 	auto select(canvas.select(*((isSelected || ti->marked) ? boldFont : font)));
-	if(theme) {
+	if(manual) {
+		canvas.setTextColor(getEnabled() ? getAppearance().getPalette().text :
+			getAppearance().getPalette().disabledText);
+		canvas.drawText(text, rect, dtFormat);
+	} else if(theme) {
 		theme.drawText(canvas, part, state, text, dtFormat, rect);
 	} else {
 		canvas.setTextColor(Color::predefined(isSelected ? COLOR_WINDOWTEXT : isHighlighted ? COLOR_HIGHLIGHTTEXT : COLOR_BTNTEXT));
@@ -964,6 +1011,24 @@ void TabView::draw(Canvas& canvas, unsigned index, Rectangle&& rect, bool isSele
 			}
 			canvas.drawIcon(closeIcon, drawRect);
 
+		} else if(manual) {
+			if(isHighlighted && highlightClose) {
+				const auto& palette = getAppearance().getPalette();
+				const auto background = Appearance::blend(palette.surface,
+					palette.accent, closeAuthorized ? 70 : 42);
+				canvas.fill(rect, Brush(background));
+			}
+			const auto& palette = getAppearance().getPalette();
+			const auto inset = scale(closeAuthorized ? 5 : 4);
+			Pen closePen(getEnabled() ? palette.text : palette.disabledText,
+				Pen::Solid, std::max(1, scale(1)));
+			auto selectClose = canvas.select(closePen);
+			/* GDI LineTo excludes its destination pixel. Extend both descending
+			 * strokes so the lower endpoints have the same length as the tops. */
+			canvas.line(Point(rect.left() + inset, rect.top() + inset),
+				Point(rect.right() - inset + 1, rect.bottom() - inset + 1));
+			canvas.line(Point(rect.right() - inset, rect.top() + inset),
+				Point(rect.left() + inset - 1, rect.bottom() - inset + 1));
 		} else {
 			UINT format = DFCS_CAPTIONCLOSE | DFCS_FLAT;
 			if(isHighlighted && highlightClose) {
@@ -992,9 +1057,21 @@ bool TabView::inCloseRect(const ScreenCoordinate& pos) const {
 void TabView::setFontImpl() {
 	BaseType::setFontImpl();
 	font = getFont();
-	if(hasStyle(TCS_OWNERDRAWFIXED)) {
-		boldFont = font->makeBold();
+	/* A native-style tab may begin using DWT's manual renderer after a live
+	appearance change, so keep both drawing fonts ready regardless of its seed. */
+	boldFont = font->makeBold();
+}
+
+void TabView::appearanceChanged() {
+	if(isManualAppearance()) {
+		theme.unload();
+	} else {
+		theme.reload();
 	}
+	if(tip) {
+		::InvalidateRect(tip->handle(), nullptr, TRUE);
+	}
+	BaseType::appearanceChanged();
 }
 
 void TabView::helpImpl(unsigned& id) {
@@ -1151,7 +1228,11 @@ void TabView::setText(unsigned index, const tstring& text) {
 void TabView::redraw(unsigned index) {
 	RECT rect;
 	if(TabCtrl_GetItemRect(handle(), index, &rect)) {
-		BaseType::redraw(Rectangle(rect));
+		if(isManualAppearance()) {
+			redrawWindow(Rectangle(rect), RDW_INVALIDATE);
+		} else {
+			BaseType::redraw(Rectangle(rect));
+		}
 	}
 }
 
@@ -1180,12 +1261,25 @@ int TabView::hitTest(const ScreenCoordinate& pt) {
 }
 
 bool TabView::handleMessage( const MSG & msg, LRESULT & retVal ) {
-	if(msg.message == WM_PAINT && !theme) {
+	if(msg.message == WM_PAINT && !theme && !isManualAppearance()) {
 		// let the tab control draw the borders of unthemed tabs (and revert to classic owner-draw callbacks).
 		return false;
 	}
 
 	bool handled = BaseType::handleMessage(msg, retVal);
+	if(!handled && msg.message == WM_ERASEBKGND && isManualAppearance()) {
+		retVal = TRUE;
+		return true;
+	}
+	if(!handled && msg.message == WM_PAINT && isManualAppearance()) {
+		/* Owner-drawn tab strips already arrive here as handled by the painting
+		callback installed in create(). Native-style strips need the same buffered
+		manual path without permanently changing TCS_OWNERDRAWFIXED. */
+		PaintCanvas canvas(this);
+		handlePainting(canvas);
+		retVal = 0;
+		return true;
+	}
 
 	if(msg.message == WM_SIZE) {
 		// We need to let the tab control window proc handle this first, otherwise getUsableArea will not return

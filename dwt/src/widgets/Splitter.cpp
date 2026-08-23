@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -31,6 +31,7 @@
 
 #include <dwt/widgets/Splitter.h>
 
+#include <dwt/Appearance.h>
 #include <dwt/dwt_vsstyle.h>
 #include <dwt/Texts.h>
 #include <dwt/WidgetCreator.h>
@@ -48,7 +49,7 @@ void Splitter::create(const Seed& cs) {
 	horizontal = cs.horizontal;
 	BaseType::create(cs);
 
-	theme.load(VSCLASS_WINDOW, this);
+	theme.load(VSCLASS_WINDOW, this, false);
 	onPainting([this](PaintCanvas& canvas) { handlePainting(canvas); });
 
 	onLeftMouseDown([this](const MouseEvent& mouseEvent) { return handleLButtonDown(mouseEvent); });
@@ -97,6 +98,35 @@ SplitterContainerPtr Splitter::getParent() const {
 }
 
 void Splitter::handlePainting(PaintCanvas& canvas) {
+	if(isManualAppearance()) {
+		const auto& palette = getAppearance().getPalette();
+		const auto paint = canvas.getPaintRect();
+		const auto background = hovering ?
+			Appearance::blend(palette.background, palette.accent, 48) :
+			palette.background;
+		canvas.fill(paint, Brush(background));
+
+		auto size = getClientSize();
+		Pen pen(hovering ? palette.accent : palette.border);
+		auto select(canvas.select(pen));
+		if(horizontal) {
+			auto mid = size.y / 2;
+			canvas.line(0, mid - 1, size.x, mid - 1);
+			canvas.line(0, mid, size.x, mid);
+		} else {
+			auto mid = size.x / 2;
+			canvas.line(mid - 1, 0, mid - 1, size.y);
+			canvas.line(mid, 0, mid, size.y);
+		}
+
+		if(::GetFocus() == handle()) {
+			RECT focus = { 0, 0, size.x, size.y };
+			::InflateRect(&focus, -1, -1);
+			::DrawFocusRect(canvas.handle(), &focus);
+		}
+		return;
+	}
+
 	if(hovering) {
 		if(theme) {
 			Rectangle rect { getClientSize() };
@@ -126,6 +156,15 @@ void Splitter::handlePainting(PaintCanvas& canvas) {
 			canvas.line(mid, 0, mid, size.y);
 		}
 	}
+}
+
+void Splitter::appearanceChanged() {
+	if(isManualAppearance()) {
+		theme.unload();
+	} else {
+		theme.reload();
+	}
+	BaseType::appearanceChanged();
 }
 
 bool Splitter::handleLButtonDown(const MouseEvent& mouseEvent) {

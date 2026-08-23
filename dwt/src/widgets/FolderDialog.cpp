@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -30,7 +30,9 @@
 */
 
 #include <dwt/widgets/FolderDialog.h>
+#include <dwt/Application.h>
 #include <dwt/util/win32/FileDialog.h>
+#include <dwt/util/win32/NativeDialogAppearance.h>
 
 #include <utility>
 
@@ -205,6 +207,8 @@ bool FolderDialog::openRooted(tstring& dir) {
 	}
 
 	auto oldErrorMode = ::SetErrorMode(SEM_FAILCRITICALERRORS);
+	util::win32::NativeDialogAppearance appearance(
+		Application::instance().getAppearance());
 	auto selected = ::SHBrowseForFolder(&info);
 	::SetErrorMode(oldErrorMode);
 	if(!selected) {

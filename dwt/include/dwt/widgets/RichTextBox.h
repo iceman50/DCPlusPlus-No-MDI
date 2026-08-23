@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2026, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -185,9 +185,11 @@ private:
 
 	// aspects::Colorable
 	void setColorImpl(COLORREF text, COLORREF background);
+	void clearColorImpl();
 
 	// aspects::Font
 	void setFontImpl();
+	void appearanceChanged() override;
 
 	COLORREF textColor;
 	COLORREF bgColor;

@@ -1,4 +1,5 @@
 == 08-18-2026 - 0.8841 !!!Experimental!!! ==
+* Add a Win7-compatible application dark theme with Windows high-contrast integration, retained visual styles, native dark non-client rendering on Win10+, application-owned button and control rendering, and a configurable Experimental palette
 * Add ADC BBS0 durable bulletin boards with dynamic board discovery, persistent replay/resume indexes, posts, replies and withdrawals, canonical TTH-verified plain or rich-text documents, explicit exact-TTH retrieval and route-scoped serving, and a /bbs command interface
 * Update version.xml to use its own version.xml (https://dcplusplus.sourceforge.io/version_exp.xml)
 

@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2022, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -33,6 +33,7 @@
 #define DWT_LINK_H
 
 #include "../aspects/Caption.h"
+#include "../aspects/CustomDraw.h"
 #include "Control.h"
 
 namespace dwt {
@@ -40,7 +41,8 @@ namespace dwt {
 /** This control can display text and clickable links. */
 class Link :
 	public Control,
-	public aspects::Caption<Link>
+	public aspects::Caption<Link>,
+	public aspects::CustomDraw<Link, NMCUSTOMDRAW>
 {
 	typedef Control BaseType;
 	friend class WidgetCreator<Link>;
@@ -67,6 +69,8 @@ public:
 
 	Point getPreferredSize();
 
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
+
 protected:
 	// Constructor Taking pointer to parent
 	explicit Link(Widget* parent);
@@ -78,6 +82,8 @@ protected:
 private:
 	friend class ChainingDispatcher;
 	static const TCHAR windowClass[];
+
+	bool handleCustomDraw(NMCUSTOMDRAW& data, LRESULT& retVal);
 };
 
 }

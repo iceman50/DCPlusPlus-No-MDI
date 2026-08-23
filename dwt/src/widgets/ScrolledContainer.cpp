@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -82,6 +82,10 @@ void ScrolledContainer::setScrollInfo(int type, int page, int max, int pos) {
 }
 
 bool ScrolledContainer::handleMessage(const MSG &msg, LRESULT &retVal) {
+	if(BaseType::handleMessage(msg, retVal)) {
+		return true;
+	}
+
 	if(!(msg.message == WM_HSCROLL || msg.message == WM_VSCROLL)) {
 		return false;
 	}

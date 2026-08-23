@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -43,6 +43,40 @@
 
 namespace dwt {
 
+namespace {
+
+UINT finalizeAppearanceMessage() {
+	static const UINT message = ::RegisterWindowMessage(
+		_T("dwt.Widget.FinalizeAppearance"));
+	return message;
+}
+
+bool isAppearanceLifecycleMessage(UINT message) {
+	switch(message) {
+	case WM_DESTROY:
+	case WM_SHOWWINDOW:
+	case WM_STYLECHANGED:
+	case WM_WINDOWPOSCHANGED:
+	case WM_SIZE:
+	case WM_NCPAINT:
+	case WM_NCACTIVATE:
+	case WM_NCMOUSEMOVE:
+	case WM_NCLBUTTONDOWN:
+	case WM_NCLBUTTONUP:
+	case WM_HSCROLL:
+	case WM_VSCROLL:
+	case WM_MOUSEWHEEL:
+	case WM_MOUSEHWHEEL:
+	case WM_KEYDOWN:
+	case WM_KEYUP:
+		return true;
+	default:
+		return false;
+	}
+}
+
+}
+
 GlobalAtom Widget::propAtom(_T("dwt::Widget*"));
 
 #ifdef DWT_DEBUG_WIDGETS
@@ -53,7 +87,8 @@ Widget::Widget(Widget* parent_, Dispatcher& dispatcher_) :
 	hwnd(NULL), parent(parent_), dispatcher(dispatcher_),
 	dpi(util::win32::defaultDpi), previousDpi(util::win32::defaultDpi),
 	accessibilityProvider(nullptr), accessibleControlType(accessibility::Custom),
-	accessibleKeyboardFocusable(false)
+	accessibleKeyboardFocusable(false), appearance(nullptr),
+	appearancePolicy(AppearancePolicy::Inherit), appearanceGeneration(0)
 {
 #ifdef DWT_DEBUG_WIDGETS
 	++widgetCount;
@@ -62,6 +97,9 @@ Widget::Widget(Widget* parent_, Dispatcher& dispatcher_) :
 }
 
 Widget::~Widget() {
+	if(appearance) {
+		appearance->removeWidget(this);
+	}
 	util::win32::detachAccessibilityProvider(accessibilityProvider);
 	util::win32::releaseAccessibilityProvider(accessibilityProvider);
 	if(hwnd) {
@@ -86,6 +124,12 @@ HWND Widget::create(const Seed & cs) {
 		// The most common error is to forget WS_CHILD in the styles
 		throw Win32Exception("Unable to create widget");
 	}
+
+	// Derived widgets may still be constructing after this base create returns.
+	// The posted fallback safely finalizes directly-created widgets once the
+	// current construction stack has unwound. WidgetCreator finalizes ordinary
+	// controls synchronously and this operation is intentionally idempotent.
+	::PostMessage(hWnd, finalizeAppearanceMessage(), 0, 0);
 
 	return hWnd;
 }
@@ -130,6 +174,13 @@ Widget::CallbackIter Widget::addCallback(const Message& msg, const CallbackType&
 	return --callbacks.end();
 }
 
+Widget::CallbackIter Widget::addInternalCallback(const Message& msg, const CallbackType& callback)
+{
+	CallbackList& callbacks = internalHandlers[msg];
+	callbacks.push_back(callback);
+	return --callbacks.end();
+}
+
 Widget::CallbackIter Widget::setCallback(const Message& msg, const CallbackType& callback) {
 	CallbackList& callbacks = handlers[msg];
 	callbacks.clear();
@@ -142,6 +193,15 @@ void Widget::clearCallback(const Message& msg, const CallbackIter& i) {
 	callbacks.erase(i);
 	if(callbacks.empty()) {
 		handlers.erase(msg);
+	}
+}
+
+void Widget::clearInternalCallback(const Message& msg, const CallbackIter& callback)
+{
+	CallbackList& callbacks = internalHandlers[msg];
+	callbacks.erase(callback);
+	if(callbacks.empty()) {
+		internalHandlers.erase(msg);
 	}
 }
 
@@ -162,11 +222,16 @@ void Widget::callAsync(const Application::Callback& f) {
 }
 
 bool Widget::handleMessage(const MSG &msg, LRESULT &retVal) {
+	if(msg.message == finalizeAppearanceMessage()) {
+		finalizeAppearance();
+		return true;
+	}
 	const bool dpiChanged = msg.message == WM_DPICHANGED ||
 		msg.message == WM_DPICHANGED_AFTERPARENT;
-	const bool appearanceChanged = msg.message == WM_THEMECHANGED ||
+	const bool appearanceChanged = (msg.message == WM_THEMECHANGED ||
 		msg.message == WM_SYSCOLORCHANGE ||
-		msg.message == WM_SETTINGCHANGE;
+		msg.message == WM_SETTINGCHANGE) &&
+		(!appearance || appearance->isColorSchemeMessage(msg));
 	if(dpiChanged) {
 		previousDpi = dpi;
 		dpi = msg.message == WM_DPICHANGED ?
@@ -198,13 +263,23 @@ bool Widget::handleMessage(const MSG &msg, LRESULT &retVal) {
 
 	// First we must create a "comparable" message...
 	Message msgComparer(msg);
-	auto i = handlers.find(msgComparer);
 	bool handled = false;
+	auto internal = internalHandlers.find(msgComparer);
+	if(internal != internalHandlers.end()) {
+		CallbackList& list = internal->second;
+		for(auto& callback: list) {
+			handled |= callback(msg, retVal);
+		}
+	}
+	auto i = handlers.find(msgComparer);
 	if(i != handlers.end()) {
 		CallbackList& list = i->second;
 		for(auto& j: list) {
 			handled |= j(msg, retVal);
 		}
+	}
+	if(appearance && (!handled || isAppearanceLifecycleMessage(msg.message))) {
+		handled |= appearance->handleMessage(this, msg, retVal);
 	}
 	if(dpiChanged) {
 		layout();
@@ -214,6 +289,38 @@ bool Widget::handleMessage(const MSG &msg, LRESULT &retVal) {
 		::InvalidateRect(hwnd, nullptr, TRUE);
 	}
 	return handled;
+}
+
+void Widget::finalizeAppearance() {
+	if(!appearance && hwnd && ::IsWindow(hwnd)) {
+		appearance = &Application::instance().getAppearance();
+		appearance->addWidget(this);
+	}
+}
+
+void Widget::setAppearancePolicy(AppearancePolicy policy) {
+	if(appearancePolicy == policy) {
+		return;
+	}
+	appearancePolicy = policy;
+	appearanceGeneration = 0;
+	if(appearance) {
+		appearance->apply(this);
+	}
+}
+
+Appearance& Widget::getAppearance() {
+	return appearance ? *appearance : Application::instance().getAppearance();
+}
+
+const Appearance& Widget::getAppearance() const {
+	return appearance ? *appearance : Application::instance().getAppearance();
+}
+
+void Widget::appearanceChanged() {
+	if(hwnd && ::IsWindow(hwnd)) {
+		::InvalidateRect(hwnd, nullptr, TRUE);
+	}
 }
 
 unsigned Widget::getDpi() const {

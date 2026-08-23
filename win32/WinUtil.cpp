@@ -22,6 +22,8 @@
 #include "resource.h"
 #include <mmsystem.h>
 
+#include <dwt/Appearance.h>
+
 #include <stdexcept>
 
 #include <dcpp/ClientManager.h>
@@ -117,6 +119,54 @@ DWORD WinUtil::helpCookie = 0;
 tstring WinUtil::helpPath;
 StringList WinUtil::helpTexts;
 
+namespace {
+
+dwt::Appearance::Palette themePalette() {
+	return {
+		static_cast<COLORREF>(SETTING(THEME_BACKGROUND_COLOR)),
+		static_cast<COLORREF>(SETTING(THEME_SURFACE_COLOR)),
+		static_cast<COLORREF>(SETTING(THEME_TEXT_COLOR)),
+		static_cast<COLORREF>(SETTING(THEME_DISABLED_TEXT_COLOR)),
+		static_cast<COLORREF>(SETTING(THEME_BORDER_COLOR)),
+		static_cast<COLORREF>(SETTING(THEME_ACCENT_COLOR)),
+		static_cast<COLORREF>(SETTING(THEME_HIGHLIGHT_TEXT_COLOR))
+	};
+}
+
+dwt::Appearance::Mode themeMode() {
+	const auto setting = SETTING(THEME_MODE);
+	return setting == SettingsManager::THEME_LIGHT ? dwt::Appearance::Mode::Light :
+		setting == SettingsManager::THEME_DARK ? dwt::Appearance::Mode::Dark :
+		dwt::Appearance::Mode::System;
+}
+
+BOOL CALLBACK updateWidgetColors(HWND hwnd, LPARAM) {
+	if(auto widget = dwt::hwnd_cast<dwt::Control*>(hwnd)) {
+		widget->sendCommand(ID_UPDATECOLOR);
+	}
+	return TRUE;
+}
+
+BOOL CALLBACK updateWindowColors(HWND hwnd, LPARAM) {
+	updateWidgetColors(hwnd, 0);
+	::EnumChildWindows(hwnd, updateWidgetColors, 0);
+	return TRUE;
+}
+
+void updateApplicationColors() {
+	const auto& appearance = dwt::Application::instance().getAppearance();
+	WinUtil::textColor = appearance.isHighContrast() ?
+		::GetSysColor(COLOR_WINDOWTEXT) :
+		static_cast<COLORREF>(SETTING(TEXT_COLOR));
+	WinUtil::bgColor = appearance.isHighContrast() ?
+		::GetSysColor(COLOR_WINDOW) :
+		static_cast<COLORREF>(SETTING(BACKGROUND_COLOR));
+	WinUtil::bgBrush = new dwt::Brush(WinUtil::bgColor);
+	::EnumThreadWindows(::GetCurrentThreadId(), updateWindowColors, 0);
+}
+
+}
+
 const Button::Seed WinUtil::Seeds::button;
 const ComboBox::Seed WinUtil::Seeds::comboBox;
 const ComboBox::Seed WinUtil::Seeds::comboBoxEdit;
@@ -142,13 +192,17 @@ const CheckBox::Seed WinUtil::Seeds::Dialog::checkBox;
 const Button::Seed WinUtil::Seeds::Dialog::button;
 
 void WinUtil::init() {
+	auto& appearance = dwt::Application::instance().getAppearance();
+	appearance.configure(themeMode(), themePalette());
 
 	SettingsManager::getInstance()->setDefault(SettingsManager::BACKGROUND_COLOR, dwt::Color::predefined(COLOR_WINDOW));
 	SettingsManager::getInstance()->setDefault(SettingsManager::TEXT_COLOR, dwt::Color::predefined(COLOR_WINDOWTEXT));
 
-	textColor = SETTING(TEXT_COLOR);
-	bgColor = SETTING(BACKGROUND_COLOR);
-	bgBrush = dwt::BrushPtr(new dwt::Brush(bgColor));
+	// The application theme colors widget chrome. Rich chat, transfer and user
+	// styles remain controlled by Appearance > Styles and must not be rewritten
+	// when the chrome theme changes.
+	updateApplicationColors();
+	appearance.onChanged(updateApplicationColors);
 
 	{
 		NONCLIENTMETRICS metrics = { sizeof(NONCLIENTMETRICS) };
@@ -317,9 +371,11 @@ void WinUtil::initSeeds() {
 
 	xlabel.font = font;
 
+	// LibDWT automatically owner-draws existing menus while a manual
+	// appearance is active. Keep this seed as the user's independent request so
+	// returning to the system appearance can restore native menu painting.
 	xmenu.ownerDrawn = SETTING(OWNER_DRAWN_MENUS);
-	if(xmenu.ownerDrawn)
-		xmenu.font = font;
+	xmenu.font = font;
 
 	xTable.style |= WS_HSCROLL | WS_VSCROLL | LVS_SHOWSELALWAYS | LVS_SHAREIMAGELISTS;
 	xTable.exStyle = WS_EX_CLIENTEDGE;
@@ -396,6 +452,11 @@ void WinUtil::uninit() {
 #ifdef HAVE_HTMLHELP_H
 	::HtmlHelp(NULL, NULL, HH_UNINITIALIZE, helpCookie);
 #endif
+}
+
+void WinUtil::refreshTheme() {
+	dwt::Application::instance().getAppearance().configure(
+		themeMode(), themePalette());
 }
 
 void WinUtil::initFont() {

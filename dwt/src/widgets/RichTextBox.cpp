@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2026, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -80,7 +80,7 @@ void RichTextBox::create(const Seed& cs) {
 	BaseType::create(cs);
 	setFont(cs.font);
 
-	setColor(Color::predefined(COLOR_WINDOWTEXT), Color::predefined(COLOR_WINDOW));
+	setColorImpl(Color::predefined(COLOR_WINDOWTEXT), Color::predefined(COLOR_WINDOW));
 
 	setScrollBarHorizontally(cs.scrollBarHorizontallyFlag);
 	setScrollBarVertically(cs.scrollBarVerticallyFlag);
@@ -133,7 +133,9 @@ void RichTextBox::create(const Seed& cs) {
 }
 
 RichTextBox::RichTextBox(dwt::Widget* parent) :
-TextBoxBase(parent, makeDispatcher())
+TextBoxBase(parent, makeDispatcher()),
+textColor(Color::predefined(COLOR_WINDOWTEXT)),
+bgColor(Color::predefined(COLOR_WINDOW))
 {
 }
 
@@ -482,6 +484,21 @@ void RichTextBox::setColorImpl(COLORREF text, COLORREF background) {
 		updateColors(text, background);
 		redraw();
 	}
+}
+
+void RichTextBox::clearColorImpl() {
+	const auto& appearance = getAppearance();
+	setColorImpl(isManualAppearance() ? appearance.getPalette().text :
+		Color::predefined(COLOR_WINDOWTEXT),
+		isManualAppearance() ? appearance.getPalette().background :
+		Color::predefined(COLOR_WINDOW));
+}
+
+void RichTextBox::appearanceChanged() {
+	if(!hasExplicitColors()) {
+		clearColorImpl();
+	}
+	BaseType::appearanceChanged();
 }
 
 void RichTextBox::setFontImpl() {

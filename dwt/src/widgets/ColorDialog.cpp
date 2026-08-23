@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -31,6 +31,9 @@
 
 #include <dwt/widgets/ColorDialog.h>
 
+#include <dwt/Application.h>
+#include <dwt/util/win32/NativeDialogAppearance.h>
+
 namespace dwt {
 
 bool ColorDialog::open( ColorParams & colorParams, bool basic, bool allowFullOpen ) {
@@ -44,6 +47,7 @@ bool ColorDialog::open( ColorParams & colorParams, bool basic, bool allowFullOpe
 	if ( !allowFullOpen )
 		cc.Flags |= CC_PREVENTFULLOPEN;
 
+	util::win32::NativeDialogAppearance appearance(Application::instance().getAppearance(), true);
 	if(::ChooseColor( & cc )) {
 		colorParams.itsColor = cc.rgbResult;
 		return true;

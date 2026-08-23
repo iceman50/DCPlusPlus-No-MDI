@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   All rights reserved.
 
@@ -62,12 +62,21 @@ void TableTree::create(const Seed& seed) {
 		indent = std::max<long>(::GetSystemMetrics(SM_CXSMICON), 16);
 	}
 
-	theme.load(VSCLASS_TREEVIEW, this);
+	theme.load(VSCLASS_TREEVIEW, this, false);
 
 	onCustomDraw([this](NMLVCUSTOMDRAW& data) { return handleCustomDraw(data); });
 	onKeyDown([this](int c) { return handleKeyDown(c); });
 	onLeftMouseDown([this](const MouseEvent& me) { return handleLeftMouseDown(me); });
 	configureAccessibility();
+}
+
+void TableTree::appearanceChanged() {
+	if(isManualAppearance()) {
+		theme.unload();
+	} else {
+		theme.reload();
+	}
+	BaseType::appearanceChanged();
 }
 
 bool TableTree::handleMessage(const MSG& msg, LRESULT& retVal) {
@@ -247,12 +256,15 @@ LRESULT TableTree::handleCustomDraw(NMLVCUSTOMDRAW& data) {
 	if(data.nmcd.dwDrawStage == (CDDS_ITEMPREPAINT | CDDS_SUBITEM) && data.dwItemType == LVCDI_ITEM && data.iSubItem == 0) {
 		FreeCanvas canvas { data.nmcd.hdc };
 		const long drawIndent = std::max<long>(indent, 16);
+		const auto manual = isManualAppearance();
+		const auto& palette = getAppearance().getPalette();
 
 		auto rect = getRect(static_cast<int>(data.nmcd.dwItemSpec), 0, LVIR_BOUNDS);
 
 		{
 			// draw tree lines.
-			LOGBRUSH lb { BS_SOLID, Color::predefined(COLOR_GRAYTEXT) };
+			LOGBRUSH lb { BS_SOLID, manual ? palette.border :
+				Color::predefined(COLOR_GRAYTEXT) };
 			Pen pen { ::ExtCreatePen(PS_COSMETIC | PS_ALTERNATE, 1, &lb, 0, nullptr) };
 			auto selectPen(canvas.select(pen));
 
@@ -275,7 +287,7 @@ LRESULT TableTree::handleCustomDraw(NMLVCUSTOMDRAW& data) {
 		if(parentItem != items.end() && !parentItem->second.children.empty()) {
 			// this is a parent item; draw the +/- glyph.
 
-			if(theme) {
+			if(theme && !manual) {
 				int part = TVP_GLYPH, state = parentItem->second.expanded ? GLPS_OPENED : GLPS_CLOSED;
 				theme.getPartSize(canvas, part, state, rect.size);
 				rect.pos.x += std::max(drawIndent - rect.size.x, 0L) / 2;
@@ -289,12 +301,22 @@ LRESULT TableTree::handleCustomDraw(NMLVCUSTOMDRAW& data) {
 				rect.pos.y += std::max(drawIndent - glyphSize, 0L) / 2;
 				rect.size.x = rect.size.y = glyphSize;
 
-				::RECT rc = rect;
-				::DrawEdge(canvas.handle(), &rc, EDGE_BUMP, BF_RECT | BF_MIDDLE | BF_FLAT);
+				if(manual) {
+					Brush background(palette.surface);
+					Pen border(palette.border);
+					auto selectBackground(canvas.select(background));
+					auto selectBorder(canvas.select(border));
+					canvas.rectangle(rect);
+				} else {
+					::RECT rc = rect;
+					::DrawEdge(canvas.handle(), &rc, EDGE_BUMP,
+						BF_RECT | BF_MIDDLE | BF_FLAT);
+				}
 
 				Point mid { rect.left() + glyphSize / 2, rect.top() + glyphSize / 2 };
 
-				Pen pen { Color::predefined(COLOR_GRAYTEXT), Pen::Solid };
+				Pen pen { manual ? palette.text :
+					Color::predefined(COLOR_GRAYTEXT), Pen::Solid };
 				auto selectPen(canvas.select(pen));
 
 				canvas.line(rect.left() + padding, mid.y, rect.right() - padding, mid.y); // horizontal

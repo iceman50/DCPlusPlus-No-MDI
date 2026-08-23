@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -35,6 +35,7 @@
 
 #include <dwt/widgets/Menu.h>
 
+#include <dwt/Application.h>
 #include <dwt/resources/Brush.h>
 #include <dwt/resources/Pen.h>
 #include <dwt/DWTException.h>
@@ -49,8 +50,6 @@
 
 namespace dwt {
 
-Menu::Colors Menu::colors;
-
 const int Menu::borderGap = 3;
 const int Menu::pointerGap = 5;
 const int Menu::textIconGap = 8;
@@ -58,10 +57,28 @@ const int Menu::textBorderGap = 4;
 const unsigned Menu::minWidth = 150;
 
 Menu::Colors::Colors() {
-	reset();
+	text = Color::predefined(COLOR_MENUTEXT);
+	gray = Color::predefined(COLOR_GRAYTEXT);
+	background = Color::predefined(COLOR_MENU);
+	stripBar = Color::darken(background, 0.06);
+	highlightBackground = Color::predefined(COLOR_HIGHLIGHT);
+	highlightText = Color::predefined(COLOR_HIGHLIGHTTEXT);
+	titleText = Color::predefined(COLOR_MENUTEXT);
 }
 
-void Menu::Colors::reset() {
+void Menu::Colors::update(const Appearance& appearance) {
+	if(appearance.isManual()) {
+		const auto& palette = appearance.getPalette();
+		text = palette.text;
+		gray = palette.disabledText;
+		background = palette.surface;
+		stripBar = palette.background;
+		highlightBackground = palette.accent;
+		highlightText = palette.highlightText;
+		titleText = palette.text;
+		return;
+	}
+
 	text = Color::predefined(COLOR_MENUTEXT);
 	gray = Color::predefined(COLOR_GRAYTEXT);
 	background = Color::predefined(COLOR_MENU);
@@ -84,36 +101,38 @@ Menu::Menu(Widget* parent) :
 parentMenu(0),
 parent(parent),
 ownerDrawn(true),
+requestedOwnerDrawn(true),
 popup(true),
 commandMessages(false),
+	appearance(nullptr),
+	observingAppearance(false),
 drawSidebar(false)
 {
 	dwtassert(dynamic_cast<Control*>(parent), "A Menu must have a parent derived from dwt::Control");
 }
 
 void Menu::create(const Seed& seed) {
-	ownerDrawn = seed.ownerDrawn;
+	requestedOwnerDrawn = seed.ownerDrawn;
+	ownerDrawn = requestedOwnerDrawn;
 	popup = seed.popup;
 	commandMessages = seed.commandMessages;
+	iconSize = seed.iconSize;
+	setFont(seed.font);
 
 	itsHandle = popup ? ::CreatePopupMenu() : ::CreateMenu();
 	if(!itsHandle) {
 		throw Win32Exception("CreateMenu in Menu::create failed");
 	}
 
-	if(ownerDrawn) {
-		iconSize = seed.iconSize;
-
-		setFont(seed.font);
-
-		if(!popup) {
-			getParent()->addCallback(Message(WM_SYSCOLORCHANGE), Dispatchers::VoidVoid<0, false>([] { colors.reset(); }));
-		}
-
-		if(!parentMenu) {
-			// only the root menu manages the theme.
-			theme.load(VSCLASS_MENU, getParent(), !popup);
-		}
+	if(!parentMenu) {
+		// Only the root menu owns appearance resources and observation.
+		theme.load(VSCLASS_MENU, getParent(), false);
+		appearance = &Application::instance().getAppearance();
+		appearanceCallback = appearance->onChanged([this] { updateAppearance(); });
+		observingAppearance = true;
+		updateAppearance();
+	} else {
+		ownerDrawn = getRootMenu()->ownerDrawn;
 	}
 
 	if(!popup && !commandMessages) {
@@ -124,32 +143,139 @@ void Menu::create(const Seed& seed) {
 	}
 }
 
-LRESULT Menu::handleNCPaint(UINT message, WPARAM wParam, long menuWidth) {
+void Menu::applyBackground() {
+	auto root = getRootMenu();
+	if(!handle() || !root->appearance) {
+		return;
+	}
+
+	MENUINFO info = { sizeof(MENUINFO), MIM_BACKGROUND };
+	info.hbrBack = root->appearance->isManual() && root->backgroundBrush ?
+		root->backgroundBrush->handle() : ::GetSysColorBrush(COLOR_MENU);
+	::SetMenuInfo(handle(), &info);
+	for(auto& child: itsChildren) {
+		child->applyBackground();
+	}
+}
+
+void Menu::updateAppearance() {
+	auto root = getRootMenu();
+	if(root != this) {
+		root->updateAppearance();
+		return;
+	}
+	if(!appearance) {
+		return;
+	}
+
+	colors.update(*appearance);
+	if(appearance->isManual()) {
+		theme.unload();
+		backgroundBrush = new Brush(colors.background);
+	} else {
+		theme.reload();
+		backgroundBrush.reset();
+	}
+	/* SetMenuItemInfo may synchronously repaint an attached menu bar. Prepare
+	 * every resource used by that paint before changing the owner-draw state. */
+	setOwnerDrawn(requestedOwnerDrawn || appearance->isManual());
+	applyBackground();
+
+	if(getParent() && getParent()->handle() &&
+		::GetMenu(getParent()->handle()) == handle()) {
+		::DrawMenuBar(getParent()->handle());
+		::RedrawWindow(getParent()->handle(), nullptr, nullptr,
+			RDW_INVALIDATE | RDW_FRAME);
+	}
+}
+
+void Menu::setOwnerDrawn(bool value) {
+	/* A title or sidebar has no useful native representation, so a menu which
+	contains one remains owner-drawn even when its root returns to native mode. */
+	value = value || !itsTitle.empty() || drawSidebar;
+	if(ownerDrawn != value) {
+		ownerDrawn = value;
+		for(auto& item: itsItemData) {
+			if(!item) {
+				continue;
+			}
+			MENUITEMINFO info = { sizeof(MENUITEMINFO),
+				MIIM_FTYPE | MIIM_DATA };
+			if(!::GetMenuItemInfo(handle(), item->index, TRUE, &info)) {
+				continue;
+			}
+			if(ownerDrawn) {
+				info.fType |= MFT_OWNERDRAW;
+				info.dwItemData = reinterpret_cast<ULONG_PTR>(item.get());
+			} else {
+				info.fType &= ~MFT_OWNERDRAW;
+				info.dwItemData = 0;
+			}
+			::SetMenuItemInfo(handle(), item->index, TRUE, &info);
+		}
+	}
+	for(auto& child: itsChildren) {
+		child->setOwnerDrawn(value);
+	}
+}
+
+LRESULT Menu::handleNCPaint(UINT message, WPARAM wParam, LPARAM lParam) {
 	// forward to ::DefWindowProc
-	const MSG msg { getParent()->handle(), message, wParam, 0 };
+	const MSG msg { getParent()->handle(), message, wParam, lParam };
 	getParent()->getDispatcher().chain(msg);
 
 	auto& rootTheme = getRootMenu()->theme;
-	if(!rootTheme)
+	auto root = getRootMenu();
+	if(!root->appearance)
 		return TRUE;
 
 	MENUBARINFO info { sizeof(MENUBARINFO) };
 	if(::GetMenuBarInfo(getParent()->handle(), OBJID_MENU, 0, &info)) {
-		Rectangle rect { info.rcBar };
-		rect.pos -= getParent()->getWindowRect().pos; // convert to client coords
-
-		rect.pos.x += menuWidth;
-		rect.size.x -= menuWidth;
-
-		BufferedCanvas<WindowUpdateCanvas> canvas { getParent(), rect.left(), rect.top() };
-
-		// avoid non-drawn left edge
-		Rectangle rect_bg = rect;
-		rect_bg.pos.x -= 1;
-		rect_bg.size.x += 1;
-		theme.drawBackground(canvas, MENU_BARBACKGROUND, MB_ACTIVE, rect_bg, false);
-
-		canvas.blast(rect);
+		RECT windowRect = getParent()->getWindowRect();
+		long itemLeft = info.rcBar.right;
+		long itemRight = info.rcBar.left;
+		bool hasItems = false;
+		for(unsigned i = 0, n = size(); i < n; ++i) {
+			RECT itemRect = { 0 };
+			if(::GetMenuItemRect(getParent()->handle(), handle(), i, &itemRect)) {
+				hasItems = true;
+				itemLeft = std::min(itemLeft, itemRect.left);
+				itemRight = std::max(itemRight, itemRect.right);
+			}
+		}
+		WindowUpdateCanvas canvas(getParent());
+		auto paintGap = [&](long left, long right) {
+			if(left >= right) {
+				return;
+			}
+			Rectangle rect(left - windowRect.left,
+				info.rcBar.top - windowRect.top, right - left,
+				info.rcBar.bottom - info.rcBar.top);
+			if(root->appearance->isManual()) {
+				if(root->backgroundBrush) {
+					canvas.fill(rect, *root->backgroundBrush);
+				} else {
+					/* A frame appearance update can synchronously generate WM_NCPAINT
+					 * before the menu's appearance observer has run. Use the already
+					 * active palette during that short transition instead of assuming
+					 * the cached menu brush is available. */
+					Brush background(root->appearance->getPalette().surface);
+					canvas.fill(rect, background);
+				}
+			} else if(rootTheme) {
+				Rectangle background = rect;
+				background.pos.x -= 1;
+				background.size.x += 1;
+				rootTheme.drawBackground(canvas, MENU_BARBACKGROUND, MB_ACTIVE,
+					background, false);
+			}
+		};
+		if(hasItems) {
+			paintGap(info.rcBar.left, std::min(itemLeft, info.rcBar.right));
+			paintGap(std::max(itemRight, info.rcBar.left), info.rcBar.right);
+		} else {
+			paintGap(info.rcBar.left, info.rcBar.right);
+		}
 	}
 
 	return TRUE;
@@ -161,27 +287,31 @@ void Menu::setMenu() {
 	if(!::SetMenu(getParent()->handle(), handle()))
 		throw Win32Exception("SetMenu in Menu::setMenu failed");
 
-	// get the width that current items will occupy
-	long menuWidth = 0;
-	for(unsigned i = 0, n = size(); i < n; ++i) {
-		::RECT rect;
-		::GetMenuItemRect(getParent()->handle(), handle(), i, &rect);
-		menuWidth += Rectangle(rect).width();
-	}
-
 	Control* control = static_cast<Control*>(getParent());
-	control->onRaw([this, menuWidth](WPARAM wParam, LPARAM) { return handleNCPaint(WM_NCPAINT, wParam, menuWidth); }, Message(WM_NCPAINT));
-	control->onRaw([this, menuWidth](WPARAM wParam, LPARAM) { return handleNCPaint(WM_NCACTIVATE, wParam, menuWidth); }, Message(WM_NCACTIVATE));
+	if(!ncPaintCallback) {
+		ncPaintCallback = control->addInternalCallback(Message(WM_NCPAINT),
+			[this](const MSG& msg, LRESULT& ret) -> bool {
+				ret = handleNCPaint(msg.message, msg.wParam, msg.lParam);
+				return true;
+			});
+	}
+	if(!ncActivateCallback) {
+		ncActivateCallback = control->addInternalCallback(Message(WM_NCACTIVATE),
+			[this](const MSG& msg, LRESULT& ret) -> bool {
+				ret = handleNCPaint(msg.message, msg.wParam, msg.lParam);
+				return true;
+			});
+	}
 	::DrawMenuBar(control->handle());
 }
 
 Menu* Menu::appendPopup(const tstring& text, const IconPtr& icon, bool subTitle) {
 	// create the sub-menu
-	auto sub = new Menu(getParent());
-	Seed seed(ownerDrawn, iconSize, font);
+	std::unique_ptr<Menu> sub(new Menu(getParent()));
+	sub->parentMenu = this;
+	Seed seed(requestedOwnerDrawn, iconSize, font);
 	seed.commandMessages = commandMessages;
 	sub->create(seed);
-	sub->parentMenu = this;
 
 	if(subTitle && popup) {
 		sub->setTitle(text, icon);
@@ -199,26 +329,38 @@ Menu* Menu::appendPopup(const tstring& text, const IconPtr& icon, bool subTitle)
 	// get position to insert
 	auto position = size();
 
+	// Retain item metadata even in native mode so a live appearance change can
+	// safely opt the existing menu into owner drawing.
+	auto wrapper = std::make_unique<ItemDataWrapper>(this, position, false, icon);
 	if(ownerDrawn) {
 		info.fMask |= MIIM_DATA | MIIM_FTYPE;
-
 		info.fType = MFT_OWNERDRAW;
-
-		// create item data
-		auto wrapper = new ItemDataWrapper(this, position, false, icon);
-		info.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper);
-		itsItemData.emplace_back(wrapper);
+		info.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper.get());
 	}
 
 	// append to this menu at the end
 	if(!::InsertMenuItem(itsHandle, position, TRUE, &info)) {
 		throw Win32Exception("Could not add a sub-menu");
 	}
-	itsChildren.emplace_back(sub);
-	return sub;
+	itsItemData.emplace_back(std::move(wrapper));
+	auto result = sub.get();
+	itsChildren.emplace_back(std::move(sub));
+	result->applyBackground();
+	return result;
 }
 
 Menu::~Menu() {
+	if(observingAppearance && appearance) {
+		appearance->removeChanged(appearanceCallback);
+	}
+	if(parent && parent->handle() && ::IsWindow(parent->handle())) {
+		if(ncPaintCallback) {
+			parent->clearInternalCallback(Message(WM_NCPAINT), *ncPaintCallback);
+		}
+		if(ncActivateCallback) {
+			parent->clearInternalCallback(Message(WM_NCACTIVATE), *ncActivateCallback);
+		}
+	}
 	// destroy this menu.
 	::DestroyMenu(handle());
 }
@@ -280,6 +422,12 @@ bool Menu::isEnabled(unsigned index) {
 void Menu::setDefaultItem(unsigned index) {
 	if(!::SetMenuDefaultItem(handle(), index, TRUE))
 		throw Win32Exception("SetMenuDefaultItem in Menu::setDefaultItem fizzled...");
+
+	for(auto& item: itsItemData) {
+		if(item) {
+			item->isDefault = item->index == index;
+		}
+	}
 }
 
 tstring Menu::getText(unsigned index) const {
@@ -336,6 +484,8 @@ void Menu::setTitle(const tstring& title, const IconPtr& icon, bool shouldDrawSi
 }
 
 bool Menu::handlePainting(DRAWITEMSTRUCT& drawInfo, ItemDataWrapper& wrapper) {
+	auto& colors = getColors();
+	auto& theme = getRootMenu()->theme;
 	MENUITEMINFO info { sizeof(MENUITEMINFO), MIIM_CHECKMARKS | MIIM_FTYPE | MIIM_DATA | MIIM_STATE | MIIM_STRING | MIIM_SUBMENU };
 	if(!::GetMenuItemInfo(handle(), wrapper.index, TRUE, &info))
 		throw Win32Exception("Couldn't get menu item info when drawing");
@@ -357,7 +507,7 @@ bool Menu::handlePainting(DRAWITEMSTRUCT& drawInfo, ItemDataWrapper& wrapper) {
 
 	Rectangle rect { drawInfo.rcItem };
 
-	BufferedCanvas<FreeCanvas> canvas { drawInfo.hDC, rect.left(), rect.top() };
+	BufferedCanvas<FreeCanvas> canvas { drawInfo.hDC, rect };
 
 	// this will contain adjusted sidebar width
 	int sidebarWidth = 0;
@@ -443,8 +593,14 @@ bool Menu::handlePainting(DRAWITEMSTRUCT& drawInfo, ItemDataWrapper& wrapper) {
 		if(highlight) {
 			color = colors.highlightBackground;
 		} else if(!popup) {
-			BOOL flat;
-			color = (::SystemParametersInfo(SPI_GETFLATMENU, 0, &flat, 0) && flat) ? Color::predefined(COLOR_MENUBAR) : colors.background;
+			if(getRootMenu()->appearance &&
+				getRootMenu()->appearance->isManual()) {
+				color = colors.background;
+			} else {
+				BOOL flat;
+				color = (::SystemParametersInfo(SPI_GETFLATMENU, 0, &flat, 0) &&
+					flat) ? Color::predefined(COLOR_MENUBAR) : colors.background;
+			}
 		} else if(wrapper.isTitle) {
 			color = colors.stripBar;
 		} else {
@@ -712,7 +868,8 @@ bool Menu::handlePainting(MEASUREITEMSTRUCT& measureInfo, ItemDataWrapper& wrapp
 		itemWidth = std::min(itemWidth, static_cast<unsigned>(getParent()->getWindowSize().x / 2));
 		itemWidth = std::max(itemWidth, minWidth);
 	}
-	itemHeight = std::max(itemHeight, static_cast<UINT>(::GetSystemMetrics(SM_CYMENU)));
+	itemHeight = std::max(itemHeight,
+		static_cast<UINT>(getParent()->getSystemMetric(SM_CYMENU)));
 	return true;
 }
 
@@ -723,19 +880,17 @@ void Menu::appendSeparator() {
 	// get position to insert
 	auto position = size();
 
+	auto wrapper = std::make_unique<ItemDataWrapper>(this, position);
 	if(ownerDrawn) {
 		itemInfo.fMask |= MIIM_DATA;
 		itemInfo.fType |= MFT_OWNERDRAW;
-
-		// create item data wrapper
-		auto wrapper = new ItemDataWrapper(this, position);
-		itemInfo.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper);
-		itsItemData.emplace_back(wrapper);
+		itemInfo.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper.get());
 	}
 
 	if(!::InsertMenuItem(itsHandle, position, TRUE, &itemInfo)) {
 		throw Win32Exception("Could not add a menu separator");
 	}
+	itsItemData.emplace_back(std::move(wrapper));
 }
 
 void Menu::remove(unsigned index) {
@@ -746,16 +901,14 @@ void Menu::remove(unsigned index) {
 		throw Win32Exception("Couldn't remove item in Menu::remove");
 	}
 
-	if(ownerDrawn) {
-		for(auto i = itsItemData.begin(); i != itsItemData.end();) {
-			if((*i)->index == index) {
-				i = itsItemData.erase(i);
-			} else {
-				if((*i)->index > index) {
-					--(*i)->index; // adjust succeeding item indices
-				}
-				++i;
+	for(auto i = itsItemData.begin(); i != itsItemData.end();) {
+		if((*i)->index == index) {
+			i = itsItemData.erase(i);
+		} else {
+			if((*i)->index > index) {
+				--(*i)->index; // adjust succeeding item indices
 			}
+			++i;
 		}
 	}
 
@@ -830,21 +983,18 @@ unsigned Menu::appendItem(const tstring& text, const Dispatcher::F& f, const Ico
 	// set text
 	info.dwTypeData = const_cast< LPTSTR >( text.c_str() );
 
+	auto wrapper = std::make_unique<ItemDataWrapper>(this, index, false, icon);
+	wrapper->isDefault = defaultItem;
 	if(ownerDrawn) {
 		info.fMask |= MIIM_FTYPE | MIIM_DATA;
 		info.fType = MFT_OWNERDRAW;
-
-		// set item data
-		auto wrapper = new ItemDataWrapper(this, index, false, icon);
-		if(defaultItem)
-			wrapper->isDefault = true;
-		info.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper);
-		itsItemData.emplace_back(wrapper);
+		info.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper.get());
 	}
 
 	if(!::InsertMenuItem(itsHandle, index, TRUE, &info)) {
 		throw Win32Exception("Couldn't insert item in Menu::appendItem");
 	}
+	itsItemData.emplace_back(std::move(wrapper));
 	return index;
 }
 

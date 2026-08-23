@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -238,6 +238,10 @@ public:
 
 	static bool isHighContrast();
 
+	/** Select how this widget responds to application appearance changes. */
+	void setAppearancePolicy(AppearancePolicy policy);
+	AppearancePolicy getAppearancePolicy() const { return appearancePolicy; }
+
 	/** Return the desktop size of the primary monitor (at coords 0, 0). */
 	static Point getPrimaryDesktopSize();
 	/** Return the desktop size of the monitor closest to this widget. */
@@ -324,6 +328,18 @@ protected:
 
 	Widget(Widget* parent, Dispatcher& dispatcher);
 
+	/** Complete framework initialization after a public create operation. */
+	void finalizeAppearance();
+
+	/** Return the appearance service associated with this widget. */
+	Appearance& getAppearance();
+	const Appearance& getAppearance() const;
+	/** Return true when this widget should use DWT's manual palette renderer. */
+	bool isManualAppearance() const;
+
+	/** Update widget-owned colors, themes and cached drawing resources. */
+	virtual void appearanceChanged();
+
 	virtual ~Widget();
 
 	/**
@@ -346,8 +362,18 @@ protected:
 
 private:
 	friend class Application;
+	friend class Appearance;
 	friend class AccessibilityProvider;
+	friend class Menu;
+	template<typename WidgetType> friend class aspects::Colorable;
+	template<typename T> friend class WidgetCreator;
 	template<typename T> friend T hwnd_cast(HWND hwnd);
+
+	/** @internal Register framework plumbing which must not be replaced by the
+	 * public callback API. Internal callbacks run before application callbacks. */
+	CallbackIter addInternalCallback(const Message& msg, const CallbackType& callback);
+	/** @internal Remove a callback previously returned by addInternalCallback. */
+	void clearInternalCallback(const Message& msg, const CallbackIter& callback);
 
 	static Rectangle getDesktopSize(HMONITOR mon);
 
@@ -355,6 +381,7 @@ private:
 	static GlobalAtom propAtom;
 
 	// Contains the list of signals we're (this window) processing
+	std::unordered_map<Message, CallbackList> internalHandlers;
 	std::unordered_map<Message, CallbackList> handlers;
 
 	HWND hwnd;
@@ -375,6 +402,9 @@ private:
 	std::unique_ptr<accessibility::ScrollProvider> accessibleScroll;
 	std::unique_ptr<accessibility::ItemProvider> accessibleItems;
 	std::vector<std::function<void (const DpiResourceEvent&)>> dpiResourceCallbacks;
+	Appearance* appearance;
+	AppearancePolicy appearancePolicy;
+	unsigned appearanceGeneration;
 };
 
 inline LRESULT Widget::sendMessage( UINT msg, WPARAM wParam, LPARAM lParam) const {
@@ -395,6 +425,11 @@ inline Dispatcher& Widget::getDispatcher() {
 
 inline Widget* Widget::getParent() const {
 	return parent;
+}
+
+inline bool Widget::isManualAppearance() const {
+	return appearancePolicy != AppearancePolicy::Native &&
+		getAppearance().isManual();
 }
 
 inline bool Widget::hasStyle(DWORD style) const {

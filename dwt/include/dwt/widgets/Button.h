@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
   SmartWin++
 
@@ -110,6 +110,10 @@ protected:
 	typedef Button ButtonType;
 
 	Button(Widget* parent);
+
+	/** Supply palette-based chrome after application custom-draw callbacks have
+	 * had the opportunity to handle the notification. */
+	virtual bool handleMessage(const MSG& msg, LRESULT& retVal);
 
 private:
 	friend class ChainingDispatcher;

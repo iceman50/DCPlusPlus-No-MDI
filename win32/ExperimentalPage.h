@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2001-2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "PropPage.h"
+#include "ThemeManager.h"
 
 /** Experimental sharing, hashing, MCN, RTF0 and defensive protocol controls. */
 class ExperimentalPage : public PropPage
@@ -30,9 +31,18 @@ private:
 		int setting;
 		int multiplier;
 	};
+	struct ThemeColorItem {
+		LabelPtr preview;
+		int setting;
+		COLORREF color;
+	};
 
 	ItemList items;
 	std::vector<ScaledIntItem> scaledIntItems;
+	std::vector<ThemeColorItem> themeColors;
+	std::vector<ThemeManager::Theme> themePresets;
+	ComboBoxPtr themeMode;
+	ComboBoxPtr themePreset;
 	TablePtr tempShares;
 	LabelPtr tempSummary;
 	ButtonPtr removeTemp;
@@ -46,6 +56,18 @@ private:
 		const tstring& unit, int minimum, int maximum, int multiplier = 1);
 	void readScaledIntItems();
 	void writeScaledIntItems();
+	void addThemeColor(GridPtr target, const tstring& text, int setting);
+	void chooseThemeColor(size_t index);
+	void resetThemeColors();
+	void updateThemeColor(size_t index);
+	void reloadThemePresets(const std::string& selectedPath = std::string());
+	void applyThemePreset();
+	void applyThemePalette(const dwt::Appearance::Palette& palette);
+	dwt::Appearance::Palette currentThemePalette() const;
+	void updateThemePresetSelection();
+	void saveCustomTheme();
+	void importTheme();
+	void openThemeDirectory();
 	void fillTempShares();
 	void handleTempSelectionChanged();
 	bool handleTempContextMenu(dwt::ScreenCoordinate pt);
