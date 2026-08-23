@@ -418,6 +418,18 @@ if dev.is_win32():
         conf.env.Append(CPPDEFINES="HAVE_HTMLHELP_H")
 
 if "mingw" in env["TOOLS"]:
+    # some toolchains come with openssl import libraries
+    ssl_lib = "#/openssl/lib/"
+    if env["arch"] != "x86":
+        ssl_lib += env["arch"] + "/"
+    if not (env.File(ssl_lib + "libssl.a").exists() and
+        env.File(ssl_lib + "libcrypto.a").exists()):
+            print("WARNING: OpenSSL static libraries not found in %s; "
+                "OpenSSL may be linked dynamically or not at all." % ssl_lib)
+            if defEnv["distro"]:
+                raise SCons.Errors.StopError(
+                    "Required OpenSSL static libraries not found in %s" % ssl_lib)
+
     # see whether we're compiling with MinGW or MinGW-w64 (2 different projects
     # that can both build a 32-bit program). the only differentiator is
     # __MINGW64_VERSION_MAJOR.
