@@ -1,3 +1,4 @@
+* Fix a signedness compiler warning in ADC Bloom filter size validation (iceman50)
 * [L#2156460] Prevent a possible freeze during time formatting (emtee)
 * [L#2156600] Avoid freezes with overly long hub and nick names (emtee)
 * [L#2154041] Improved bounds check for NMDC search strings (emtee)
