@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2001-2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
+#include <openssl/rsa.h>
 
 #include <bzlib.h>
 
@@ -108,14 +109,6 @@ CryptoManager::CryptoManager()
 		SSL_CTX_set_cipher_list(serverContext, ciphersuites12);
 		SSL_CTX_set_ciphersuites(serverContext, ciphersuites13);
 
-		EC_KEY* tmp_ecdh;
-		if ((tmp_ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1)) != NULL) {
-			SSL_CTX_set_options(serverContext, SSL_OP_SINGLE_ECDH_USE);
-			SSL_CTX_set_tmp_ecdh(serverContext, tmp_ecdh);
-
-			EC_KEY_free(tmp_ecdh);
-		}
-
 		SSL_CTX_set_verify(clientContext, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, verify_callback);
 		SSL_CTX_set_verify(serverContext, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, verify_callback);
 	}
@@ -152,13 +145,12 @@ void CryptoManager::generateCertificate() {
 	}
 
 	ssl::BIGNUM bn(BN_new());
-	ssl::RSA rsa(RSA_new());
-	ssl::EVP_PKEY pkey(EVP_PKEY_new());
+	ssl::EVP_PKEY_CTX keyContext(EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL));
 	ssl::X509_NAME nm(X509_NAME_new());
 	ssl::X509 x509ss(X509_new());
 	ssl::ASN1_INTEGER serial(ASN1_INTEGER_new());
 
-	if(!bn || !rsa || !pkey || !nm || !x509ss || !serial) {
+	if(!bn || !keyContext || !nm || !x509ss || !serial) {
 		throw CryptoException(_("Error generating certificate"));
 	}
 
@@ -168,9 +160,12 @@ void CryptoManager::generateCertificate() {
 #define CHECK(n) if(!(n)) { throw CryptoException(#n); }
 
 	// Generate key pair
-	CHECK((BN_set_word(bn, RSA_F4)))
-	CHECK((RSA_generate_key_ex(rsa, keylength, bn, NULL)))
-	CHECK((EVP_PKEY_set1_RSA(pkey, rsa)))
+	CHECK((EVP_PKEY_keygen_init(keyContext) > 0))
+	CHECK((EVP_PKEY_CTX_set_rsa_keygen_bits(keyContext, keylength) > 0))
+	::EVP_PKEY* generatedKey = NULL;
+	CHECK((EVP_PKEY_keygen(keyContext, &generatedKey) > 0))
+	ssl::EVP_PKEY pkey(generatedKey);
+	CHECK((pkey))
 
 	ByteVector fieldBytes;
 
@@ -208,7 +203,7 @@ void CryptoManager::generateCertificate() {
 		if(!f) {
 			return;
 		}
-		PEM_write_RSAPrivateKey(f, rsa, NULL, NULL, 0, NULL, NULL);
+		PEM_write_PrivateKey(f, pkey, NULL, NULL, 0, NULL, NULL);
 		fclose(f);
 	}
 	{

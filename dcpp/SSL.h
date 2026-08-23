@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2001-2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -68,7 +68,7 @@ private:
 typedef scoped_handle<ASN1_INTEGER, ASN1_INTEGER_free> ASN1_INTEGER;
 typedef scoped_handle<BIGNUM, BN_free> BIGNUM;
 typedef scoped_handle<EVP_PKEY, EVP_PKEY_free> EVP_PKEY;
-typedef scoped_handle<RSA, RSA_free> RSA;
+typedef scoped_handle<EVP_PKEY_CTX, EVP_PKEY_CTX_free> EVP_PKEY_CTX;
 typedef scoped_handle<SSL, SSL_free> SSL;
 typedef scoped_handle<SSL_CTX, SSL_CTX_free> SSL_CTX;
 typedef scoped_handle<X509, X509_free> X509;
