@@ -477,7 +477,7 @@ bool ClientManager::supportsRichText(const HintedUser& user) const {
 		findOnlineUser(user) :
 		findOnlineUserHint(user);
 
-	return u && u->getClient().supportsRichText() && u->getIdentity().supports("RTF0");
+	return u && u->getClient().supportsRichText() && u->getIdentity().supports(AdcHub::RTF0_FEATURE);
 }
 
 void ClientManager::userCommand(const HintedUser& user, const UserCommand& uc, ParamMap& params, bool compatibility) {

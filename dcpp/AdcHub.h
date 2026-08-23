@@ -78,6 +78,8 @@ public:
 	static const string NAT0_FEATURE;
 	static const string SEGA_FEATURE;
 	static const string CCPM_FEATURE;
+	static const string RTF0_FEATURE;
+	static const string BBS0_FEATURE;
 	static const string BASE_SUPPORT;
 	static const string BAS0_SUPPORT;
 	static const string TIGR_SUPPORT;

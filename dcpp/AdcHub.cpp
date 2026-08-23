@@ -56,6 +56,8 @@ const string AdcHub::UDP6_FEATURE("UDP6");
 const string AdcHub::NAT0_FEATURE("NAT0");
 const string AdcHub::SEGA_FEATURE("SEGA");
 const string AdcHub::CCPM_FEATURE("CCPM");
+const string AdcHub::RTF0_FEATURE("RTF0");
+const string AdcHub::BBS0_FEATURE("BBS0");
 const string AdcHub::SUDP_FEATURE("SUDP");
 const string AdcHub::BASE_SUPPORT("ADBASE");
 const string AdcHub::BAS0_SUPPORT("ADBAS0");
@@ -70,6 +72,10 @@ const string AdcHub::BBS0_SUPPORT("ADBBS0");
 const vector<StringList> AdcHub::searchExts;
 
 namespace {
+
+string bbsNotNegotiatedError() {
+	return str(F_("This hub has not negotiated %1%") % AdcHub::BBS0_FEATURE);
+}
 
 bool getBBSParam(const AdcCommand& command, const char* name, bool required, string& value) noexcept {
 	bool found = false;
@@ -290,12 +296,12 @@ void AdcHub::handle(AdcCommand::SUP, AdcCommand& c) noexcept {
 			const auto enabled = SETTING(ENABLE_RICH_TEXT);
 			rtfChanged = rtfChanged || supportsRTF0 != enabled;
 			supportsRTF0 = enabled;
-		} else if(i == "RMRTF0") {
+		} else if(i == "RM" + RTF0_FEATURE) {
 			rtfChanged = rtfChanged || supportsRTF0;
 			supportsRTF0 = false;
 		} else if(i == BBS0_SUPPORT) {
 			bbsAdvertised = true;
-		} else if(i == "RMBBS0") {
+		} else if(i == "RM" + BBS0_FEATURE) {
 			bbsRemoved = true;
 		}
 	}
@@ -988,7 +994,7 @@ bool AdcHub::hubMessage(const string& aMessage, bool thirdPerson, bool explicitR
 
 bool AdcHub::subscribeBBS(const string& board, uint64_t timestamp, string& error) {
 	if(!supportsBBS0 || state != STATE_NORMAL) {
-		error = _("This hub has not negotiated BBS0");
+		error = bbsNotNegotiatedError();
 		return false;
 	}
 	auto descriptor = BBSManager::getInstance()->getBoard(getHubUrl(), board);
@@ -1005,7 +1011,7 @@ bool AdcHub::subscribeBBS(const string& board, uint64_t timestamp, string& error
 
 bool AdcHub::unsubscribeBBS(const string& board, string& error) {
 	if(!supportsBBS0 || state != STATE_NORMAL) {
-		error = _("This hub has not negotiated BBS0");
+		error = bbsNotNegotiatedError();
 		return false;
 	}
 	if(!BBSManager::validBoardName(board)) {
@@ -1021,7 +1027,7 @@ bool AdcHub::unsubscribeBBS(const string& board, string& error) {
 
 bool AdcHub::requestBBSEntry(const string& board, const string& tth, string& error) {
 	if(!supportsBBS0 || state != STATE_NORMAL) {
-		error = _("This hub has not negotiated BBS0");
+		error = bbsNotNegotiatedError();
 		return false;
 	}
 	if(!BBSManager::validBoardName(board) || tth.size() != 39 || !Encoder::isBase32(tth)) {
@@ -1038,7 +1044,7 @@ bool AdcHub::postBBS(const string& board, const string& parent, const string& su
 	const string& body, bool richText, string& error)
 {
 	if(!supportsBBS0 || state != STATE_NORMAL) {
-		error = _("This hub has not negotiated BBS0");
+		error = bbsNotNegotiatedError();
 		return false;
 	}
 	auto descriptor = BBSManager::getInstance()->getBoard(getHubUrl(), board);
@@ -1072,7 +1078,7 @@ bool AdcHub::postBBS(const string& board, const string& parent, const string& su
 
 bool AdcHub::withdrawBBS(const string& board, const string& tth, string& error) {
 	if(!supportsBBS0 || state != STATE_NORMAL) {
-		error = _("This hub has not negotiated BBS0");
+		error = bbsNotNegotiatedError();
 		return false;
 	}
 	auto descriptor = BBSManager::getInstance()->getBoard(getHubUrl(), board);
@@ -1094,7 +1100,7 @@ bool AdcHub::withdrawBBS(const string& board, const string& tth, string& error) 
 
 bool AdcHub::fetchBBS(const string& board, const string& tth, string& error) {
 	if(!supportsBBS0 || state != STATE_NORMAL) {
-		error = _("This hub has not negotiated BBS0");
+		error = bbsNotNegotiatedError();
 		return false;
 	}
 	return BBSManager::getInstance()->requestDocument(getHubUrl(), board, tth, error);
@@ -1106,7 +1112,7 @@ bool AdcHub::privateMessage(const OnlineUser& user, const string& aMessage, bool
 	if(state != STATE_NORMAL)
 		return false;
 	string message = aMessage;
-	const bool richText = supportsRTF0 && user.getIdentity().supports("RTF0") &&
+	const bool richText = supportsRTF0 && user.getIdentity().supports(RTF0_FEATURE) &&
 		RichText::prepareOutgoingMessage(message, explicitRichText, getHubUrl());
 	if(explicitRichText && !richText)
 		return false;
@@ -1449,7 +1455,7 @@ void AdcHub::infoImpl() {
 		su += "," + SUDP_FEATURE;
 	}
 	if(SETTING(ENABLE_RICH_TEXT)) {
-		su += ",RTF0";
+		su += "," + RTF0_FEATURE;
 	}
 
 	const auto connectivity = getAdvertisedConnectivity(sock->isV6Valid(),

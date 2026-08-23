@@ -194,7 +194,7 @@ fullSlots(false)
 
 	TimerManager::getInstance()->start();
 
-	conns[CONN_VERSION] = HttpManager::getInstance()->download("https://dcplusplus.sourceforge.io/version.xml");
+	conns[CONN_VERSION] = HttpManager::getInstance()->download("https://dcplusplus.sourceforge.io/version_exp.xml");
 
 	try {
 		ConnectivityManager::getInstance()->setup(true, true);
