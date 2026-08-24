@@ -57,6 +57,8 @@ public:
 	};
 
 	static uint32_t convertTime(FILETIME* f);
+	/** Convert an absolute UTF-8 path to the Win32 extended-length form when needed. */
+	static tstring toNativePath(const string& path) noexcept;
 
 #else // !_WIN32
 

@@ -21,6 +21,30 @@
 namespace dcpp {
 
 #ifdef _WIN32
+tstring File::toNativePath(const string& aPath) noexcept {
+	auto path = Text::toT(aPath);
+
+	// CreateDirectory has a lower legacy limit than most file APIs. Using that
+	// threshold keeps all callers safe without changing short-path semantics.
+	if(path.size() < MAX_PATH - 12 || path.compare(0, 4, L"\\\\?\\") == 0 ||
+		path.compare(0, 4, L"\\\\.\\") == 0)
+	{
+		return path;
+	}
+
+	std::replace(path.begin(), path.end(), L'/', L'\\');
+	if(path.size() >= 3 && path[1] == L':' && path[2] == L'\\') {
+		return L"\\\\?\\" + path;
+	}
+	if(path.compare(0, 2, L"\\\\") == 0) {
+		return L"\\\\?\\UNC\\" + path.substr(2);
+	}
+
+	// Extended-length syntax requires an absolute path. Preserve relative paths
+	// so their resolution remains identical to the legacy behavior.
+	return path;
+}
+
 File::File(const string& aFileName, int access, int mode) {
 	dcassert(access == static_cast<int>(WRITE) || access == static_cast<int>(READ) || access == static_cast<int>((READ | WRITE)));
 
@@ -40,7 +64,7 @@ File::File(const string& aFileName, int access, int mode) {
 	}
 	DWORD shared = FILE_SHARE_READ | (mode & SHARED ? FILE_SHARE_WRITE : 0);
 
-	h = ::CreateFile(Text::toT(aFileName).c_str(), access, shared, nullptr, m,
+	h = ::CreateFile(toNativePath(aFileName).c_str(), access, shared, nullptr, m,
 		FILE_FLAG_POSIX_SEMANTICS | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
 
 	if(h == INVALID_HANDLE_VALUE) {
@@ -145,7 +169,7 @@ size_t File::flush() {
 }
 
 void File::renameFile(const string& source, const string& target) {
-	if(!::MoveFile(Text::toT(source).c_str(), Text::toT(target).c_str())) {
+	if(!::MoveFile(toNativePath(source).c_str(), toNativePath(target).c_str())) {
 		// Can't move, try copy/delete...
 		copyFile(source, target);
 		deleteFile(source);
@@ -153,14 +177,14 @@ void File::renameFile(const string& source, const string& target) {
 }
 
 void File::copyFile(const string& src, const string& target) {
-	if(!::CopyFile(Text::toT(src).c_str(), Text::toT(target).c_str(), FALSE)) {
+	if(!::CopyFile(toNativePath(src).c_str(), toNativePath(target).c_str(), FALSE)) {
 		throw FileException(Util::translateError(GetLastError()));
 	}
 }
 
 void File::deleteFile(const string& aFileName) noexcept
 {
-	::DeleteFile(Text::toT(aFileName).c_str());
+	::DeleteFile(toNativePath(aFileName).c_str());
 }
 
 int64_t File::getSize(const string& aFileName) noexcept {
@@ -170,14 +194,12 @@ int64_t File::getSize(const string& aFileName) noexcept {
 
 void File::ensureDirectory(const string& aFile) noexcept {
 	// Skip the first dir...
-	tstring file;
-	Text::toT(aFile, file);
-	tstring::size_type start = file.find_first_of(_T("\\/"));
+	string::size_type start = aFile.find_first_of("\\/");
 	if(start == string::npos)
 		return;
 	start++;
-	while( (start = file.find_first_of(_T("\\/"), start)) != string::npos) {
-		::CreateDirectory(file.substr(0, start+1).c_str(), NULL);
+	while( (start = aFile.find_first_of("\\/", start)) != string::npos) {
+		::CreateDirectory(toNativePath(aFile.substr(0, start + 1)).c_str(), NULL);
 		start++;
 	}
 }
@@ -443,7 +465,7 @@ StringList File::findFiles(const string& path, const string& pattern) {
 FileFindIter::FileFindIter() : handle(INVALID_HANDLE_VALUE) { }
 
 FileFindIter::FileFindIter(const string& path) : handle(INVALID_HANDLE_VALUE) {
-	handle = ::FindFirstFileEx(Text::toT(path).c_str(), FindExInfoBasic, &data,
+	handle = ::FindFirstFileEx(File::toNativePath(path).c_str(), FindExInfoBasic, &data,
 		FindExSearchNameMatch, nullptr, FIND_FIRST_EX_CASE_SENSITIVE);
 }
 
@@ -575,7 +597,7 @@ uint32_t FileFindIter::DirData::getLastWriteTime() {
 
 #ifdef _WIN32
 FILE* dcpp_fopen(const char* filename, const char* mode) {
-	return _wfopen(Text::toT(filename).c_str(), Text::toT(mode).c_str());
+	return _wfopen(File::toNativePath(filename).c_str(), Text::toT(mode).c_str());
 }
 #endif
 

@@ -100,7 +100,7 @@ struct Handle {
 size_t FileReader::readDirect(const string& file, const DataCallback& callback) {
 	DWORD sector = 0, y;
 
-	auto tfile = Text::toT(file);
+	auto tfile = File::toNativePath(file);
 
 	if (!::GetDiskFreeSpace(Util::getFilePath(tfile).c_str(), &y, &sector, &y, &y)) {
 		dcdebug("Failed to get sector size: %s\n", Util::translateError(::GetLastError()).c_str());

@@ -1090,7 +1090,7 @@ be found, and if it has no case-insensitive duplicate. */
 bool upgradeFromV2(string& file) {
 	WIN32_FIND_DATA data;
 	// FindFirstFile does a case-insensitive search by default
-	auto handle = ::FindFirstFile(Text::toT(file).c_str(), &data);
+	auto handle = ::FindFirstFile(File::toNativePath(file).c_str(), &data);
 	if(handle == INVALID_HANDLE_VALUE) {
 		// file not found
 		return false;
@@ -1103,7 +1103,7 @@ bool upgradeFromV2(string& file) {
 	::FindClose(handle);
 
 	// don't use dcpp::File as that would be case-sensitive
-	handle = ::CreateFile((Text::toT(Util::getFilePath(file)) + data.cFileName).c_str(),
+	handle = ::CreateFile(File::toNativePath(Util::getFilePath(file) + Text::fromT(data.cFileName)).c_str(),
 		GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
 	if(handle == INVALID_HANDLE_VALUE) {
 		return false;
