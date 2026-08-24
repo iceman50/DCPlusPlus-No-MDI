@@ -244,7 +244,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		addIntItem(cur, T_("Hash database write batch size"), SettingsManager::HASH_DB_WRITE_BATCH_SIZE,
 			IDH_SETTINGS_EXPERIMENTAL_HASH_BATCH_SIZE, T_("statements"), 1, UD_MAXVAL);
 
-		auto checks = cur->addChild(Grid::Seed(1, 2));
+		auto checks = cur->addChild(Grid::Seed(2, 1));
 		checks->column(0).mode = GridInfo::FILL;
 		auto verify = checks->addChild(CheckBox::Seed(T_("Verify hash database on startup")));
 		verify->setHelpId(IDH_SETTINGS_EXPERIMENTAL_HASH_VERIFY_STARTUP);
@@ -348,7 +348,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		reloadThemePresets();
 	}
 
-	themeGrid->addChild(Label::Seed(T_("High contrast always uses Windows system colors. Chat, transfer and other semantic colors remain under Appearance > Styles.")));
+	themeGrid->addChild(Label::Seed(T_("High contrast always uses Windows system colors.\r\nChat, transfer and other semantic colors remain under Appearance > Styles.")));
 
 	PropPage::read(items);
 	readScaledIntItems();
