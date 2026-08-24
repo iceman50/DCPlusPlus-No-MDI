@@ -165,6 +165,57 @@ void updateApplicationColors() {
 	::EnumThreadWindows(::GetCurrentThreadId(), updateWindowColors, 0);
 }
 
+PIDLIST_ABSOLUTE parseShellPath(const tstring& path) {
+	PIDLIST_ABSOLUTE item = nullptr;
+	if(SUCCEEDED(::SHParseDisplayName(path.c_str(), nullptr, &item, 0, nullptr))) {
+		return item;
+	}
+	const auto nativePath = File::toNativePath(Text::fromT(path));
+	if(nativePath != path && SUCCEEDED(::SHParseDisplayName(nativePath.c_str(), nullptr, &item, 0, nullptr))) {
+		return item;
+	}
+	return nullptr;
+}
+
+bool executeShellItem(const tstring& path) {
+	auto item = parseShellPath(path);
+	if(!item) {
+		return false;
+	}
+	SHELLEXECUTEINFO info = { sizeof(SHELLEXECUTEINFO) };
+	info.fMask = SEE_MASK_IDLIST | SEE_MASK_INVOKEIDLIST;
+	info.lpIDList = item;
+	info.nShow = SW_SHOWNORMAL;
+	const auto result = ::ShellExecuteEx(&info) != FALSE;
+	::CoTaskMemFree(item);
+	return result;
+}
+
+bool showShellFolder(const tstring& path, bool selectItem) {
+	auto item = parseShellPath(path);
+	if(!item) {
+		return false;
+	}
+	HRESULT result;
+	if(selectItem) {
+		auto parent = ::ILCloneFull(item);
+		LPCITEMIDLIST child = ::ILFindLastID(item);
+		if(!parent || !child || !::ILRemoveLastID(parent)) {
+			if(parent) {
+				::ILFree(parent);
+			}
+			::CoTaskMemFree(item);
+			return false;
+		}
+		result = ::SHOpenFolderAndSelectItems(parent, 1, &child, 0);
+		::ILFree(parent);
+	} else {
+		result = ::SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
+	}
+	::CoTaskMemFree(item);
+	return SUCCEEDED(result);
+}
+
 }
 
 const Button::Seed WinUtil::Seeds::button;
@@ -803,21 +854,25 @@ void WinUtil::playSound(const tstring& sound) {
 	if(sound == _T("beep")) {
 		::MessageBeep(MB_OK);
 	} else {
-		::PlaySound(sound.c_str(), 0, SND_FILENAME | SND_ASYNC);
+		::PlaySound(File::toNativePath(Text::fromT(sound)).c_str(), 0, SND_FILENAME | SND_ASYNC);
 	}
 }
 
 void WinUtil::openFile(const tstring& file) {
-	::ShellExecute(NULL, NULL, file.c_str(), NULL, NULL, SW_SHOWNORMAL);
+	if(!executeShellItem(file)) {
+		::ShellExecute(NULL, NULL, file.c_str(), NULL, NULL, SW_SHOWNORMAL);
+	}
 }
 
 void WinUtil::openFolder(const tstring& file) {
-	if(File::getSize(Text::fromT(file)) != -1)
-		::ShellExecute(NULL, NULL, Text::toT("explorer.exe").c_str(), Text::toT("/e, /select, \"" + (Text::fromT(file))
-			+ "\"").c_str(), NULL, SW_SHOWNORMAL);
-	else
-		::ShellExecute(NULL, NULL, Text::toT("explorer.exe").c_str(), Text::toT("/e, \"" + Util::getFilePath(
-			Text::fromT(file)) + "\"").c_str(), NULL, SW_SHOWNORMAL);
+	const auto path = Text::fromT(file);
+	const auto isFile = File::getSize(path) != -1;
+	const auto folder = isFile || !File::isDirectory(path) ? Text::toT(Util::getFilePath(path)) : file;
+	if((isFile && showShellFolder(file, true)) || (!isFile && showShellFolder(folder, false))) {
+		return;
+	}
+	::ShellExecute(NULL, NULL, Text::toT("explorer.exe").c_str(),
+		Text::toT("/e, \"" + Text::fromT(folder) + "\"").c_str(), NULL, SW_SHOWNORMAL);
 }
 
 tstring WinUtil::getNicks(const CID& cid) {

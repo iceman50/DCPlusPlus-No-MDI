@@ -78,20 +78,68 @@ extern "C" const char *_nl_locale_name_default(void);
 
 #ifdef _WIN32
 
-static string getDownloadsPath(const string& def) {
-	// Try Vista downloads path
-	PWSTR path = NULL;
+namespace {
 
-	// Defined in KnownFolders.h.
-	static GUID downloads = {0x374de290, 0x123f, 0x4565, {0x91, 0x64, 0x39, 0xc4, 0x92, 0x5e, 0x46, 0x7b}};
-
-	if(::SHGetKnownFolderPath(downloads, 0, NULL, &path) == S_OK) {
-		string ret = Text::fromT(path) + "\\";
-		::CoTaskMemFree(path);
-		return ret;
+tstring getModuleFileName() {
+	tstring value(MAX_PATH, _T('\0'));
+	while(true) {
+		const auto length = ::GetModuleFileName(nullptr, &value[0], static_cast<DWORD>(value.size()));
+		if(!length) {
+			return tstring();
+		}
+		if(length < value.size()) {
+			value.resize(length);
+			return value;
+		}
+		if(value.size() >= 32768) {
+			return tstring();
+		}
+		value.resize(std::min<size_t>(value.size() * 2, 32768), _T('\0'));
 	}
+}
 
-	return def + "Downloads\\";
+string getKnownFolderPath(const GUID& folder, const string& fallback = string()) {
+	PWSTR path = nullptr;
+	if(::SHGetKnownFolderPath(folder, 0, nullptr, &path) != S_OK) {
+		return fallback;
+	}
+	const auto result = Text::fromT(path);
+	::CoTaskMemFree(path);
+	return result;
+}
+
+tstring getShortPath(const tstring& path) {
+	const auto nativePath = File::toNativePath(Text::fromT(path));
+	const auto required = ::GetShortPathName(nativePath.c_str(), nullptr, 0);
+	if(!required) {
+		return tstring();
+	}
+	tstring result(required, _T('\0'));
+	const auto length = ::GetShortPathName(nativePath.c_str(), &result[0], required);
+	if(!length || length >= required) {
+		return tstring();
+	}
+	result.resize(length);
+	if(result.compare(0, 8, _T("\\\\?\\UNC\\")) == 0) {
+		result.replace(0, 8, _T("\\\\"));
+	} else if(result.compare(0, 4, _T("\\\\?\\")) == 0) {
+		result.erase(0, 4);
+	}
+	return result;
+}
+
+// Folder identifiers are declared locally so builds using older MinGW SDK
+// headers still get the dynamically allocated known-folder API.
+const GUID roamingAppData = {0x3eb685db, 0x65f9, 0x4cf6, {0xa0, 0x3a, 0xe3, 0xef, 0x65, 0x72, 0x9f, 0x3d}};
+const GUID localAppData = {0xf1b32785, 0x6fba, 0x4fcf, {0x9d, 0x55, 0x7b, 0x8e, 0x7f, 0x15, 0x70, 0x91}};
+const GUID documents = {0xfdd39ad0, 0x238f, 0x46af, {0xad, 0xb4, 0x6c, 0x85, 0x48, 0x03, 0x69, 0xc7}};
+const GUID downloads = {0x374de290, 0x123f, 0x4565, {0x91, 0x64, 0x39, 0xc4, 0x92, 0x5e, 0x46, 0x7b}};
+
+string getDownloadsPath(const string& def) {
+	const auto path = getKnownFolderPath(downloads);
+	return path.empty() ? def + "Downloads\\" : path + "\\";
+}
+
 }
 
 #endif
@@ -103,10 +151,7 @@ void Util::initialize(PathsMap pathOverrides) {
 	mt.seed(dev());
 
 #ifdef _WIN32
-	TCHAR buf[MAX_PATH+1] = { 0 };
-	::GetModuleFileName(NULL, buf, MAX_PATH);
-
-	string exePath = Util::getFilePath(Text::fromT(buf));
+	string exePath = Util::getFilePath(Text::fromT(getModuleFileName()));
 
 	// Global config path is DC++ executable path...
 	paths[PATH_GLOBAL_CONFIG] = exePath;
@@ -127,13 +172,15 @@ void Util::initialize(PathsMap pathOverrides) {
 		paths[PATH_DOWNLOADS] = paths[PATH_USER_CONFIG] + "Downloads\\";
 
 	} else {
-		if(::SHGetFolderPath(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, buf) == S_OK) {
-			paths[PATH_USER_CONFIG] = Text::fromT(buf) + "\\DC++\\";
+		const auto roamingPath = getKnownFolderPath(roamingAppData);
+		if(!roamingPath.empty()) {
+			paths[PATH_USER_CONFIG] = roamingPath + "\\DC++\\";
 		}
 
 		paths[PATH_DOWNLOADS] = getDownloadsPath(paths[PATH_USER_CONFIG]);
 
-		paths[PATH_USER_LOCAL] = ::SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, buf) == S_OK ? Text::fromT(buf) + "\\DC++\\" : paths[PATH_USER_CONFIG];
+		const auto localPath = getKnownFolderPath(localAppData);
+		paths[PATH_USER_LOCAL] = localPath.empty() ? paths[PATH_USER_CONFIG] : localPath + "\\DC++\\";
 	}
 
 	paths[PATH_RESOURCES] = exePath;
@@ -141,10 +188,7 @@ void Util::initialize(PathsMap pathOverrides) {
 	// libintl doesn't support wide path names so we use the short (8.3) format.
 	// https://sourceforge.net/p/gnuwin32/discussion/74807/thread/724990a4/
 	tstring localePath_ = Text::toT(exePath) + _T("locale\\");
-	memset(buf, 0, sizeof(buf));
-	::GetShortPathName(localePath_.c_str(), buf, sizeof(buf)/sizeof(TCHAR));
-
-	paths[PATH_LOCALE] = Text::fromT(buf);
+	paths[PATH_LOCALE] = Text::fromT(getShortPath(localePath_));
 
 #else
 	paths[PATH_GLOBAL_CONFIG] = "/etc/";
@@ -220,12 +264,10 @@ void Util::loadBootConfig() {
 #ifdef _WIN32
 			/// @todo load environment variables instead? would make it more useful on *nix
 			params["APPDATA"] = []() -> string {
-				TCHAR path[MAX_PATH];
-				return Text::fromT((::SHGetFolderPath(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, path), path));
+				return getKnownFolderPath(roamingAppData);
 			};
 			params["PERSONAL"] = []() -> string {
-				TCHAR path[MAX_PATH];
-				return Text::fromT((::SHGetFolderPath(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, path), path));
+				return getKnownFolderPath(documents);
 			};
 #endif
 			paths[PATH_USER_CONFIG] = Util::formatParams(boot.getChildData(), params);
@@ -1280,9 +1322,19 @@ void Util::setAwayCounter(uint8_t i) {
 
 string Util::getTempPath() {
 #ifdef _WIN32
-	TCHAR buf[MAX_PATH + 1];
-	DWORD x = GetTempPath(MAX_PATH, buf);
-	return Text::fromT(tstring(buf, x));
+	tstring path(MAX_PATH, _T('\0'));
+	while(path.size() < 32768) {
+		const auto length = ::GetTempPath(static_cast<DWORD>(path.size()), &path[0]);
+		if(!length) {
+			return emptyString;
+		}
+		if(length < path.size()) {
+			path.resize(length);
+			return Text::fromT(path);
+		}
+		path.resize(static_cast<size_t>(length) + 1, _T('\0'));
+	}
+	return emptyString;
 #else
 	return "/tmp/";
 #endif

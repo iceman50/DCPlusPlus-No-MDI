@@ -83,7 +83,7 @@ bool GeoIP::decompress() const {
 
 void GeoIP::open() {
 #ifdef _WIN32
-	geo = GeoIP_open(Text::toT(path).c_str(), GEOIP_STANDARD);
+	geo = GeoIP_open(File::toNativePath(path).c_str(), GEOIP_STANDARD);
 #else
 	geo = GeoIP_open(path.c_str(), GEOIP_STANDARD);
 #endif

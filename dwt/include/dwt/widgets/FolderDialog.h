@@ -119,8 +119,6 @@ private:
 
 	HWND getParentHandle() const { return parent ? parent->handle() : nullptr; }
 	util::win32::FileDialogOptions getModernOptions() const;
-	bool openRooted(tstring& dir);
-	static int CALLBACK browseCallbackProc(HWND hwnd, UINT message, LPARAM, LPARAM data);
 };
 
 }

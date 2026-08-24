@@ -33,7 +33,7 @@ Archive::Archive(const string& path) {
 #ifdef _WIN32
 	zlib_filefunc64_def funcs;
 	fill_win32_filefunc64(&funcs);
-	file = unzOpen2_64(Text::toT(path).c_str(), &funcs);
+	file = unzOpen2_64(File::toNativePath(path).c_str(), &funcs);
 #else
 	file = unzOpen64(path.c_str());
 #endif
@@ -69,9 +69,12 @@ void Archive::extract(const string& path) {
 	if(check(unzGoToFirstFile(file)) != UNZ_OK) { return; }
 
 	do {
-		char pathBuf[PATH_MAX];
-		if(check(unzGetCurrentFileInfo(file, nullptr, pathBuf, PATH_MAX, nullptr, 0, nullptr, 0)) != UNZ_OK) { continue; }
-		string path_out(pathBuf);
+		unz_file_info64 info = { };
+		if(check(unzGetCurrentFileInfo64(file, &info, nullptr, 0, nullptr, 0, nullptr, 0)) != UNZ_OK) { continue; }
+		vector<char> pathBuf(static_cast<size_t>(info.size_filename) + 1, 0);
+		if(check(unzGetCurrentFileInfo64(file, nullptr, pathBuf.data(),
+			static_cast<uLong>(pathBuf.size()), nullptr, 0, nullptr, 0)) != UNZ_OK) { continue; }
+		string path_out(pathBuf.data(), info.size_filename);
 		if(path_out.empty() || isDir(path_out)) {
 			continue;
 		}

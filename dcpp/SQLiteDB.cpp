@@ -18,6 +18,9 @@
 #include "stdinc.h"
 #include "SQLiteDB.h"
 
+#include "File.h"
+#include "Text.h"
+
 namespace dcpp {
 
 namespace {
@@ -57,7 +60,14 @@ void SQLiteDB::open(const string& fileName, bool readOnly) {
 		SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_PRIVATECACHE;
 
 	sqlite3* handle = nullptr;
+#ifdef _WIN32
+	// SQLite's default Windows VFS advertises MAX_PATH even though the bundled
+	// implementation also provides a wide-character extended-length VFS.
+	const auto nativeFileName = Text::fromT(File::toNativePath(fileName));
+	const auto rc = sqlite3_open_v2(nativeFileName.c_str(), &handle, flags, "win32-longpath");
+#else
 	const auto rc = sqlite3_open_v2(fileName.c_str(), &handle, flags, nullptr);
+#endif
 	db = handle;
 	if (rc != SQLITE_OK) {
 		throwLastError("opening " + fileName);

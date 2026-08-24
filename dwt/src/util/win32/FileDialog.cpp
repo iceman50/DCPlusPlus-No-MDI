@@ -25,6 +25,7 @@
 #include <dwt/Application.h>
 #include <dwt/DWTException.h>
 #include <dwt/util/win32/NativeDialogAppearance.h>
+#include <dwt/util/win32/Path.h>
 
 #include <sstream>
 
@@ -160,6 +161,17 @@ FileDialogResult makeResult(IShellItem* item) {
 	return result;
 }
 
+HRESULT createShellItem(const tstring& path, IShellItem** item) {
+	auto result = ::SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(item));
+	if(FAILED(result)) {
+		const auto nativePath = toNativePath(path);
+		if(nativePath != path) {
+			result = ::SHCreateItemFromParsingName(nativePath.c_str(), nullptr, IID_PPV_ARGS(item));
+		}
+	}
+	return result;
+}
+
 void setFolder(IFileDialog* dialog, const FileDialogOptions& options) {
 	ComPtr<IShellItem> item;
 	HRESULT result = E_FAIL;
@@ -169,8 +181,7 @@ void setFolder(IFileDialog* dialog, const FileDialogOptions& options) {
 	} else if(options.initialItem) {
 		result = ::SHCreateItemFromIDList(options.initialItem, IID_PPV_ARGS(item.put()));
 	} else if(!options.initialDirectory.empty()) {
-		result = ::SHCreateItemFromParsingName(options.initialDirectory.c_str(), nullptr,
-			IID_PPV_ARGS(item.put()));
+		result = createShellItem(options.initialDirectory, item.put());
 	}
 	if(SUCCEEDED(result)) {
 		dialog->SetFolder(item.get());
@@ -223,8 +234,7 @@ void configureDialog(const FileDialogOptions& options, IFileDialog* dialog) {
 
 	for(const auto& place: options.places) {
 		ComPtr<IShellItem> item;
-		if(SUCCEEDED(::SHCreateItemFromParsingName(place.first.c_str(), nullptr,
-			IID_PPV_ARGS(item.put())))) {
+		if(SUCCEEDED(createShellItem(place.first, item.put()))) {
 			dialog->AddPlace(item.get(), place.second);
 		}
 	}

@@ -98,6 +98,7 @@ public:
 	static void deleteFile(const string& aFileName) noexcept;
 
 	static int64_t getSize(const string& aFileName) noexcept;
+	static bool isDirectory(const string& path) noexcept;
 
 	static void ensureDirectory(const string& aFile) noexcept;
 	static bool isAbsolute(const string& path) noexcept;

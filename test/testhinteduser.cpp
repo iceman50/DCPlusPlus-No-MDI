@@ -97,6 +97,29 @@ TEST_F(HubHintQueueTest, replaces_the_route_for_a_hub_specific_file_list)
 	});
 }
 
+#ifdef _WIN32
+
+TEST_F(HubHintQueueTest, accepts_download_targets_beyond_legacy_max_path)
+{
+	uint8_t cidData[CID::SIZE] = { 6 };
+	UserPtr user(new User(CID(cidData)));
+	auto queue = QueueManager::getInstance();
+	auto target = Util::getPath(Util::PATH_DOWNLOADS);
+	while(target.size() < MAX_PATH + 32) {
+		target += "segment-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\";
+	}
+	target += "download.bin";
+
+	EXPECT_NO_THROW(queue->add(target, 1, TTHValue(), HintedUser(user, "adc://example.invalid")));
+	queue->lockedOperation([&](const QueueItem::StringMap& items) {
+		ASSERT_EQ(1U, items.size());
+		EXPECT_EQ(target, items.begin()->second->getTarget());
+	});
+	queue->remove(target);
+}
+
+#endif
+
 TEST_F(HubHintQueueTest, adc_directory_downloads_queue_recursive_partial_lists_with_full_fallback)
 {
 	uint8_t cidData[CID::SIZE] = { 2 };

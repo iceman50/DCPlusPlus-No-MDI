@@ -36,6 +36,7 @@
 #include <dwt/resources/Icon.h>
 #include <dwt/resources/Bitmap.h>
 #include <dwt/DWTException.h>
+#include <dwt/util/win32/Path.h>
 
 namespace dwt {
 
@@ -62,7 +63,7 @@ resId(resourceId)
 }
 
 Icon::Icon(const tstring& filePath, const Point& size) :
-ResourceType((HICON)::LoadImage(0, filePath.c_str(), IMAGE_ICON, size.x, size.y, LR_DEFAULTCOLOR | LR_LOADFROMFILE)),
+ResourceType((HICON)::LoadImage(0, util::win32::toNativePath(filePath).c_str(), IMAGE_ICON, size.x, size.y, LR_DEFAULTCOLOR | LR_LOADFROMFILE)),
 resId(0)
 {
 	if(!handle()) {

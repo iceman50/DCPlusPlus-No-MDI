@@ -148,7 +148,7 @@ bool UnZFilter::operator()(const void* in, size_t& insize, void* out, size_t& ou
 
 void GZ::decompress(const string& source, const string& target) {
 #ifdef _WIN32
-	auto gz = gzopen_w(Text::toT(source).c_str(), "rb");
+	auto gz = gzopen_w(File::toNativePath(source).c_str(), "rb");
 #else
 	auto gz = gzopen(source.c_str(), "rb");
 #endif

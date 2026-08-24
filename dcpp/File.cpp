@@ -192,6 +192,11 @@ int64_t File::getSize(const string& aFileName) noexcept {
 	return i != FileFindIter() ? i->getSize() : -1;
 }
 
+bool File::isDirectory(const string& path) noexcept {
+	const auto attributes = ::GetFileAttributes(toNativePath(path).c_str());
+	return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
 void File::ensureDirectory(const string& aFile) noexcept {
 	// Skip the first dir...
 	string::size_type start = aFile.find_first_of("\\/");
@@ -398,6 +403,11 @@ int64_t File::getSize(const string& aFileName) noexcept {
 		return -1;
 
 	return s.st_size;
+}
+
+bool File::isDirectory(const string& path) noexcept {
+	struct stat s;
+	return stat(Text::fromUtf8(path).c_str(), &s) == 0 && S_ISDIR(s.st_mode);
 }
 
 void File::ensureDirectory(const string& aFile) noexcept {

@@ -37,6 +37,7 @@
 
 #include <dwt/CanvasClasses.h>
 #include <dwt/Point.h>
+#include <dwt/util/win32/Path.h>
 
 namespace dwt {
 
@@ -50,7 +51,7 @@ Bitmap::Bitmap(unsigned resourceId, unsigned flags) :
 }
 
 Bitmap::Bitmap(const tstring& filePath, unsigned flags) :
-	Bitmap(reinterpret_cast<HBITMAP>(::LoadImage(::GetModuleHandle(NULL), filePath.c_str(), IMAGE_BITMAP, 0, 0, flags | LR_LOADFROMFILE)))
+	Bitmap(reinterpret_cast<HBITMAP>(::LoadImage(::GetModuleHandle(NULL), util::win32::toNativePath(filePath).c_str(), IMAGE_BITMAP, 0, 0, flags | LR_LOADFROMFILE)))
 {
 }
 

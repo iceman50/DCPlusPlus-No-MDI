@@ -44,7 +44,7 @@ if dev.is_win32():
         print("Unknown resource compiler.")
         Return()
     res = env.RES(dev.get_sources(source_path, "*.rc"))
-    env.Depends(res, "resource.h")
+    env.Depends(res, ["resource.h", "#/res/DCPlusPlus.manifest." + env["arch"]])
     prog_sources.append(res)
 
 headers = dev.get_sources(source_path, "*.h")

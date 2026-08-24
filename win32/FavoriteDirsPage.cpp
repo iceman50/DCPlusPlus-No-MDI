@@ -26,6 +26,7 @@
 #include <dwt/widgets/MessageBox.h>
 
 #include <dcpp/SettingsManager.h>
+#include <dcpp/File.h>
 #include <dcpp/FavoriteManager.h>
 #include <dcpp/version.h>
 #include "WinUtil.h"
@@ -128,7 +129,7 @@ void FavoriteDirsPage::handleSelectionChanged() {
 
 void FavoriteDirsPage::handleDragDrop(const TStringList& files) {
 	for(auto& i: files)
-		if(PathIsDirectory(i.c_str()))
+		if(File::isDirectory(Text::fromT(i)))
 			addDirectory(i);
 }
 

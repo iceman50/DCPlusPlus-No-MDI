@@ -36,6 +36,7 @@
 #include <dwt/LibraryLoader.h>
 #include <dwt/util/check.h>
 #include <dwt/util/StringConversion.h>
+#include <dwt/util/win32/Path.h>
 
 namespace dwt {
 
@@ -63,7 +64,7 @@ void LibraryLoader::load(const tstring& libraryName, bool allowFailure) {
 	}
 
 	// Loading library
-	itsHMod = ::LoadLibrary( libraryName.c_str() );
+	itsHMod = ::LoadLibrary(util::win32::toNativePath(libraryName).c_str());
 
 	// TODO: Rewrite xAssert to get support for submitting tstrings (could show library name)
 	if(!allowFailure) {

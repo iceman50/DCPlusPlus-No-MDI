@@ -35,7 +35,7 @@
 #ifdef _WIN32
 # define PLUGIN_EXT "*.dll"
 
-# define LOAD_LIBRARY(filename) ::LoadLibrary(Text::toT(filename).c_str())
+# define LOAD_LIBRARY(filename) ::LoadLibrary(File::toNativePath(filename).c_str())
 # define FREE_LIBRARY(lib) ::FreeLibrary(lib)
 # define GET_ADDRESS(lib, name) ::GetProcAddress(lib, name)
 # define GET_ERROR() Util::translateError(GetLastError())

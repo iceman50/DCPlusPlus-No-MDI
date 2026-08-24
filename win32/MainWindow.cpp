@@ -26,6 +26,7 @@
 #include <dcpp/Download.h>
 #include <dcpp/DownloadManager.h>
 #include <dcpp/FavoriteManager.h>
+#include <dcpp/File.h>
 #include <dcpp/GeoManager.h>
 #include <dcpp/HttpManager.h>
 #include <dcpp/LogManager.h>
@@ -751,7 +752,7 @@ void MainWindow::addPluginCommands(Menu* menu) {
 			for(auto& i: commandIt->second) {
 				dwt::IconPtr icon;
 				if(!i.second.second.empty()) {
-					try { icon = new dwt::Icon(i.second.second, dwt::Point(16, 16)); }
+					try { icon = new dwt::Icon(File::toNativePath(Text::fromT(i.second.second)), dwt::Point(16, 16)); }
 					catch(const dwt::DWTException&) { }
 				}
 				sub->appendItem(i.first, i.second.first, icon);

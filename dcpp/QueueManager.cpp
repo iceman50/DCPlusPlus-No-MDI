@@ -690,19 +690,25 @@ void QueueManager::setDirty() {
 }
 
 string QueueManager::checkTarget(const string& aTarget, bool checkExistence) {
+#ifdef _WIN32
+	// Extended-length Win32 paths may contain up to 32,767 UTF-16 code units,
+	// including the native prefix and terminating null character.
+	if(File::toNativePath(aTarget).size() >= 32767) {
+#else
 	if(aTarget.length() > PATH_MAX) {
+#endif
 		throw QueueException(_("Target filename too long"));
 	}
 
 #ifdef _WIN32
 	// Check that target starts with a drive or is an UNC path
-	if( (aTarget[1] != ':' || aTarget[2] != '\\') &&
-		(aTarget[0] != '\\' && aTarget[1] != '\\') ) {
+	if(aTarget.size() < 3 || ((aTarget[1] != ':' || aTarget[2] != '\\') &&
+		(aTarget[0] != '\\' || aTarget[1] != '\\')) ) {
 		throw QueueException(_("Invalid target file (missing directory, check default download directory setting)"));
 	}
 #else
 	// Check that target contains at least one directory...we don't want headless files...
-	if(aTarget[0] != '/') {
+	if(aTarget.empty() || aTarget[0] != '/') {
 		throw QueueException(_("Invalid target file (missing directory, check default download directory setting)"));
 	}
 #endif

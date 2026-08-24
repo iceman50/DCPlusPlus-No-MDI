@@ -34,7 +34,7 @@ and bundled libdwarf 2.3.2 for MinGW-w64 Windows builds.
   - Follow `DW_AT_abstract_origin` as well as `DW_AT_specification`.
   - Add cycle and depth protection while following DIE references.
 
-- [ ] Support Unicode module and debug-file paths.
+- [x] Support Unicode module and debug-file paths.
   - Replace `GetModuleFileNameA` and narrow-path file access with wide paths.
   - Open the GNU debug companion with `_wopen`.
   - Initialize libdwarf from the resulting file descriptor with `dwarf_init_b`.

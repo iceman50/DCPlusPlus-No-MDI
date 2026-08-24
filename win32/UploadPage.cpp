@@ -28,6 +28,7 @@
 #include <dwt/widgets/Spinner.h>
 
 #include <dcpp/format.h>
+#include <dcpp/File.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/ShareManager.h>
 #include <dcpp/version.h>
@@ -198,7 +199,7 @@ void UploadPage::handleSelectionChanged() {
 
 void UploadPage::handleDragDrop(const TStringList& files) {
 	for(auto& i: files)
-		if(PathIsDirectory(i.c_str()))
+		if(File::isDirectory(Text::fromT(i)))
 			addDirectory(i);
 }
 

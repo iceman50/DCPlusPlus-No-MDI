@@ -40,9 +40,32 @@
 #include <dwt/util/check.h>
 #include <dwt/util/win32/Dpi.h>
 #include <dwt/widgets/Control.h>
+#include <algorithm>
 #include <assert.h>
 
 namespace dwt {
+
+namespace {
+
+tstring moduleFileName() {
+	tstring value(MAX_PATH, _T('\0'));
+	while(true) {
+		const auto length = ::GetModuleFileName(nullptr, &value[0], static_cast<DWORD>(value.size()));
+		if(!length) {
+			return tstring();
+		}
+		if(length < value.size()) {
+			value.resize(length);
+			return value;
+		}
+		if(value.size() >= 32768) {
+			return tstring();
+		}
+		value.resize(std::min<size_t>(value.size() * 2, 32768), _T('\0'));
+	}
+}
+
+}
 
 Application* Application::itsInstance = 0;
 HANDLE Application::itsMutex = 0;
@@ -129,16 +152,13 @@ Application& Application::instance() {
 }
 
 tstring Application::getModulePath() const {
-	TCHAR retVal[2049];
-	GetModuleFileName(0, retVal, 2048);
-	tstring retStr = retVal;
+	auto retStr = moduleFileName();
 	retStr = retStr.substr(0, retStr.find_last_of('\\') + 1);
 	return retStr;
 }
 
 tstring Application::getModuleFileName() const {
-	TCHAR retVal[2049];
-	return tstring(retVal, GetModuleFileName(0, retVal, 2048));
+	return moduleFileName();
 }
 
 void Application::run() {

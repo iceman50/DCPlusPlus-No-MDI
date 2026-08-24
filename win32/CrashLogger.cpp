@@ -18,9 +18,10 @@
 #include "stdafx.h"
 #include "CrashLogger.h"
 
+#include <algorithm>
 #include <iostream>
-#include <fstream>
 
+#include <dcpp/File.h>
 #include <dcpp/Util.h>
 #include <dcpp/version.h>
 #include "WinUtil.h"
@@ -36,6 +37,8 @@ FILE* f;
 parse it. */
 
 #include <imagehlp.h>
+#include <fcntl.h>
+#include <io.h>
 
 #include <dwarf.h>
 #define LIBDWARF_STATIC
@@ -373,10 +376,31 @@ inline std::string getFunctionPrototype(Dwarf_Debug dbg, Dwarf_Die die, Dwarf_Er
 } // namespace DwarfResolver
 
 bool isPortableExecutable(const string& path) {
-	std::ifstream file(path, std::ios::binary);
+	std::unique_ptr<FILE, decltype(&fclose)> file(dcpp_fopen(path.c_str(), "rb"), &fclose);
+	if(!file) {
+		return false;
+	}
 	WORD signature = 0;
-	return file.read(reinterpret_cast<char*>(&signature), sizeof(signature)) &&
+	return fread(&signature, sizeof(signature), 1, file.get()) == 1 &&
 		signature == IMAGE_DOS_SIGNATURE;
+}
+
+string getModulePath(HMODULE module) {
+	tstring path(MAX_PATH, _T('\0'));
+	while(true) {
+		const auto length = ::GetModuleFileName(module, &path[0], static_cast<DWORD>(path.size()));
+		if(!length) {
+			return string();
+		}
+		if(length < path.size()) {
+			path.resize(length);
+			return Text::fromT(path);
+		}
+		if(path.size() >= 32768) {
+			return string();
+		}
+		path.resize(std::min<size_t>(path.size() * 2, 32768), _T('\0'));
+	}
 }
 
 void getDebugInfo(string path, DWORD_PTR addr, string& file, int& line, int& column, string& function) {
@@ -407,7 +431,8 @@ void getDebugInfo(string path, DWORD_PTR addr, string& file, int& line, int& col
 
 	Dwarf_Debug dbg = nullptr;
 	Dwarf_Error error = 0;
-	if(dwarf_init_path(path.c_str(), nullptr, 0, DW_GROUPNUMBER_ANY, nullptr, nullptr, &dbg, &error) == DW_DLV_OK) {
+	const auto descriptor = ::_wopen(File::toNativePath(path).c_str(), _O_RDONLY | _O_BINARY);
+	if(descriptor != -1 && dwarf_init_b(descriptor, DW_GROUPNUMBER_ANY, nullptr, nullptr, &dbg, &error) == DW_DLV_OK) {
 
 		/* use the ".debug_aranges" DWARF section to pinpoint the CU (Compilation Unit) that
 		corresponds to the address we want to find information about. */
@@ -517,6 +542,9 @@ void getDebugInfo(string path, DWORD_PTR addr, string& file, int& line, int& col
 		}
 		dwarf_finish(dbg);
 	}
+	if(descriptor != -1) {
+		::_close(descriptor);
+	}
 
 	if(error) {
 		fprintf(f, "[libdwarf error: %s] ", dwarf_errmsg(error));
@@ -605,43 +633,47 @@ inline void writePlatformInfo() {
 #ifndef NO_BACKTRACE
 
 inline DWORD64 getPreferredImageBase(const char* path) {
-	std::ifstream file(path, std::ios::binary);
+	std::unique_ptr<FILE, decltype(&fclose)> file(dcpp_fopen(path, "rb"), &fclose);
 	if(!file) {
 		return 0;
 	}
 
 	IMAGE_DOS_HEADER dosHeader = {};
-	if(!file.read(reinterpret_cast<char*>(&dosHeader), sizeof(dosHeader)) ||
+	if(fread(&dosHeader, sizeof(dosHeader), 1, file.get()) != 1 ||
 		dosHeader.e_magic != IMAGE_DOS_SIGNATURE || dosHeader.e_lfanew < 0)
 	{
 		return 0;
 	}
 
-	file.seekg(dosHeader.e_lfanew, std::ios::beg);
+	if(::_fseeki64(file.get(), dosHeader.e_lfanew, SEEK_SET) != 0) {
+		return 0;
+	}
 	DWORD signature = 0;
 	IMAGE_FILE_HEADER fileHeader = {};
-	if(!file.read(reinterpret_cast<char*>(&signature), sizeof(signature)) ||
+	if(fread(&signature, sizeof(signature), 1, file.get()) != 1 ||
 		signature != IMAGE_NT_SIGNATURE ||
-		!file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader)))
+		fread(&fileHeader, sizeof(fileHeader), 1, file.get()) != 1)
 	{
 		return 0;
 	}
 
-	const auto optionalHeaderOffset = file.tellg();
+	const auto optionalHeaderOffset = ::_ftelli64(file.get());
 	WORD magic = 0;
-	if(!file.read(reinterpret_cast<char*>(&magic), sizeof(magic))) {
+	if(optionalHeaderOffset < 0 || fread(&magic, sizeof(magic), 1, file.get()) != 1) {
 		return 0;
 	}
-	file.seekg(optionalHeaderOffset, std::ios::beg);
+	if(::_fseeki64(file.get(), optionalHeaderOffset, SEEK_SET) != 0) {
+		return 0;
+	}
 
 	if(magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC && fileHeader.SizeOfOptionalHeader >= sizeof(IMAGE_OPTIONAL_HEADER32)) {
 		IMAGE_OPTIONAL_HEADER32 optionalHeader = {};
-		if(file.read(reinterpret_cast<char*>(&optionalHeader), sizeof(optionalHeader))) {
+		if(fread(&optionalHeader, sizeof(optionalHeader), 1, file.get()) == 1) {
 			return optionalHeader.ImageBase;
 		}
 	} else if(magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC && fileHeader.SizeOfOptionalHeader >= sizeof(IMAGE_OPTIONAL_HEADER64)) {
 		IMAGE_OPTIONAL_HEADER64 optionalHeader = {};
-		if(file.read(reinterpret_cast<char*>(&optionalHeader), sizeof(optionalHeader))) {
+		if(fread(&optionalHeader, sizeof(optionalHeader), 1, file.get()) == 1) {
 			return optionalHeader.ImageBase;
 		}
 	}
@@ -709,17 +741,17 @@ inline void writeBacktrace(LPCONTEXT context) {
 		// to avoid printing errors to the crashlog
 
 		// read DWARF debugging info if available.
-		if(hasModule && (module.LoadedImageName[0] ||
-			// LoadedImageName is not always correctly filled in XP... @todo test whether we can safely remove this
-			::GetModuleFileNameA(reinterpret_cast<HMODULE>(module.BaseOfImage), module.LoadedImageName, sizeof(module.LoadedImageName))))
+		const auto imagePath = hasModule ?
+			getModulePath(reinterpret_cast<HMODULE>(module.BaseOfImage)) : string();
+		if(!imagePath.empty())
 		{
-			const DWORD64 preferredImageBase = getPreferredImageBase(module.LoadedImageName);
+			const DWORD64 preferredImageBase = getPreferredImageBase(imagePath.c_str());
 			const bool hasModuleOffset = currentAddr >= module.BaseOfImage;
 			const DWORD64 moduleOffset = hasModuleOffset ? (currentAddr - module.BaseOfImage) : 0;
 
 			auto tryDwarf = [&](DWORD64 candidateAddress) {
 				if(file.empty() && line < 0 && function.empty()) {
-					getDebugInfo(module.LoadedImageName, static_cast<DWORD_PTR>(candidateAddress), file, line, column, function);
+					getDebugInfo(imagePath, static_cast<DWORD_PTR>(candidateAddress), file, line, column, function);
 				}
 			};
 
@@ -794,7 +826,7 @@ LONG WINAPI exceptionFilter(LPEXCEPTION_POINTERS info) {
 		return EXCEPTION_CONTINUE_SEARCH;
 	}
 
-	f = _wfopen(CrashLogger::getPath().c_str(), L"w");
+	f = dcpp_fopen(Text::fromT(CrashLogger::getPath()).c_str(), "w");
 	if(f) {
 		writeAppInfo();
 

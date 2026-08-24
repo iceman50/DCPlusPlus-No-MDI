@@ -30,13 +30,55 @@
 */
 
 #include <dwt/widgets/FolderDialog.h>
-#include <dwt/Application.h>
 #include <dwt/util/win32/FileDialog.h>
-#include <dwt/util/win32/NativeDialogAppearance.h>
 
 #include <utility>
 
 namespace dwt {
+
+namespace {
+
+bool isWithinRoot(PCIDLIST_ABSOLUTE root, IShellItem* item) {
+	if(!root || !item) {
+		return false;
+	}
+	PIDLIST_ABSOLUTE itemId = nullptr;
+	if(FAILED(::SHGetIDListFromObject(item, &itemId)) || !itemId) {
+		return false;
+	}
+	const auto result = ::ILIsEqual(root, itemId) || ::ILIsParent(root, itemId, FALSE);
+	::CoTaskMemFree(itemId);
+	return result != FALSE;
+}
+
+void addRootRestriction(util::win32::FileDialogOptions& options, PCIDLIST_ABSOLUTE root,
+	util::win32::FileDialogEvents& restrictedEvents)
+{
+	if(!root) {
+		return;
+	}
+	if(options.events) {
+		restrictedEvents = *options.events;
+	}
+	const auto folderChanging = restrictedEvents.folderChanging;
+	restrictedEvents.folderChanging = [root, folderChanging](IFileDialog* dialog, IShellItem* folder) {
+		if(!isWithinRoot(root, folder)) {
+			return S_FALSE;
+		}
+		return folderChanging ? folderChanging(dialog, folder) : S_OK;
+	};
+	const auto fileOk = restrictedEvents.fileOk;
+	restrictedEvents.fileOk = [root, fileOk](IFileDialog* dialog) {
+		util::win32::ComPtr<IShellItem> selected;
+		if(FAILED(dialog->GetResult(selected.put())) || !isWithinRoot(root, selected.get())) {
+			return S_FALSE;
+		}
+		return fileOk ? fileOk(dialog) : S_OK;
+	};
+	options.events = &restrictedEvents;
+}
+
+}
 
 FolderDialog::FolderDialog(Widget* parent) :
 parent(parent),
@@ -146,11 +188,9 @@ bool FolderDialog::open(tstring& dir) {
 	if(!dir.empty())
 		setInitialSelection(dir);
 
-	if(pidlRoot) {
-		return openRooted(dir);
-	}
-
 	auto dialogOptions = getModernOptions();
+	util::win32::FileDialogEvents restrictedEvents;
+	addRootRestriction(dialogOptions, pidlRoot, restrictedEvents);
 	std::vector<tstring> paths;
 	if(!util::win32::showFileDialog(dialogOptions, paths)) {
 		return false;
@@ -165,6 +205,8 @@ bool FolderDialog::open(tstring& dir) {
 bool FolderDialog::openShellItem(util::win32::FileDialogResult& result) {
 	auto dialogOptions = getModernOptions();
 	dialogOptions.forceFilesystem = false;
+	util::win32::FileDialogEvents restrictedEvents;
+	addRootRestriction(dialogOptions, pidlRoot, restrictedEvents);
 
 	std::vector<util::win32::FileDialogResult> results;
 	if(!util::win32::showFileDialogItems(dialogOptions, results)) {
@@ -195,51 +237,6 @@ util::win32::FileDialogOptions FolderDialog::getModernOptions() const {
 	dialogOptions.customize = customize;
 	dialogOptions.controls = controls;
 	return dialogOptions;
-}
-
-bool FolderDialog::openRooted(tstring& dir) {
-	BROWSEINFO info = { getParentHandle(), pidlRoot };
-	info.lpszTitle = title.empty() ? nullptr : title.c_str();
-	info.ulFlags = BIF_USENEWUI | BIF_RETURNONLYFSDIRS | BIF_EDITBOX;
-	if(!initialSel.empty() || pidlInitialSel) {
-		info.lpfn = &browseCallbackProc;
-		info.lParam = reinterpret_cast<LPARAM>(this);
-	}
-
-	auto oldErrorMode = ::SetErrorMode(SEM_FAILCRITICALERRORS);
-	util::win32::NativeDialogAppearance appearance(
-		Application::instance().getAppearance());
-	auto selected = ::SHBrowseForFolder(&info);
-	::SetErrorMode(oldErrorMode);
-	if(!selected) {
-		return false;
-	}
-
-	TCHAR path[MAX_PATH + 1] = { 0 };
-	bool result = ::SHGetPathFromIDList(selected, path) != FALSE;
-	::CoTaskMemFree(selected);
-	if(!result) {
-		return false;
-	}
-
-	dir = path;
-	if(!dir.empty() && dir.back() != _T('\\')) {
-		dir += _T('\\');
-	}
-	return true;
-}
-
-int CALLBACK FolderDialog::browseCallbackProc(HWND window, UINT message, LPARAM, LPARAM data) {
-	if(data && message == BFFM_INITIALIZED) {
-		auto& dialog = *reinterpret_cast<FolderDialog*>(data);
-		auto stringSelection = !dialog.initialSel.empty();
-		auto selection = stringSelection ?
-			reinterpret_cast<LPARAM>(dialog.initialSel.c_str()) :
-			reinterpret_cast<LPARAM>(dialog.pidlInitialSel);
-		::SendMessage(window, BFFM_SETSELECTION, stringSelection ? TRUE : FALSE, selection);
-		::SendMessage(window, BFFM_SETEXPANDED, stringSelection ? TRUE : FALSE, selection);
-	}
-	return 0;
 }
 
 }
