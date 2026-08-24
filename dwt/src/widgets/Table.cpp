@@ -319,12 +319,22 @@ ScreenCoordinate Table::getContextMenuPos() {
 
 tstring Table::getText( unsigned int row, unsigned int column )
 {
-	// TODO: Get string length first?
-	const int BUFFER_MAX = 2048;
-	TCHAR buffer[BUFFER_MAX + 1];
-	buffer[0] = '\0';
-	ListView_GetItemText(handle(), row, column, buffer, BUFFER_MAX);
-	return buffer;
+	// List views don't expose the stored text length. Grow until the returned
+	// value fits so paths and other long values aren't silently truncated.
+	tstring buffer(256, _T('\0'));
+	for(;;) {
+		LVITEM item = { LVIF_TEXT };
+		item.iSubItem = column;
+		item.pszText = &buffer[0];
+		item.cchTextMax = static_cast<int>(buffer.size());
+		const auto copied = static_cast<int>(sendMessage(LVM_GETITEMTEXT, row,
+			reinterpret_cast<LPARAM>(&item)));
+		if(copied < static_cast<int>(buffer.size()) - 1 || buffer.size() >= 32768) {
+			buffer.resize(copied);
+			return buffer;
+		}
+		buffer.resize((std::min<size_t>)(buffer.size() * 2, 32768), _T('\0'));
+	}
 }
 
 std::vector< unsigned > Table::getSelection() const
@@ -992,10 +1002,6 @@ int CALLBACK Table::compareFuncCallback(LPARAM lParam1, LPARAM lParam2, LPARAM l
 int CALLBACK Table::compareFunc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort) {
 	Table* p = reinterpret_cast<Table*>(lParamSort);
 
-	const int BUF_SIZE = 128;
-	TCHAR buf[BUF_SIZE];
-	TCHAR buf2[BUF_SIZE];
-
 	int na = (int)lParam1;
 	int nb = (int)lParam2;
 
@@ -1005,19 +1011,19 @@ int CALLBACK Table::compareFunc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSor
 	if(type == SORT_CALLBACK) {
 		result = p->fun(p->getData(na), p->getData(nb));
 	} else {
-		ListView_GetItemText(p->handle(), na, p->sortColumn, buf, BUF_SIZE);
-		ListView_GetItemText(p->handle(), nb, p->sortColumn, buf2, BUF_SIZE);
+		const auto buf = p->getText(na, p->sortColumn);
+		const auto buf2 = p->getText(nb, p->sortColumn);
 
 		if(type == SORT_STRING) {
-			result = wcscoll(buf, buf2);
+			result = wcscoll(buf.c_str(), buf2.c_str());
 		} else if(type == SORT_STRING_SIMPLE) {
-			result = wcscmp(buf, buf2);
+			result = wcscmp(buf.c_str(), buf2.c_str());
 		} else if(type == SORT_INT) {
-			result = compare(_ttoi(buf), _ttoi(buf2));
+			result = compare(_ttoi(buf.c_str()), _ttoi(buf2.c_str()));
 		} else if(type == SORT_FLOAT) {
 			double b1, b2;
-			_stscanf(buf, _T("%lf"), &b1);
-			_stscanf(buf2, _T("%lf"), &b2);
+			_stscanf(buf.c_str(), _T("%lf"), &b1);
+			_stscanf(buf2.c_str(), _T("%lf"), &b2);
 			result = compare(b1, b2);
 		}
 	}

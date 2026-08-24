@@ -216,15 +216,19 @@ void UploadPage::handleRenameClicked() {
 
 	int i = -1;
 	while((i = directories->getNext(i, LVNI_SELECTED)) != -1) {
-		tstring vName = directories->getText(i, 0);
-		tstring rPath = directories->getText(i, 1);
+		auto row = getDirectoryRow(i);
+		if(!row) {
+			continue;
+		}
+		tstring vName = Text::toT(row->virtualPath);
 		try {
 			ParamDlg dlg(this, T_("Virtual name"), T_("Name under which the others see the directory"), vName);
 			if(dlg.run() == IDOK) {
 				tstring line = dlg.getValue();
 				if (Util::stricmp(vName, line) != 0) {
-					ShareManager::getInstance()->renameDirectory(Text::fromT(rPath), Text::fromT(line));
+					ShareManager::getInstance()->renameDirectory(row->realPath, Text::fromT(line));
 					directories->setText(i, 0, line);
+					row->virtualPath = Text::fromT(line);
 
 					setDirty = true;
 				} else {
@@ -245,7 +249,10 @@ void UploadPage::handleRenameClicked() {
 void UploadPage::handleRemoveClicked() {
 	int i;
 	while((i = directories->getNext(-1, LVNI_SELECTED)) != -1) {
-		ShareManager::getInstance()->removeDirectory(Text::fromT(directories->getText(i, 1)));
+		auto row = getDirectoryRow(i);
+		if(row) {
+			ShareManager::getInstance()->removeDirectory(row->realPath);
+		}
 		directories->erase(i);
 		refreshTotalSize();
 	}
@@ -256,7 +263,13 @@ void UploadPage::addRow(const string& virtualPath, const string& realPath) {
 	row.push_back(Text::toT(virtualPath));
 	row.push_back(Text::toT(realPath));
 	row.push_back(Text::toT(Util::formatBytes(ShareManager::getInstance()->getShareSize(realPath))));
-	directories->insert(row);
+	auto data = std::make_unique<DirectoryRow>(DirectoryRow { virtualPath, realPath });
+	directories->insert(row, reinterpret_cast<LPARAM>(data.get()));
+	directoryRows.push_back(std::move(data));
+}
+
+UploadPage::DirectoryRow* UploadPage::getDirectoryRow(int row) {
+	return reinterpret_cast<DirectoryRow*>(directories->getData(row));
 }
 
 void UploadPage::fillList() {

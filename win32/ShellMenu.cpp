@@ -22,6 +22,8 @@
 
 #include <dwt/util/StringUtils.h>
 
+#include <dcpp/File.h>
+
 #include "resource.h"
 #include "WinUtil.h"
 
@@ -61,7 +63,14 @@ void ShellMenu::appendShellMenu(const StringList& paths) {
 		// but since we use the Desktop as our interface and the Desktop is the namespace root
 		// that means that it's a fully qualified PIDL, which is what we need
 		LPITEMIDLIST pidl = 0;
-		hr = desktop->ParseDisplayName(0, 0, const_cast<LPWSTR>(Text::utf8ToWide(i).c_str()), 0, &pidl, 0);
+		const auto path = Text::utf8ToWide(i);
+		hr = desktop->ParseDisplayName(0, 0, const_cast<LPWSTR>(path.c_str()), 0, &pidl, 0);
+		if(FAILED(hr)) {
+			const auto nativePath = File::toNativePath(i);
+			if(nativePath != path) {
+				hr = desktop->ParseDisplayName(0, 0, const_cast<LPWSTR>(nativePath.c_str()), 0, &pidl, 0);
+			}
+		}
 		check(hr == S_OK && pidl);
 		pidls.push_back(pidl);
 

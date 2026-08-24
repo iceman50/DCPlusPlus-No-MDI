@@ -1209,7 +1209,8 @@ void WinUtil::helpId(dwt::Control* widget, unsigned id) {
 #ifdef HAVE_HTMLHELP_H
 		if(id < IDH_BEGIN || id > IDH_END)
 			id = IDH_INDEX;
-		::HtmlHelp(widget->handle(), helpPath.c_str(), HH_HELP_CONTEXT, id);
+		const auto nativeHelpPath = File::toNativePath(Text::fromT(helpPath));
+		::HtmlHelp(widget->handle(), nativeHelpPath.c_str(), HH_HELP_CONTEXT, id);
 #endif
 	}
 }
@@ -1477,22 +1478,39 @@ void regChanged() {
 	::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 }
 
+tstring readRegistryString(HKEY key, LPCTSTR valueName) {
+	DWORD type = 0;
+	DWORD bytes = 0;
+	if(::RegQueryValueEx(key, valueName, nullptr, &type, nullptr, &bytes) != ERROR_SUCCESS ||
+		(type != REG_SZ && type != REG_EXPAND_SZ))
+	{
+		return tstring();
+	}
+
+	tstring value(bytes / sizeof(TCHAR) + 1, _T('\0'));
+	DWORD available = static_cast<DWORD>(value.size() * sizeof(TCHAR));
+	if(::RegQueryValueEx(key, valueName, nullptr, &type,
+		reinterpret_cast<LPBYTE>(&value[0]), &available) != ERROR_SUCCESS)
+	{
+		return tstring();
+	}
+	value.resize(value.find(_T('\0')));
+	return value;
+}
+
 bool registerHandler_(const tstring& name, const tstring& descr, bool url, const tstring& prefix) {
 	HKEY hk;
-	TCHAR Buf[512];
-	Buf[0] = 0;
+	tstring registeredApp;
 
 	if(::RegOpenKeyEx(HKEY_CURRENT_USER, (_T("Software\\Classes\\") + name + _T("\\Shell\\Open\\Command")).c_str(),
 		0, KEY_WRITE | KEY_READ, &hk) == ERROR_SUCCESS)
 	{
-		DWORD bufLen = sizeof(Buf);
-		DWORD type;
-		::RegQueryValueEx(hk, NULL, 0, &type, (LPBYTE) Buf, &bufLen);
+		registeredApp = readRegistryString(hk, nullptr);
 		::RegCloseKey(hk);
 	}
 
 	tstring app = _T("\"") + dwt::Application::instance().getModuleFileName() + _T("\" \"") + prefix + _T("%1\"");
-	if(Util::stricmp(app.c_str(), Buf) == 0) {
+	if(Util::stricmp(app, registeredApp) == 0) {
 		// already registered to us
 		return true;
 	}
@@ -1627,16 +1645,10 @@ void WinUtil::setApplicationStartupUnregister()
 	}
 
 	tstring app = _T("\"") + dwt::Application::instance().getModuleFileName() + _T("\"");
-
-	TCHAR Buf[512];
-	Buf[0] = 0;
-	DWORD bufLen = sizeof(Buf);
-	DWORD type;
-
-	ret = ::RegQueryValueEx(hk, _T("DC++"), 0, &type, (LPBYTE) Buf, &bufLen);
-	if(ret == ERROR_SUCCESS)
+	const auto registeredApp = readRegistryString(hk, _T("DC++"));
+	if(!registeredApp.empty())
 	{
-		bool bEqualApplications = Util::stricmp(app.c_str(), Buf) == 0;
+		bool bEqualApplications = Util::stricmp(app, registeredApp) == 0;
 		if(bEqualApplications) 
 		{
 			ret = ::RegDeleteValue(hk, _T("DC++"));

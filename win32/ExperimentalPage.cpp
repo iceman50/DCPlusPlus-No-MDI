@@ -607,6 +607,7 @@ void ExperimentalPage::writeScaledIntItems() {
 
 void ExperimentalPage::fillTempShares() {
 	tempShares->clear();
+	tempShareRows.clear();
 	const auto shares = ShareManager::getInstance()->getTempShares();
 	for(const auto& share: shares) {
 		bool available = false;
@@ -617,11 +618,19 @@ void ExperimentalPage::fillTempShares() {
 		}
 		auto name = Text::toT(Util::getFileName(share.realPath));
 		if(!available) name += T_(" (missing or changed)");
+		auto data = std::make_unique<TempShareRow>(TempShareRow {
+			share.realPath, share.hubUrl, share.tth.toBase32()
+		});
 		tempShares->insert({ name, Text::toT(Util::formatBytes(share.size)), Text::toT(share.hubUrl),
-			Text::toT(share.tth.toBase32()), Text::toT(share.realPath) });
+			Text::toT(data->tth), Text::toT(share.realPath) }, reinterpret_cast<LPARAM>(data.get()));
+		tempShareRows.push_back(std::move(data));
 	}
 	tempSummary->setText(T_("Active temporary shares: ") + Text::toT(std::to_string(shares.size())));
 	handleTempSelectionChanged();
+}
+
+ExperimentalPage::TempShareRow* ExperimentalPage::getTempShareRow(int row) {
+	return reinterpret_cast<TempShareRow*>(tempShares->getData(row));
 }
 
 void ExperimentalPage::handleTempSelectionChanged() {
@@ -652,13 +661,13 @@ void ExperimentalPage::handleCopyTempMagnet() {
 	if(row < 0) return;
 
 	try {
-		const auto path = Text::fromT(tempShares->getText(row, 4));
-		const auto route = Text::fromT(tempShares->getText(row, 2));
-		const TTHValue tth(Text::fromT(tempShares->getText(row, 3)));
+		const auto data = getTempShareRow(row);
+		if(!data) return;
+		const TTHValue tth(data->tth);
 		const auto shares = ShareManager::getInstance()->getTempShares();
 		const auto share = std::find_if(shares.begin(), shares.end(), [&](const ShareManager::TempShareInfo& item) {
-			return item.tth == tth && Util::stricmp(item.realPath, path) == 0 &&
-				Util::stricmp(item.hubUrl, route) == 0;
+			return item.tth == tth && Util::stricmp(item.realPath, data->path) == 0 &&
+				Util::stricmp(item.hubUrl, data->route) == 0;
 		});
 		if(share != shares.end()) {
 			WinUtil::copyMagnet(share->tth, Text::toT(Util::getFileName(share->realPath)), share->size);
@@ -672,8 +681,11 @@ void ExperimentalPage::handleRemoveTemps() {
 		row = tempShares->getNext(row, LVNI_SELECTED))
 	{
 		try {
-			ShareManager::getInstance()->removeTempShare(Text::fromT(tempShares->getText(row, 4)),
-				TTHValue(Text::fromT(tempShares->getText(row, 3))), Text::fromT(tempShares->getText(row, 2)));
+			const auto data = getTempShareRow(row);
+			if(data) {
+				ShareManager::getInstance()->removeTempShare(data->path,
+					TTHValue(data->tth), data->route);
+			}
 		} catch(...) {
 		}
 	}

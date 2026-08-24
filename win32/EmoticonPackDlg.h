@@ -10,6 +10,9 @@
 #ifndef DCPLUSPLUS_WIN32_EMOTICON_PACK_DLG_H
 #define DCPLUSPLUS_WIN32_EMOTICON_PACK_DLG_H
 
+#include <memory>
+#include <vector>
+
 #include <dcpp/typedefs.h>
 #include <dwt/widgets/ModalDialog.h>
 
@@ -23,8 +26,17 @@ public:
 	const dcpp::tstring& getExportedPath() const { return exportedPath; }
 
 private:
+	struct RuleRow {
+		dcpp::tstring name;
+		dcpp::tstring shortcut;
+		dcpp::tstring imagePath;
+	};
+
 	bool handleInitDialog();
 	void addRule();
+	void insertRule(const dcpp::tstring& name, const dcpp::tstring& shortcut,
+		const dcpp::tstring& imagePath);
+	RuleRow* getRule(int row);
 	void updateRule();
 	void removeRule();
 	void selectRule();
@@ -40,6 +52,7 @@ private:
 	TextBoxPtr shortcut;
 	TextBoxPtr iconPath;
 	TablePtr rules;
+	std::vector<std::unique_ptr<RuleRow>> ruleRows;
 	ButtonPtr updateButton;
 	ButtonPtr removeButton;
 	dcpp::tstring initialImportPath;

@@ -18,6 +18,9 @@
 #ifndef DCPLUSPLUS_WIN32_FAVORITE_DIRS_PAGE_H
 #define DCPLUSPLUS_WIN32_FAVORITE_DIRS_PAGE_H
 
+#include <memory>
+#include <vector>
+
 #include <dcpp/typedefs.h>
 
 #include "PropPage.h"
@@ -31,7 +34,13 @@ public:
 	virtual void layout();
 
 private:
+	struct DirectoryRow {
+		tstring name;
+		tstring path;
+	};
+
 	TablePtr directories;
+	std::vector<std::unique_ptr<DirectoryRow>> directoryRows;
 
 	ButtonPtr rename;
 	ButtonPtr remove;
@@ -45,6 +54,7 @@ private:
 	void handleRemoveClicked();
 
 	void addRow(const tstring& name, const tstring& path);
+	DirectoryRow* getDirectoryRow(int row);
 	void addDirectory(const tstring& aPath);
 };
 

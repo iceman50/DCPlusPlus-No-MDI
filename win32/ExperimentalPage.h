@@ -11,6 +11,7 @@
 #define DCPLUSPLUS_WIN32_EXPERIMENTAL_PAGE_H
 
 #include <memory>
+#include <vector>
 
 #include "PropPage.h"
 #include "ThemeManager.h"
@@ -36,6 +37,11 @@ private:
 		int setting;
 		COLORREF color;
 	};
+	struct TempShareRow {
+		string path;
+		string route;
+		string tth;
+	};
 
 	ItemList items;
 	std::vector<ScaledIntItem> scaledIntItems;
@@ -44,6 +50,7 @@ private:
 	ComboBoxPtr themeMode;
 	ComboBoxPtr themePreset;
 	TablePtr tempShares;
+	std::vector<std::unique_ptr<TempShareRow>> tempShareRows;
 	LabelPtr tempSummary;
 	ButtonPtr removeTemp;
 	ButtonPtr clearTemps;
@@ -69,6 +76,7 @@ private:
 	void importTheme();
 	void openThemeDirectory();
 	void fillTempShares();
+	TempShareRow* getTempShareRow(int row);
 	void handleTempSelectionChanged();
 	bool handleTempContextMenu(dwt::ScreenCoordinate pt);
 	void handleCopyTempMagnet();

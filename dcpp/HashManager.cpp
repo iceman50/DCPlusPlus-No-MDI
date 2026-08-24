@@ -1111,8 +1111,19 @@ bool upgradeFromV2(string& file) {
 
 	// use GetFinalPathNameByHandle to retrieve a properly cased path from the
 	// lower-case one that the version 2 file registry has provided us with.
-	wstring buf(file.size() * 2, 0);
-	buf.resize(::GetFinalPathNameByHandle(handle, &buf[0], buf.size(), 0));
+	wstring buf((std::max<size_t>)(file.size() * 2, MAX_PATH), 0);
+	while(true) {
+		const auto length = ::GetFinalPathNameByHandle(handle, &buf[0], static_cast<DWORD>(buf.size()), 0);
+		if(!length) {
+			buf.clear();
+			break;
+		}
+		if(length < buf.size()) {
+			buf.resize(length);
+			break;
+		}
+		buf.resize(static_cast<size_t>(length) + 1, 0);
+	}
 
 	::CloseHandle(handle);
 

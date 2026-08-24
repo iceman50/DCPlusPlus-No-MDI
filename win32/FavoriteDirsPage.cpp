@@ -143,12 +143,17 @@ void FavoriteDirsPage::handleAddClicked() {
 void FavoriteDirsPage::handleRenameClicked() {
 	int i = -1;
 	while((i = directories->getNext(i, LVNI_SELECTED)) != -1) {
-		tstring old = directories->getText(i, 0);
+		auto row = getDirectoryRow(i);
+		if(!row) {
+			continue;
+		}
+		const auto old = row->name;
 		ParamDlg dlg(this, T_("Favorite name"), T_("Under what name you see the directory"), old);
 		if(dlg.run() == IDOK) {
 			tstring line = dlg.getValue();
 			if (FavoriteManager::getInstance()->renameFavoriteDir(Text::fromT(old), Text::fromT(line))) {
 				directories->setText(i, 0, line);
+				row->name = line;
 			} else {
 				dwt::MessageBox(this).show(T_("Directory or directory name already exists"), _T(APPNAME) _T(" ") _T(VERSIONSTRING),
 					dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
@@ -160,12 +165,19 @@ void FavoriteDirsPage::handleRenameClicked() {
 void FavoriteDirsPage::handleRemoveClicked() {
 	int i;
 	while((i = directories->getNext(-1, LVNI_SELECTED)) != -1)
-		if(FavoriteManager::getInstance()->removeFavoriteDir(Text::fromT(directories->getText(i, 1))))
+		if(auto row = getDirectoryRow(i);
+			row && FavoriteManager::getInstance()->removeFavoriteDir(Text::fromT(row->path)))
 			directories->erase(i);
 }
 
 void FavoriteDirsPage::addRow(const tstring& name, const tstring& path) {
-	directories->insert({ name, path });
+	auto data = std::make_unique<DirectoryRow>(DirectoryRow { name, path });
+	directories->insert({ name, path }, reinterpret_cast<LPARAM>(data.get()));
+	directoryRows.push_back(std::move(data));
+}
+
+FavoriteDirsPage::DirectoryRow* FavoriteDirsPage::getDirectoryRow(int row) {
+	return reinterpret_cast<DirectoryRow*>(directories->getData(row));
 }
 
 void FavoriteDirsPage::addDirectory(const tstring& aPath) {

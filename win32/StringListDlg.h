@@ -18,6 +18,9 @@
 #ifndef DCPLUSPLUS_WIN32_STRING_LIST_DLG_H
 #define DCPLUSPLUS_WIN32_STRING_LIST_DLG_H
 
+#include <memory>
+#include <vector>
+
 #include <dwt/widgets/ModalDialog.h>
 
 #include <dcpp/typedefs.h>
@@ -62,6 +65,7 @@ private:
 	GridPtr grid;
 	TextBoxPtr editBox;
 	TablePtr list;
+	std::vector<std::unique_ptr<tstring>> rows;
 	ButtonPtr addBtn;
 	ButtonPtr up;
 	ButtonPtr down;
@@ -86,6 +90,7 @@ private:
 
 	void layout();
 
+	const tstring& getRowText(unsigned row) const;
 	bool checkUnique(const tstring& text);
 };
 

@@ -18,6 +18,9 @@
 #ifndef DCPLUSPLUS_WIN32_UPLOAD_PAGE_H
 #define DCPLUSPLUS_WIN32_UPLOAD_PAGE_H
 
+#include <memory>
+#include <vector>
+
 #include <dcpp/typedefs.h>
 
 #include "PropPage.h"
@@ -32,7 +35,13 @@ public:
 	virtual void write();
 
 private:
+	struct DirectoryRow {
+		string virtualPath;
+		string realPath;
+	};
+
 	ItemList items;
+	std::vector<std::unique_ptr<DirectoryRow>> directoryRows;
 
 	TablePtr directories;
 	LabelPtr total;
@@ -48,6 +57,7 @@ private:
 	void handleRenameClicked();
 	void handleRemoveClicked();
 	void addRow(const string& virtualPath, const string& realPath);
+	DirectoryRow* getDirectoryRow(int row);
 	void fillList();
 	void refreshTotalSize();
 	void addDirectory(const tstring& aPath);

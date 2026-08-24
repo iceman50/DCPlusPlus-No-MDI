@@ -61,7 +61,10 @@ using std::numeric_limits;
 namespace {
 const int SHARE_CACHE_SCHEMA_VERSION = 3;
 const size_t MAX_SHARE_CACHE_NAME = 4096;
-const size_t MAX_SHARE_CACHE_PATH = 32768;
+// Windows extended paths are limited in UTF-16 code units, while cached paths
+// are UTF-8. Allow the worst-case UTF-8 representation without dropping an
+// otherwise valid long path from the share cache.
+const size_t MAX_SHARE_CACHE_PATH = 32768 * 4;
 
 // The fingerprint is not a security boundary; it is a compact invalidation key
 // for share roots and settings that change what may be advertised or uploaded.

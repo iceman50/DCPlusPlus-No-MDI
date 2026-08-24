@@ -208,6 +208,42 @@ TEST_F(ShareCacheTest, round_trips_share_tree_and_indices) {
 	EXPECT_EQ(1700000200, file->getLastWrite());
 }
 
+#ifdef _WIN32
+
+TEST_F(ShareCacheTest, preserves_long_unicode_file_paths) {
+	auto sm = ShareManager::getInstance();
+	sm->shares[sharePath] = "Virtual";
+
+	auto root = ShareManager::Directory::create("Virtual");
+	auto child = ShareManager::Directory::create("Child", root);
+	root->directories.emplace("Child", child);
+
+	string segment;
+	for(size_t i = 0; i < 100; ++i) {
+		segment += "\xE6\xB5\x8B";
+	}
+	string longPath = sharePath;
+	while(longPath.size() <= 32768) {
+		longPath += segment + PATH_SEPARATOR_STR;
+	}
+	longPath += "file.bin";
+	ASSERT_LT(File::toNativePath(longPath).size(), 32767U);
+
+	ShareManager::Directory::File file("file.bin", 1234, child,
+		TTHValue("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+	file.realPath = longPath;
+	child->files.insert(std::move(file));
+	sm->directories["Virtual"] = root;
+	sm->rebuildIndices(1);
+
+	sm->saveShareCache();
+	clearLoadedShare();
+	ASSERT_TRUE(sm->loadShareCache());
+	EXPECT_EQ(longPath, sm->toReal("/Virtual/Child/file.bin"));
+}
+
+#endif
+
 TEST_F(ShareCacheTest, emits_dates_only_for_non_recursive_partial_file_items) {
 	populateShare();
 

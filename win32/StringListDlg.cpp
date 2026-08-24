@@ -58,7 +58,9 @@ int StringListDlg::run() {
 void StringListDlg::insert(const tstring& line, int index) {
 	if(!checkUnique(line))
 		return;
-	int itemCount = list->insert(TStringList(1, line), 0, index);
+	auto data = std::make_unique<tstring>(line);
+	int itemCount = list->insert(TStringList(1, line), reinterpret_cast<LPARAM>(data.get()), index);
+	rows.push_back(std::move(data));
 	if(index == -1)
 		index = itemCount;
 	list->ensureVisible(index);
@@ -67,6 +69,7 @@ void StringListDlg::insert(const tstring& line, int index) {
 void StringListDlg::modify(unsigned row, const tstring& text) {
 	if(!checkUnique(text))
 		return;
+	*reinterpret_cast<tstring*>(list->getData(row)) = text;
 	list->setText(row, 0, text);
 }
 
@@ -236,7 +239,7 @@ void StringListDlg::handleMoveUpClicked() {
 	auto selected = list->getSelection();
 	for(auto i: selected) {
 		if(i > 0) {
-			tstring selText = list->getText(i, 0);
+			tstring selText = getRowText(i);
 			list->erase(i);
 			insert(selText, i - 1);
 			list->select(i - 1);
@@ -250,7 +253,7 @@ void StringListDlg::handleMoveDownClicked() {
 	for(auto it = selected.rbegin(); it != selected.rend(); ++it) {
 		auto i = *it;
 		if(i < list->size() - 1) {
-			tstring selText = list->getText(i, 0);
+			tstring selText = getRowText(i);
 			list->erase(i);
 			insert(selText, i + 1);
 			list->select(i + 1);
@@ -261,7 +264,7 @@ void StringListDlg::handleMoveDownClicked() {
 void StringListDlg::handleEditClicked() {
 	int i = -1;
 	while((i = list->getNext(i, LVNI_SELECTED)) != -1) {
-		edit(i, list->getText(i, 0));
+		edit(i, getRowText(i));
 	}
 }
 
@@ -273,7 +276,7 @@ void StringListDlg::handleRemoveClicked() {
 
 void StringListDlg::handleOKClicked() {
 	for(int i = 0, iend = static_cast<int>(list->size()); i < iend; ++i)
-		values.push_back(list->getText(i, 0));
+		values.push_back(getRowText(i));
 
 	endDialog(IDOK);
 }
@@ -285,14 +288,19 @@ void StringListDlg::layout() {
 	list->setColumnWidth(0, list->getWindowSize().x - 20);
 }
 
+const tstring& StringListDlg::getRowText(unsigned row) const {
+	return *reinterpret_cast<const tstring*>(list->getData(row));
+}
+
 bool StringListDlg::checkUnique(const tstring& text) {
 	if(!unique)
 		return true;
 
-	int pos = list->find(text);
-	if(pos == -1)
-		return true;
-
-	list->ensureVisible(pos);
-	return false;
+	for(unsigned row = 0; row < list->size(); ++row) {
+		if(Util::stricmp(getRowText(row), text) == 0) {
+			list->ensureVisible(row);
+			return false;
+		}
+	}
+	return true;
 }

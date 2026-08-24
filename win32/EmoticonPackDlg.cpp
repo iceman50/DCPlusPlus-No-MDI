@@ -118,16 +118,31 @@ void EmoticonPackDlg::addRule() {
 			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONEXCLAMATION);
 		return;
 	}
-	const auto row = rules->insert({ emoticonName->getText(), shortcut->getText(), iconPath->getText() });
+	insertRule(emoticonName->getText(), shortcut->getText(), iconPath->getText());
+}
+
+void EmoticonPackDlg::insertRule(const tstring& name, const tstring& shortcut_, const tstring& imagePath_) {
+	auto data = std::make_unique<RuleRow>(RuleRow { name, shortcut_, imagePath_ });
+	const auto row = rules->insert({ name, shortcut_, imagePath_ }, reinterpret_cast<LPARAM>(data.get()));
+	ruleRows.push_back(std::move(data));
 	rules->select(row);
+}
+
+EmoticonPackDlg::RuleRow* EmoticonPackDlg::getRule(int row) {
+	return reinterpret_cast<RuleRow*>(rules->getData(row));
 }
 
 void EmoticonPackDlg::updateRule() {
 	const auto row = rules->getSelected();
 	if(row < 0 || emoticonName->getText().empty() || shortcut->getText().empty() || iconPath->getText().empty()) return;
-	rules->setText(row, 0, emoticonName->getText());
-	rules->setText(row, 1, shortcut->getText());
-	rules->setText(row, 2, iconPath->getText());
+	auto data = getRule(row);
+	if(!data) return;
+	data->name = emoticonName->getText();
+	data->shortcut = shortcut->getText();
+	data->imagePath = iconPath->getText();
+	rules->setText(row, 0, data->name);
+	rules->setText(row, 1, data->shortcut);
+	rules->setText(row, 2, data->imagePath);
 }
 
 void EmoticonPackDlg::removeRule() {
@@ -139,9 +154,12 @@ void EmoticonPackDlg::removeRule() {
 void EmoticonPackDlg::selectRule() {
 	const auto row = rules->getSelected();
 	if(row >= 0) {
-		emoticonName->setText(rules->getText(row, 0));
-		shortcut->setText(rules->getText(row, 1));
-		iconPath->setText(rules->getText(row, 2));
+		const auto data = getRule(row);
+		if(data) {
+			emoticonName->setText(data->name);
+			shortcut->setText(data->shortcut);
+			iconPath->setText(data->imagePath);
+		}
 	}
 	updateButtons();
 }
@@ -161,9 +179,10 @@ void EmoticonPackDlg::importPackage(tstring path) {
 		const auto imported = EmoticonManager::importEmoticonPackage(Text::fromT(path));
 		packageName->setText(Text::toT(imported.name));
 		rules->clear();
+		ruleRows.clear();
 		for(const auto& item: imported.items) {
 			for(const auto& rule: item.rules) {
-				rules->insert({ Text::toT(item.name), Text::toT(rule), Text::toT(item.iconPath) });
+				insertRule(Text::toT(item.name), Text::toT(rule), Text::toT(item.iconPath));
 			}
 		}
 		if(rules->size()) rules->select(0);
@@ -182,9 +201,11 @@ void EmoticonPackDlg::exportPackage() {
 	vector<EmoticonManager::ExportItem> items;
 	try {
 		for(size_t row = 0; row < rules->size(); ++row) {
-			const auto name = Text::fromT(rules->getText(static_cast<unsigned>(row), 0));
-			const auto rule = Text::fromT(rules->getText(static_cast<unsigned>(row), 1));
-			const auto image = Text::fromT(rules->getText(static_cast<unsigned>(row), 2));
+			const auto data = getRule(static_cast<int>(row));
+			if(!data) continue;
+			const auto name = Text::fromT(data->name);
+			const auto rule = Text::fromT(data->shortcut);
+			const auto image = Text::fromT(data->imagePath);
 			auto existing = std::find_if(items.begin(), items.end(), [&name](const auto& item) { return item.name == name; });
 			if(existing == items.end()) {
 				items.push_back({ name, { rule }, image });
