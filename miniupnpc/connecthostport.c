@@ -49,6 +49,10 @@
 
 #include "connecthostport.h"
 
+#ifndef MINIUPNPC_CONNECT_TIMEOUT_IN_MS
+#define MINIUPNPC_CONNECT_TIMEOUT_IN_MS 3000
+#endif
+
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 64
 #endif
@@ -71,7 +75,11 @@ SOCKET connecthostport(const char * host, unsigned short port,
 	struct addrinfo hints;
 #endif /* #ifdef USE_GETHOSTBYNAME */
 #ifdef MINIUPNPC_SET_SOCKET_TIMEOUT
+#ifdef _WIN32
+	DWORD timeout = MINIUPNPC_CONNECT_TIMEOUT_IN_MS;
+#else
 	struct timeval timeout;
+#endif
 #endif /* #ifdef MINIUPNPC_SET_SOCKET_TIMEOUT */
 
 #ifdef USE_GETHOSTBYNAME
@@ -91,15 +99,23 @@ SOCKET connecthostport(const char * host, unsigned short port,
 	}
 #ifdef MINIUPNPC_SET_SOCKET_TIMEOUT
 	/* setting a 3 seconds timeout for the connect() call */
+#ifdef _WIN32
+	if(setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0)
+#else
 	timeout.tv_sec = 3;
 	timeout.tv_usec = 0;
 	if(setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval)) < 0)
+#endif
 	{
 		PRINT_SOCKET_ERROR("setsockopt SO_RCVTIMEO");
 	}
+#ifdef _WIN32
+	if(setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout, sizeof(timeout)) < 0)
+#else
 	timeout.tv_sec = 3;
 	timeout.tv_usec = 0;
 	if(setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(struct timeval)) < 0)
+#endif
 	{
 		PRINT_SOCKET_ERROR("setsockopt SO_SNDTIMEO");
 	}
@@ -212,15 +228,23 @@ SOCKET connecthostport(const char * host, unsigned short port,
 		}
 #ifdef MINIUPNPC_SET_SOCKET_TIMEOUT
 		/* setting a 3 seconds timeout for the connect() call */
+#ifdef _WIN32
+		if(setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0)
+#else
 		timeout.tv_sec = 3;
 		timeout.tv_usec = 0;
 		if(setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval)) < 0)
+#endif
 		{
 			PRINT_SOCKET_ERROR("setsockopt");
 		}
+#ifdef _WIN32
+		if(setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout, sizeof(timeout)) < 0)
+#else
 		timeout.tv_sec = 3;
 		timeout.tv_usec = 0;
 		if(setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(struct timeval)) < 0)
+#endif
 		{
 			PRINT_SOCKET_ERROR("setsockopt");
 		}
