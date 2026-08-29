@@ -107,22 +107,22 @@ string SearchManager::normalizeWhitespace(const string& aString){
 	return normalized;
 }
 
-void SearchManager::search(const string& aName, int64_t aSize, TypeModes aTypeMode /* = TYPE_ANY */, SizeModes aSizeMode /* = SIZE_ATLEAST */, const string& aToken /* = Util::emptyString */) {
-	if(okToSearch()) {
-		string aKey;
-		genSUDPKey(aKey);
-		ClientManager::getInstance()->search(aSizeMode, aSize, aTypeMode, normalizeWhitespace(aName), aToken, aKey);
-		lastSearch.store(GET_TICK(), std::memory_order_relaxed);
-	}
+bool SearchManager::search(const string& aName, int64_t aSize, TypeModes aTypeMode /* = TYPE_ANY */, SizeModes aSizeMode /* = SIZE_ATLEAST */, const string& aToken /* = Util::emptyString */) {
+	if(!okToSearch()) return false;
+	string aKey;
+	genSUDPKey(aKey);
+	ClientManager::getInstance()->search(aSizeMode, aSize, aTypeMode, normalizeWhitespace(aName), aToken, aKey);
+	lastSearch.store(GET_TICK(), std::memory_order_relaxed);
+	return true;
 }
 
-void SearchManager::search(StringList& who, const string& aName, int64_t aSize /* = 0 */, TypeModes aTypeMode /* = TYPE_ANY */, SizeModes aSizeMode /* = SIZE_ATLEAST */, const string& aToken /* = Util::emptyString */, const StringList& aExtList) {
-	if(okToSearch()) {
-		string aKey;
-		genSUDPKey(aKey);
-		ClientManager::getInstance()->search(who, aSizeMode, aSize, aTypeMode, normalizeWhitespace(aName), aToken, aExtList, aKey);
-		lastSearch.store(GET_TICK(), std::memory_order_relaxed);
-	}
+bool SearchManager::search(StringList& who, const string& aName, int64_t aSize /* = 0 */, TypeModes aTypeMode /* = TYPE_ANY */, SizeModes aSizeMode /* = SIZE_ATLEAST */, const string& aToken /* = Util::emptyString */, const StringList& aExtList) {
+	if(!okToSearch()) return false;
+	string aKey;
+	genSUDPKey(aKey);
+	ClientManager::getInstance()->search(who, aSizeMode, aSize, aTypeMode, normalizeWhitespace(aName), aToken, aExtList, aKey);
+	lastSearch.store(GET_TICK(), std::memory_order_relaxed);
+	return true;
 }
 
 void SearchManager::listen() {

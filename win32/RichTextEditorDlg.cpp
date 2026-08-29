@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -57,10 +58,11 @@ void normalizeAdcLineEndings(string& text) {
 
 }
 
-RichTextEditorDlg::RichTextEditorDlg(dwt::Widget* parent, const string& aHubUrl, const tstring& aInitialText) :
+RichTextEditorDlg::RichTextEditorDlg(dwt::Widget* parent, const string& aHubUrl, const tstring& aInitialText, const tstring& aUseCaption) :
 	GridDialog(parent, 780),
 	hubUrl(aHubUrl),
 	initialText(aInitialText),
+	useCaption(aUseCaption),
 	source(nullptr),
 	preview(nullptr),
 	validation(nullptr),
@@ -177,7 +179,7 @@ bool RichTextEditorDlg::handleInitDialog() {
 		[this] { handleUse(); },
 		[this] { endDialog(IDCANCEL); });
 	useButton = dialogButtons.first;
-	useButton->setText(T_("Use in chat"));
+	useButton->setText(useCaption.empty() ? T_("Use in chat") : useCaption);
 	useButton->setEnabled(false);
 
 	source->onUpdated([this] { updatePreview(); });

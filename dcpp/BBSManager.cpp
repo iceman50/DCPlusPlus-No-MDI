@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -102,9 +103,11 @@ BBSManager::BBSManager() {
 	QueueManager::getInstance()->addListener(this);
 	SearchManager::getInstance()->addListener(this);
 	SettingsManager::getInstance()->addListener(this);
+	TimerManager::getInstance()->addListener(this);
 }
 
 BBSManager::~BBSManager() {
+	TimerManager::getInstance()->removeListener(this);
 	SettingsManager::getInstance()->removeListener(this);
 	SearchManager::getInstance()->removeListener(this);
 	QueueManager::getInstance()->removeListener(this);
@@ -147,10 +150,7 @@ string BBSManager::sanitizeDisplayText(const string& value, size_t maxBytes) {
 	return result;
 }
 
-bool BBSManager::composeDocument(const string& authorId, const string& parent,
-	const string& subject, const string& body, bool richText, uint64_t composed,
-	string& raw, BBSDocument& document, string& error) noexcept
-{
+bool BBSManager::composeDocument(const string& authorId, const string& parent, const string& subject, const string& body, bool richText, uint64_t composed, string& raw, BBSDocument& document, string& error) noexcept {
 	try {
 		if(authorId.size() != 39 || !isBase32(authorId)) {
 			error = _("The BBS post author CID is invalid");
@@ -205,9 +205,7 @@ bool BBSManager::composeDocument(const string& authorId, const string& parent,
 	return false;
 }
 
-bool BBSManager::parseDocument(const string& raw, const string& expectedTTH,
-	BBSDocument& document, string& error) noexcept
-{
+bool BBSManager::parseDocument(const string& raw, const string& expectedTTH, BBSDocument& document, string& error) noexcept {
 	try {
 		if(expectedTTH.size() != 39 || !isBase32(expectedTTH)) {
 			error = _("The expected BBS post hash is invalid");
@@ -363,6 +361,7 @@ void BBSManager::setHubSupported(const string& hubUrl, bool supported) noexcept 
 			}
 		}
 	}
+	fire(BBSManagerListener::SupportUpdated(), hubUrl, supported);
 	if(!supported) return;
 	for(const auto& entry: cachedEntries) {
 		try {
@@ -411,11 +410,18 @@ void BBSManager::removeBoard(const string& hubUrl, const string& board) noexcept
 }
 
 void BBSManager::setSubscribed(const string& hubUrl, const string& board, bool subscribed) noexcept {
-	Lock l(cs);
-	auto hub = hubs.find(hubUrl);
-	if(hub == hubs.end()) return;
-	auto i = hub->second.boards.find(board);
-	if(i != hub->second.boards.end()) i->second.descriptor.subscribed = subscribed;
+	bool changed = false;
+	{
+		Lock l(cs);
+		auto hub = hubs.find(hubUrl);
+		if(hub == hubs.end()) return;
+		auto i = hub->second.boards.find(board);
+		if(i != hub->second.boards.end() && i->second.descriptor.subscribed != subscribed) {
+			i->second.descriptor.subscribed = subscribed;
+			changed = true;
+		}
+	}
+	if(changed) fire(BBSManagerListener::BoardUpdated(), hubUrl, board);
 }
 
 uint64_t BBSManager::getResumeTimestamp(const string& hubUrl, const string& board) const noexcept {
@@ -489,9 +495,7 @@ std::vector<BBSBoard> BBSManager::getBoards(const string& hubUrl) const {
 	return result;
 }
 
-std::vector<BBSEntry> BBSManager::getEntries(const string& hubUrl, const string& board,
-	bool includeWithdrawn) const
-{
+std::vector<BBSEntry> BBSManager::getEntries(const string& hubUrl, const string& board, bool includeWithdrawn) const {
 	std::vector<BBSEntry> result;
 	{
 		Lock l(cs);
@@ -517,9 +521,7 @@ std::optional<BBSBoard> BBSManager::getBoard(const string& hubUrl, const string&
 	return i == hub->second.boards.end() ? std::nullopt : std::optional<BBSBoard>(i->second.descriptor);
 }
 
-std::optional<BBSEntry> BBSManager::getEntry(const string& hubUrl, const string& board,
-	const string& tth) const
-{
+std::optional<BBSEntry> BBSManager::getEntry(const string& hubUrl, const string& board, const string& tth) const {
 	Lock l(cs);
 	auto hub = hubs.find(hubUrl);
 	if(hub == hubs.end()) return std::nullopt;
@@ -533,6 +535,13 @@ std::optional<BBSDocument> BBSManager::getDocument(const string& tth) const {
 	Lock l(cs);
 	auto i = documents.find(tth);
 	return i == documents.end() ? std::nullopt : std::optional<BBSDocument>(i->second);
+}
+
+bool BBSManager::isDocumentPending(const string& hubUrl, const string& board, const string& tth) const noexcept {
+	Lock l(cs);
+	auto requests = pending.find(tth);
+	if(requests == pending.end()) return false;
+	return std::any_of(requests->second.begin(), requests->second.end(), [&](const PendingRequest& request) { return hubHintsEqual(request.hubUrl, hubUrl) && request.board == board; });
 }
 
 string BBSManager::getCachePath(const string& tth) const {
@@ -572,10 +581,7 @@ void BBSManager::registerDocument(const string& hubUrl, const BBSDocument& docum
 	} catch(...) { }
 }
 
-bool BBSManager::preparePost(const string& hubUrl, const string& authorId, const string& parent,
-	const string& subject, const string& body, bool richText, int64_t boardLimit,
-	BBSDocument& document, string& error) noexcept
-{
+bool BBSManager::preparePost(const string& hubUrl, const string& authorId, const string& parent, const string& subject, const string& body, bool richText, int64_t boardLimit, BBSDocument& document, string& error) noexcept {
 	string raw;
 	if(!composeDocument(authorId, parent, subject, body, richText, GET_TIME(), raw, document, error)) return false;
 	if(boardLimit < 0 || document.size > boardLimit) {
@@ -610,9 +616,7 @@ bool BBSManager::preparePost(const string& hubUrl, const string& authorId, const
 	return false;
 }
 
-bool BBSManager::loadCachedDocument(const string& hubUrl, const string& board,
-	const BBSEntry& entry, BBSDocument& document, string& error) noexcept
-{
+bool BBSManager::loadCachedDocument(const string& hubUrl, const string& board, const BBSEntry& entry, BBSDocument& document, string& error) noexcept {
 	try {
 		const auto path = getCachePath(entry.tth);
 		if(File::getSize(path) != entry.size || entry.size < 0 || entry.size > MAX_DOCUMENT_SIZE) return false;
@@ -635,17 +639,37 @@ bool BBSManager::loadCachedDocument(const string& hubUrl, const string& board,
 	}
 }
 
-void BBSManager::searchFor(const PendingRequest& request, const string& tth) noexcept {
+bool BBSManager::searchFor(const PendingRequest& request, const string& tth) noexcept {
+	{
+		Lock l(cs);
+		auto requests = pending.find(tth);
+		if(requests == pending.end()) return false;
+		auto current = std::find_if(requests->second.begin(), requests->second.end(), [&](const PendingRequest& item) {
+			return hubHintsEqual(item.hubUrl, request.hubUrl) && item.board == request.board &&
+				item.size == request.size && item.queuedAt == 0;
+		});
+		if(current == requests->second.end()) return false;
+	}
 	try {
 		StringList hubsToSearch { request.hubUrl };
-		SearchManager::getInstance()->search(hubsToSearch, tth, 0, SearchManager::TYPE_TTH,
-			SearchManager::SIZE_DONTCARE, "BBS0-" + tth.substr(0, 12), StringList());
+		if(!SearchManager::getInstance()->search(hubsToSearch, tth, 0, SearchManager::TYPE_TTH,
+			SearchManager::SIZE_DONTCARE, "BBS0-" + tth.substr(0, 12), StringList())) return false;
+		const auto now = GET_TICK();
+		Lock l(cs);
+		auto requests = pending.find(tth);
+		if(requests != pending.end()) {
+			auto current = std::find_if(requests->second.begin(), requests->second.end(), [&](const PendingRequest& item) {
+				return hubHintsEqual(item.hubUrl, request.hubUrl) && item.board == request.board &&
+					item.size == request.size && item.queuedAt == 0;
+			});
+			if(current != requests->second.end()) current->lastSearch = now;
+		}
+		return true;
 	} catch(...) { }
+	return false;
 }
 
-bool BBSManager::requestDocument(const string& hubUrl, const string& board, const string& tth,
-	string& error) noexcept
-{
+bool BBSManager::requestDocument(const string& hubUrl, const string& board, const string& tth, string& error) noexcept {
 	auto entry = getEntry(hubUrl, board, tth);
 	if(!entry || entry->withdrawn) {
 		error = _("No active BBS index entry has that hash");
@@ -668,8 +692,10 @@ bool BBSManager::requestDocument(const string& hubUrl, const string& board, cons
 		return true;
 	}
 
-	PendingRequest request { hubUrl, board, entry->size, GET_TICK() };
-	bool shouldSearch = true;
+	const auto now = GET_TICK();
+	PendingRequest request { hubUrl, board, entry->size, now, 0, 0 };
+	bool shouldSearch = false;
+	bool added = false;
 	{
 		Lock l(cs);
 		auto& requests = pending[tth];
@@ -678,20 +704,51 @@ bool BBSManager::requestDocument(const string& hubUrl, const string& board, cons
 		});
 		if(i == requests.end()) {
 			requests.push_back(request);
-		} else if(request.lastSearch - i->lastSearch >= 30000) {
-			i->lastSearch = request.lastSearch;
+			shouldSearch = true;
+			added = true;
+		} else if(i->queuedAt == 0 && (i->lastSearch == 0 || now - i->lastSearch >= DOCUMENT_SEARCH_RETRY_MS)) {
 			i->size = request.size;
-		} else {
-			shouldSearch = false;
+			request = *i;
+			shouldSearch = true;
 		}
 	}
+	if(added) fire(BBSManagerListener::DocumentUpdated(), hubUrl, board, tth);
 	if(shouldSearch) searchFor(request, tth);
+	return true;
+}
+
+bool BBSManager::loadCachedDocument(const string& hubUrl, const string& board, const string& tth, string& error) noexcept {
+	auto entry = getEntry(hubUrl, board, tth);
+	if(!entry || entry->withdrawn) {
+		error = _("No active BBS index entry has that hash");
+		return false;
+	}
+	if(entry->size < 0 || entry->size > MAX_DOCUMENT_SIZE) {
+		error = str(F_("The declared BBS post size exceeds the %1% byte local safety limit") % MAX_DOCUMENT_SIZE);
+		return false;
+	}
+	BBSDocument document;
+	{
+		Lock l(cs);
+		auto cached = documents.find(tth);
+		if(cached != documents.end()) document = cached->second;
+	}
+	if(document.tth.empty()) {
+		if(!loadCachedDocument(hubUrl, board, *entry, document, error)) {
+			if(error.empty()) error = _("The BBS post is not cached locally");
+			return false;
+		}
+	} else {
+		registerDocument(hubUrl, document);
+	}
+	fire(BBSManagerListener::DocumentUpdated(), hubUrl, board, tth);
 	return true;
 }
 
 void BBSManager::on(SearchManagerListener::SR, const SearchResultPtr& result) noexcept {
 	if(!result || result->getType() != SearchResult::TYPE_FILE) return;
 	const auto tth = result->getTTH().toBase32();
+	const auto target = getCachePath(tth);
 	std::optional<PendingRequest> request;
 	{
 		Lock l(cs);
@@ -704,17 +761,81 @@ void BBSManager::on(SearchManagerListener::SR, const SearchResultPtr& result) no
 	}
 	if(!request) return;
 
+	auto markQueued = [&]() {
+		const auto now = GET_TICK();
+		bool marked = false;
+		Lock l(cs);
+		auto requests = pending.find(tth);
+		if(requests == pending.end()) return false;
+		for(auto& item: requests->second) {
+			if(item.size == result->getSize() && hubHintsEqual(item.hubUrl, result->getUser().hint)) {
+				item.queuedAt = now;
+				marked = true;
+			}
+		}
+		return marked;
+	};
+	auto failRequest = [&](const string& message) {
+		std::vector<PendingRequest> failed;
+		{
+			Lock l(cs);
+			auto requests = pending.find(tth);
+			if(requests == pending.end()) return;
+			auto& items = requests->second;
+			for(auto i = items.begin(); i != items.end();) {
+				if(hubHintsEqual(i->hubUrl, request->hubUrl) && i->board == request->board) {
+					failed.push_back(*i);
+					i = items.erase(i);
+				} else {
+					++i;
+				}
+			}
+			if(items.empty()) pending.erase(requests);
+		}
+		for(const auto& item: failed) {
+			reportStatus(item.hubUrl, message);
+			fire(BBSManagerListener::DocumentUpdated(), item.hubUrl, item.board, tth);
+		}
+	};
+
 	try {
-		QueueManager::getInstance()->add(getCachePath(tth), request->size, result->getTTH(),
+		QueueManager::getInstance()->add(target, request->size, result->getTTH(),
 			result->getUser(), QueueItem::FLAG_CLIENT_VIEW | QueueItem::FLAG_TEXT);
-	} catch(const QueueException&) {
+		if(!markQueued()) QueueManager::getInstance()->remove(target);
+	} catch(const QueueException& e) {
 		BBSDocument document;
 		string error;
 		auto entry = getEntry(request->hubUrl, request->board, tth);
 		if(entry && loadCachedDocument(request->hubUrl, request->board, *entry, document, error)) {
-			fire(BBSManagerListener::DocumentUpdated(), request->hubUrl, request->board, tth);
+			std::vector<PendingRequest> completed;
+			{
+				Lock l(cs);
+				auto requests = pending.find(tth);
+				if(requests != pending.end()) {
+					completed = std::move(requests->second);
+					pending.erase(requests);
+				}
+			}
+			for(const auto& item: completed) {
+				if(item.size != document.size) continue;
+				registerDocument(item.hubUrl, document);
+				fire(BBSManagerListener::DocumentUpdated(), item.hubUrl, item.board, tth);
+			}
+			return;
 		}
-	} catch(...) { }
+		TTHValue queuedRoot;
+		if(QueueManager::getInstance()->getSize(target) == request->size &&
+			QueueManager::getInstance()->getTTH(target, queuedRoot) && queuedRoot == result->getTTH())
+		{
+			markQueued();
+			return;
+		}
+		failRequest(e.getError());
+	} catch(const Exception& e) {
+		failRequest(e.getError());
+	} catch(...) {
+		failRequest(_("Unable to queue the BBS post download"));
+	}
 }
 
 void BBSManager::completeDocument(const string& tth, const string& path) noexcept {
@@ -723,9 +844,25 @@ void BBSManager::completeDocument(const string& tth, const string& path) noexcep
 		Lock l(cs);
 		auto i = pending.find(tth);
 		if(i == pending.end()) return;
-		requests = i->second;
+		requests = std::move(i->second);
+		pending.erase(i);
 	}
 	if(requests.empty()) return;
+	std::vector<PendingRequest> stale;
+	requests.erase(std::remove_if(requests.begin(), requests.end(), [&](const PendingRequest& request) {
+		auto entry = getEntry(request.hubUrl, request.board, tth);
+		const auto invalid = !entry || entry->withdrawn || entry->size != request.size;
+		if(invalid) stale.push_back(request);
+		return invalid;
+	}), requests.end());
+	for(const auto& request: stale) {
+		reportStatus(request.hubUrl, _("The BBS index entry changed while the post was downloading"));
+		fire(BBSManagerListener::DocumentUpdated(), request.hubUrl, request.board, tth);
+	}
+	if(requests.empty()) {
+		try { File::deleteFile(path); } catch(...) { }
+		return;
+	}
 
 	BBSDocument document;
 	string error;
@@ -738,9 +875,6 @@ void BBSManager::completeDocument(const string& tth, const string& path) noexcep
 			const auto raw = file.read(static_cast<size_t>(size));
 			if(static_cast<int64_t>(raw.size()) == size && parseDocument(raw, tth, document, error)) {
 				document.path = path;
-				Lock l(cs);
-				documents[tth] = document;
-				pending.erase(tth);
 			}
 		}
 	} catch(const Exception& e) {
@@ -751,15 +885,30 @@ void BBSManager::completeDocument(const string& tth, const string& path) noexcep
 
 	if(document.tth.empty()) {
 		try { File::deleteFile(path); } catch(...) { }
-		for(const auto& request: requests) reportStatus(request.hubUrl,
-			error.empty() ? _("The downloaded BBS post failed verification") : error);
+		for(const auto& request: requests) {
+			reportStatus(request.hubUrl, error.empty() ? _("The downloaded BBS post failed verification") : error);
+			fire(BBSManagerListener::DocumentUpdated(), request.hubUrl, request.board, tth);
+		}
 		return;
 	}
 
+	bool accepted = false;
 	for(const auto& request: requests) {
-		if(request.size != document.size) continue;
+		if(request.size != document.size) {
+			reportStatus(request.hubUrl, _("The downloaded BBS post size did not match its index entry"));
+			fire(BBSManagerListener::DocumentUpdated(), request.hubUrl, request.board, tth);
+			continue;
+		}
+		if(!accepted) {
+			Lock l(cs);
+			documents[tth] = document;
+			accepted = true;
+		}
 		registerDocument(request.hubUrl, document);
 		fire(BBSManagerListener::DocumentUpdated(), request.hubUrl, request.board, tth);
+	}
+	if(!accepted) {
+		try { File::deleteFile(path); } catch(...) { }
 	}
 }
 
@@ -768,6 +917,68 @@ void BBSManager::on(QueueManagerListener::Finished, QueueItem* item, const strin
 	const auto tth = item->getTTH().toBase32();
 	if(Util::stricmp(item->getTarget(), getCachePath(tth)) != 0) return;
 	completeDocument(tth, item->getTarget());
+}
+
+void BBSManager::on(QueueManagerListener::Removed, QueueItem* item) noexcept {
+	if(!item || !item->isSet(QueueItem::FLAG_CLIENT_VIEW)) return;
+	const auto tth = item->getTTH().toBase32();
+	if(Util::stricmp(item->getTarget(), getCachePath(tth)) != 0) return;
+	std::vector<PendingRequest> requests;
+	{
+		Lock l(cs);
+		auto pendingRequests = pending.find(tth);
+		if(pendingRequests == pending.end()) return;
+		requests = std::move(pendingRequests->second);
+		pending.erase(pendingRequests);
+	}
+	for(const auto& request: requests) {
+		reportStatus(request.hubUrl, _("The BBS post download ended before it could be verified"));
+		fire(BBSManagerListener::DocumentUpdated(), request.hubUrl, request.board, tth);
+	}
+}
+
+void BBSManager::on(TimerManagerListener::Second, uint64_t tick) noexcept {
+	using PendingAction = std::pair<string, PendingRequest>;
+	std::vector<PendingAction> searches;
+	std::vector<PendingAction> expired;
+	std::set<string> queuesToRemove;
+	{
+		Lock l(cs);
+		for(auto requests = pending.begin(); requests != pending.end();) {
+			auto& items = requests->second;
+			bool queuedExpired = false;
+			for(auto item = items.begin(); item != items.end();) {
+				const auto since = item->queuedAt != 0 ? item->queuedAt : item->started;
+				const auto timeout = item->queuedAt != 0 ? DOCUMENT_QUEUE_TIMEOUT_MS : DOCUMENT_SEARCH_TIMEOUT_MS;
+				if(since != 0 && tick >= since && tick - since >= timeout) {
+					queuedExpired = queuedExpired || item->queuedAt != 0;
+					expired.emplace_back(requests->first, *item);
+					item = items.erase(item);
+					continue;
+				}
+				if(item->queuedAt == 0 && (item->lastSearch == 0 ||
+					(tick >= item->lastSearch && tick - item->lastSearch >= DOCUMENT_SEARCH_RETRY_MS)))
+				{
+					searches.emplace_back(requests->first, *item);
+				}
+				++item;
+			}
+			if(items.empty()) {
+				if(queuedExpired) queuesToRemove.insert(getCachePath(requests->first));
+				requests = pending.erase(requests);
+			} else {
+				++requests;
+			}
+		}
+	}
+	for(const auto& action: expired) {
+		const auto& request = action.second;
+		reportStatus(request.hubUrl, request.queuedAt != 0 ?
+			_("The BBS post download timed out") : _("No online peer responded with the BBS post"));
+		fire(BBSManagerListener::DocumentUpdated(), request.hubUrl, request.board, action.first);
+	}
+	for(const auto& action: searches) searchFor(action.second, action.first);
+	for(const auto& target: queuesToRemove) QueueManager::getInstance()->remove(target);
 }
 
 bool BBSManager::hasLiveReference(const string& hubUrl, const string& tth) const noexcept {

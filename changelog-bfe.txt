@@ -3,6 +3,8 @@
 * Support Windows paths longer than the legacy MAX_PATH limit across hashing, sharing, downloads, dialogs, drag-and-drop, archives and persistent databases
 * Add a Win7-compatible application dark theme with Windows high-contrast integration, retained visual styles, native dark non-client rendering on Win10+, application-owned button and control rendering, and a configurable Experimental palette
 * Add ADC BBS0 durable bulletin boards with dynamic board discovery, persistent replay/resume indexes, posts, replies and withdrawals, canonical TTH-verified plain or rich-text documents, explicit exact-TTH retrieval and route-scoped serving, and a /bbs command interface
+* Add a hub-scoped BBS workspace with board and threaded post browsing, verified document viewing, subscriptions, posting, replies, withdrawals, filtering, offline cache access and session restoration (iceman50)
+* Fix route-scoped BBS document uploads and the BBS post dialog layout (iceman50)
 * Update version.xml to use its own version.xml (https://dcplusplus.sourceforge.io/version_exp.xml)
 
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==

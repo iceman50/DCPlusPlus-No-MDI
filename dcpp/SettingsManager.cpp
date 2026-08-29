@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,6 +41,7 @@ const string SettingsManager::settingTags[] =
 	"LinkFont", "LogFont", "ChatTimestampFont", "ChatNickFont", "ChatTextFont", "ChatSystemFont",
 	"ChatOwnTimestampFont", "ChatOwnNickFont", "ChatOwnTextFont", "ChatMentionFont",
 	"ADLSearchFrameOrder", "ADLSearchFrameWidths",
+	"BBSFrameBoardsOrder", "BBSFrameBoardsWidths", "BBSFrameEntriesOrder", "BBSFrameEntriesWidths",
 	"DirectoryListingFrameOrder", "DirectoryListingFrameWidths",
 	"FavHubsFrameOrder", "FavHubsFrameWidths",
 	"FinishedDLFilesOrder", "FinishedDLFilesWidths",
@@ -138,7 +140,7 @@ const string SettingsManager::settingTags[] =
 	"TotalUpload", "TotalDownload", "SharingSkiplistMinSize", "SharingSkiplistMaxSize",
 	"SENTRY",
 	// Floats
-	"FileListPanedPos", "HubPanedPos", "QueuePanedPos", "SearchPanedPos",
+	"BBSFramePanedPos", "BBSFrameContentPanedPos", "FileListPanedPos", "HubPanedPos", "QueuePanedPos", "SearchPanedPos",
 	"TransfersPanedPos", "UsersPanedPos", "StatsPanedPos",
 	"SENTRY"
 };
@@ -388,6 +390,8 @@ SettingsManager::SettingsManager() {
 	setDefault(TOOLBAR_SIZE, 20);
 	setDefault(TAB_WIDTH, 150);
 	setDefault(TAB_STYLE, TAB_STYLE_OD | TAB_STYLE_BROWSER);
+	setDefault(BBSFRAME_PANED_POS, .22);
+	setDefault(BBSFRAME_CONTENT_PANED_POS, .48);
 	setDefault(FILE_LIST_PANED_POS, .3);
 	setDefault(HUB_PANED_POS, .7);
 	setDefault(QUEUE_PANED_POS, .3);

@@ -1040,9 +1040,7 @@ bool AdcHub::requestBBSEntry(const string& board, const string& tth, string& err
 	return true;
 }
 
-bool AdcHub::postBBS(const string& board, const string& parent, const string& subject,
-	const string& body, bool richText, string& error)
-{
+bool AdcHub::postBBS(const string& board, const string& parent, const string& subject, const string& body, bool richText, string& error) {
 	if(!supportsBBS0 || state != STATE_NORMAL) {
 		error = bbsNotNegotiatedError();
 		return false;

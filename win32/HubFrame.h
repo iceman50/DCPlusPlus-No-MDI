@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -53,12 +54,14 @@ class HubFrame :
 	friend class AspectChat<HubFrame>;
 	friend class AspectUserInfo<HubFrame>;
 	friend class AspectUserCommand<HubFrame>;
+	friend class BBSFrame;
 
 	using IRecent<HubFrame>::setText;
 
 public:
 	enum Status {
 		STATUS_STATUS,
+		STATUS_BBS,
 		STATUS_SECURE,
 		STATUS_USERS,
 		STATUS_SHARED,
@@ -185,6 +188,7 @@ private:
 
 	ParamMap ucLineParams;
 	bool hubMenu;
+	std::unordered_set<string> bbsChatReads;
 
 	tstring complete;
 	StringList tabCompleteNicks;
@@ -210,6 +214,8 @@ private:
 	void updateStatus();
 	void updateSecureStatus();
 	void updateRichTextAvailability();
+	void updateBBSAvailability();
+	void openBBS();
 
 	void initTimer();
 	bool runTimer();
@@ -306,6 +312,7 @@ private:
 	virtual void on(BBSManagerListener::EntryUpdated, const string&, const string&, const string&) noexcept;
 	virtual void on(BBSManagerListener::DocumentUpdated, const string&, const string&, const string&) noexcept;
 	virtual void on(BBSManagerListener::Status, const string&, const string&) noexcept;
+	virtual void on(BBSManagerListener::SupportUpdated, const string&, bool) noexcept;
 	void onStatusMessage(const string& line, int flags);
 
 	// Icon management

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -74,6 +75,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 	optional<TTHValue> requestedRoot;
 	int64_t expectedFileSize = -1;
 	bool verifyTempShare = false;
+	bool exactOnly = false;
 	std::unique_ptr<File> verifiedFile;
 
 	try {
@@ -101,6 +103,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				if(aFile.compare(0, 4, "TTH/") == 0) {
 					requestedRoot = TTHValue(aFile.substr(4));
 					verifyTempShare = info.temporary;
+					exactOnly = info.exactOnly;
 				} else {
 					requestedRoot = ShareManager::getInstance()->getTTH(aFile, aSource.getHubUrl());
 				}
@@ -199,14 +202,14 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				// change must not turn a temporary candidate into an unverified upload.
 				auto current = ShareManager::getInstance()->resolveFile(
 					"TTH/" + requestedRoot->toBase32(), aSource.getHubUrl());
-				if(current.size != expectedFileSize) return false;
+				if(!current.temporary || current.exactOnly != exactOnly || current.size != expectedFileSize) return false;
 
 				// Keep this exact handle for the transfer. On Windows the non-SHARED open
 				// prevents writes/replacement while the bytes are hashed and then served;
 				// hashing the handle also bypasses second-resolution timestamp caches.
 				auto candidate = std::make_unique<File>(current.realPath, File::READ, File::OPEN);
 				if(!HashManager::getInstance()->verifyFileTTH(*candidate, current.size, *requestedRoot)) return false;
-				if(current.temporary && !ShareManager::getInstance()->validateChatAttachment(
+				if(!current.exactOnly && !ShareManager::getInstance()->validateChatAttachment(
 					*requestedRoot, current.size, aSource.getHubUrl())) return false;
 				sourceFile = std::move(current.realPath);
 				verifiedFile = std::move(candidate);
@@ -245,7 +248,7 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 				if(refreshing || verifyTempShare) {
 					if(!verifyUploadPath()) {
 						if(refreshing) return queueRefreshRetry();
-						aSource.fileNotAvail("Temporary attachment is no longer available");
+						aSource.fileNotAvail(exactOnly ? "Protocol document is no longer available" : "Temporary attachment is no longer available");
 						return false;
 					}
 				}

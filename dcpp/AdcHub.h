@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -46,8 +47,7 @@ public:
 	bool subscribeBBS(const string& board, uint64_t timestamp, string& error);
 	bool unsubscribeBBS(const string& board, string& error);
 	bool requestBBSEntry(const string& board, const string& tth, string& error);
-	bool postBBS(const string& board, const string& parent, const string& subject,
-		const string& body, bool richText, string& error);
+	bool postBBS(const string& board, const string& parent, const string& subject, const string& body, bool richText, string& error);
 	bool withdrawBBS(const string& board, const string& tth, string& error);
 	bool fetchBBS(const string& board, const string& tth, string& error);
 	virtual void sendUserCmd(const UserCommand& command, const ParamMap& params);

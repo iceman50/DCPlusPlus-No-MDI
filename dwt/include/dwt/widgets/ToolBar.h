@@ -153,6 +153,7 @@ public:
 	/** id is the identification of which button you want to enable.
 	  */
 	void setButtonEnabled( unsigned id, bool enable );
+	void setButtonEnabled(const std::string& id, bool enable);
 
 	/// Returns a boolean indicating if the button with the current id is enabled or not
 	/** id is the identification you supplied when you called addButton.

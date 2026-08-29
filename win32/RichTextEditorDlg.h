@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,7 +23,7 @@
 /** Source-preserving ADC RTF0 editor with a separate rendered preview. */
 class RichTextEditorDlg : public GridDialog {
 public:
-	RichTextEditorDlg(dwt::Widget* parent, const string& hubUrl, const tstring& initialText);
+	RichTextEditorDlg(dwt::Widget* parent, const string& hubUrl, const tstring& initialText, const tstring& useCaption = Util::emptyStringT);
 	~RichTextEditorDlg();
 
 	const tstring& getText() const { return result; }
@@ -31,6 +32,7 @@ private:
 	string hubUrl;
 	tstring initialText;
 	tstring result;
+	tstring useCaption;
 
 	TextBoxPtr source;
 	RichTextBoxPtr preview;

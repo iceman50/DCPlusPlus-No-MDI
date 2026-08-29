@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +22,7 @@
 #include "SettingsManager.h"
 #include "Singleton.h"
 #include "Speaker.h"
+#include "TimerManager.h"
 
 namespace dcpp {
 
@@ -78,16 +80,19 @@ public:
 	typedef X<1> EntryUpdated;
 	typedef X<2> DocumentUpdated;
 	typedef X<3> Status;
+	typedef X<4> SupportUpdated;
 
 	virtual void on(BoardUpdated, const string&, const string&) noexcept { }
 	virtual void on(EntryUpdated, const string&, const string&, const string&) noexcept { }
 	virtual void on(DocumentUpdated, const string&, const string&, const string&) noexcept { }
 	virtual void on(Status, const string&, const string&) noexcept { }
+	virtual void on(SupportUpdated, const string&, bool) noexcept { }
 };
 
 /** Client-side implementation of the ADC BBS0 index and post-document cache. */
 class BBSManager : public Singleton<BBSManager>, public Speaker<BBSManagerListener>,
-	private QueueManagerListener, private SearchManagerListener, private SettingsManagerListener
+	private QueueManagerListener, private SearchManagerListener, private SettingsManagerListener,
+	private TimerManagerListener
 {
 public:
 	static constexpr int64_t MAX_DOCUMENT_SIZE = 4 * 1024 * 1024;
@@ -106,31 +111,26 @@ public:
 	bool updateEntry(const string& hubUrl, BBSEntry entry) noexcept;
 
 	std::vector<BBSBoard> getBoards(const string& hubUrl) const;
-	std::vector<BBSEntry> getEntries(const string& hubUrl, const string& board,
-		bool includeWithdrawn = false) const;
+	std::vector<BBSEntry> getEntries(const string& hubUrl, const string& board, bool includeWithdrawn = false) const;
 	std::optional<BBSBoard> getBoard(const string& hubUrl, const string& board) const;
-	std::optional<BBSEntry> getEntry(const string& hubUrl, const string& board,
-		const string& tth) const;
+	std::optional<BBSEntry> getEntry(const string& hubUrl, const string& board, const string& tth) const;
 	std::optional<BBSDocument> getDocument(const string& tth) const;
+	bool isDocumentPending(const string& hubUrl, const string& board, const string& tth) const noexcept;
 
 	/** Compose, hash, cache and expose a post before HBBP is sent. */
-	bool preparePost(const string& hubUrl, const string& authorId, const string& parent,
-		const string& subject, const string& body, bool richText, int64_t boardLimit,
-		BBSDocument& document, string& error) noexcept;
+	bool preparePost(const string& hubUrl, const string& authorId, const string& parent, const string& subject, const string& body, bool richText, int64_t boardLimit, BBSDocument& document, string& error) noexcept;
 
 	/** Fetch on explicit user action. No body is fetched merely because an entry arrived. */
-	bool requestDocument(const string& hubUrl, const string& board, const string& tth,
-		string& error) noexcept;
+	bool requestDocument(const string& hubUrl, const string& board, const string& tth, string& error) noexcept;
+	/** Load and verify a local document without searching the network. */
+	bool loadCachedDocument(const string& hubUrl, const string& board, const string& tth, string& error) noexcept;
 
 	void reportStatus(const string& hubUrl, const string& message) noexcept;
 
 	static bool validBoardName(const string& value) noexcept;
 	static string sanitizeDisplayText(const string& value, size_t maxBytes = 512);
-	static bool composeDocument(const string& authorId, const string& parent,
-		const string& subject, const string& body, bool richText, uint64_t composed,
-		string& raw, BBSDocument& document, string& error) noexcept;
-	static bool parseDocument(const string& raw, const string& expectedTTH,
-		BBSDocument& document, string& error) noexcept;
+	static bool composeDocument(const string& authorId, const string& parent, const string& subject, const string& body, bool richText, uint64_t composed, string& raw, BBSDocument& document, string& error) noexcept;
+	static bool parseDocument(const string& raw, const string& expectedTTH, BBSDocument& document, string& error) noexcept;
 
 private:
 	friend class Singleton<BBSManager>;
@@ -149,8 +149,13 @@ private:
 		string hubUrl;
 		string board;
 		int64_t size = -1;
+		uint64_t started = 0;
 		uint64_t lastSearch = 0;
+		uint64_t queuedAt = 0;
 	};
+	static constexpr uint64_t DOCUMENT_SEARCH_RETRY_MS = 30 * 1000;
+	static constexpr uint64_t DOCUMENT_SEARCH_TIMEOUT_MS = 90 * 1000;
+	static constexpr uint64_t DOCUMENT_QUEUE_TIMEOUT_MS = 5 * 60 * 1000;
 
 	BBSManager();
 	~BBSManager();
@@ -161,18 +166,19 @@ private:
 	std::unordered_map<string, std::vector<PendingRequest>> pending;
 
 	string getCachePath(const string& tth) const;
-	bool loadCachedDocument(const string& hubUrl, const string& board, const BBSEntry& entry,
-		BBSDocument& document, string& error) noexcept;
+	bool loadCachedDocument(const string& hubUrl, const string& board, const BBSEntry& entry, BBSDocument& document, string& error) noexcept;
 	bool cacheRawDocument(const string& raw, BBSDocument& document, string& error) noexcept;
 	void registerDocument(const string& hubUrl, const BBSDocument& document) noexcept;
 	void completeDocument(const string& tth, const string& path) noexcept;
-	void searchFor(const PendingRequest& request, const string& tth) noexcept;
+	bool searchFor(const PendingRequest& request, const string& tth) noexcept;
 	bool hasLiveReference(const string& hubUrl, const string& tth) const noexcept;
 
 	void on(QueueManagerListener::Finished, QueueItem*, const string&, int64_t) noexcept override;
+	void on(QueueManagerListener::Removed, QueueItem*) noexcept override;
 	void on(SearchManagerListener::SR, const SearchResultPtr&) noexcept override;
 	void on(SettingsManagerListener::Load, SimpleXML&) noexcept override;
 	void on(SettingsManagerListener::Save, SimpleXML&) noexcept override;
+	void on(TimerManagerListener::Second, uint64_t) noexcept override;
 };
 
 } // namespace dcpp

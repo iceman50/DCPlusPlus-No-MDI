@@ -326,20 +326,23 @@ LRESULT drawButton(Button& button, NMCUSTOMDRAW& data, const Appearance::Palette
 	const bool checked = checkState != BST_UNCHECKED;
 	const bool pushLike = (style & BS_PUSHLIKE) != 0;
 	if((check || radio) && !pushLike) {
+		const long glyphMargin = button.scale(radio ? 2 : 4);
 		const long glyphSize = std::max(8L, std::min<long>(
-			button.scale(15), std::max(8L, bounds.height() - 4)));
+			button.scale(radio ? 13 : 15),
+			std::max(8L, bounds.height() - glyphMargin)));
 		const bool rightGlyph = (style & BS_LEFTTEXT) != 0;
 		Rectangle glyph(rightGlyph ? bounds.right() - glyphSize - 1 :
 			bounds.left() + 1, bounds.top() + std::max(0L,
 				(bounds.height() - glyphSize) / 2), glyphSize, glyphSize);
-		auto fill = checked ? colors.accent : colors.surface;
+		auto fill = radio ? colors.surface : checked ? colors.accent : colors.surface;
 		auto border = checked ? colors.accent : colors.border;
 		if(pressed) {
-			fill = checked ? Appearance::blend(colors.accent, RGB(0, 0, 0), 45) :
-				Appearance::blend(colors.surface, colors.accent, 38);
+			const auto pressedSurface = Appearance::blend(colors.surface, colors.accent, 38);
+			fill = radio || !checked ? pressedSurface : Appearance::blend(colors.accent, RGB(0, 0, 0), 45);
+			if(radio && checked) border = Appearance::blend(colors.accent, RGB(0, 0, 0), 45);
 		} else if(hot) {
-			fill = checked ? Appearance::blend(colors.accent, RGB(0, 0, 0), 25) :
-				Appearance::blend(colors.surface, colors.accent, 18);
+			const auto hotSurface = Appearance::blend(colors.surface, colors.accent, 18);
+			fill = radio || !checked ? hotSurface : Appearance::blend(colors.accent, RGB(0, 0, 0), 25);
 			border = Appearance::blend(border, colors.accent, 110);
 		}
 		if(disabled) {
@@ -352,22 +355,20 @@ LRESULT drawButton(Button& button, NMCUSTOMDRAW& data, const Appearance::Palette
 			Pen pen(border, Pen::Solid, 1);
 			auto selectBrush = canvas.select(brush);
 			auto selectPen = canvas.select(pen);
-			canvas.ellipse(Rectangle(glyph.left(), glyph.top(),
-				std::max(1L, glyph.width() - 1),
-				std::max(1L, glyph.height() - 1)));
+			canvas.ellipse(glyph);
 		} else {
 			drawSurface(canvas, glyph, fill, border);
 		}
 
 		if(checked) {
-			const auto mark = disabled ? Appearance::blend(
-				colors.highlightText, fill, 105) : colors.highlightText;
+			const auto checkMark = disabled ? Appearance::blend(colors.highlightText, fill, 105) : colors.highlightText;
+			const auto mark = radio ? border : checkMark;
 			Brush markBrush(mark);
-			Pen markPen(mark, Pen::Solid, std::max(1, button.scale(2)));
+			Pen markPen(mark, Pen::Solid, std::max(1, button.scale(radio ? 1 : 2)));
 			auto selectMarkBrush = canvas.select(markBrush);
 			auto selectMarkPen = canvas.select(markPen);
 			if(radio) {
-				const long inset = std::max(2L, glyphSize / 4);
+				const long inset = std::max(3L, glyphSize / 3);
 				canvas.ellipse(Rectangle(glyph.left() + inset,
 					glyph.top() + inset,
 					std::max(1L, glyph.width() - inset * 2),

@@ -205,6 +205,12 @@ void ToolBar::setButtonChecked(const std::string& id, bool check) {
 		setButtonChecked(intId, check);
 }
 
+void ToolBar::setButtonEnabled(const std::string& id, bool enable) {
+	int intId = getIntId(id);
+	if(intId != -1)
+		setButtonEnabled(intId, enable);
+}
+
 unsigned ToolBar::size() const {
 	return static_cast<unsigned>(sendMessage(TB_BUTTONCOUNT));
 }

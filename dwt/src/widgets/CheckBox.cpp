@@ -1,7 +1,7 @@
 /*
   DC++ Widget Toolkit
 
-  Copyright (c) 2007-2013, Jacek Sieka
+  Copyright (c) 2007-2026, iceman50
 
 
   All rights reserved.
@@ -47,18 +47,17 @@ CheckBox::Seed::Seed(const tstring& caption, DWORD style) :
 }
 
 Point CheckBox::getPreferredSize() {
-	// Pixels between icon and text
-	const int MARGIN = 4;
-
 	UpdateCanvas c(this);
-
 	auto select(c.select(*getFont()));
 	TEXTMETRIC tmNew = { 0 };
 	c.getTextMetrics(tmNew);
 
 	Point ret = c.getTextExtent(getText());
-	ret.y = std::max((int)tmNew.tmHeight, ::GetSystemMetrics(SM_CYSMICON));
-	ret.x += ::GetSystemMetrics(SM_CXSMICON) + MARGIN;
+	const auto glyph = isManualAppearance() ? scale(15) : getSystemMetric(SM_CXMENUCHECK);
+	const auto glyphHeight = isManualAppearance() ? scale(15) : getSystemMetric(SM_CYMENUCHECK);
+	const auto gap = scale(isManualAppearance() ? 8 : 4);
+	ret.y = std::max<long>(tmNew.tmHeight, glyphHeight);
+	ret.x += glyph + gap + scale(2);
 	return ret;
 }
 

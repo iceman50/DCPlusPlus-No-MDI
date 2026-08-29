@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2026 iceman50
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 #include "testbase.h"
 
 #include <algorithm>
@@ -6,6 +15,8 @@
 #include <fstream>
 
 #define private public
+#include <dcpp/BBSManager.h>
+#include <dcpp/SearchManager.h>
 #include <dcpp/ShareManager.h>
 #undef private
 
@@ -17,7 +28,6 @@
 #include <dcpp/LogManager.h>
 #include <dcpp/QueueManager.h>
 #include <dcpp/SearchResult.h>
-#include <dcpp/SearchManager.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/SQLiteDB.h>
 #include <dcpp/Streams.h>
@@ -63,11 +73,13 @@ public:
 		UploadManager::newInstance();
 		QueueManager::newInstance();
 		ShareManager::newInstance();
+		BBSManager::newInstance();
 		HttpManager::newInstance();
 		FavoriteManager::newInstance();
 	}
 
 	void TearDown() override {
+		BBSManager::deleteInstance();
 		ShareManager::deleteInstance();
 		FavoriteManager::getInstance()->shutdown();
 		FavoriteManager::deleteInstance();
@@ -176,6 +188,20 @@ public:
 	string sharePath;
 	string secondSharePath;
 	static int counter;
+};
+
+class BBSProbe : public BBSManagerListener {
+public:
+	void on(DocumentUpdated, const string& hubUrl, const string& board, const string& tth) noexcept override {
+		updates.push_back(hubUrl + '\n' + board + '\n' + tth);
+	}
+
+	void on(Status, const string& hubUrl, const string& message) noexcept override {
+		statuses.push_back(hubUrl + '\n' + message);
+	}
+
+	vector<string> updates;
+	vector<string> statuses;
 };
 
 int ShareCacheTest::counter = 0;
@@ -428,6 +454,7 @@ TEST_F(ShareCacheTest, temp_shares_are_searchable_and_downloadable_only_on_their
 	EXPECT_EQ(resolved.realPath, path);
 	EXPECT_EQ(resolved.size, static_cast<int64_t>(contents.size()));
 	EXPECT_TRUE(resolved.temporary);
+	EXPECT_FALSE(resolved.exactOnly);
 
 	ASSERT_NE(sm->findTempShare(tree.getRoot(), &matchingRoute), nullptr);
 	EXPECT_EQ(sm->findTempShare(tree.getRoot(), &otherRoute), nullptr);
@@ -497,12 +524,131 @@ TEST_F(ShareCacheTest, protocol_documents_are_exposed_only_by_exact_tth_on_their
 	EXPECT_EQ(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), route),
 		std::make_pair(cached.path, cached.size));
 	EXPECT_THROW(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), otherRoute), ShareException);
+	const auto resolved = sm->resolveFile("TTH/" + cached.tth.toBase32(), route);
+	EXPECT_TRUE(resolved.temporary);
+	EXPECT_TRUE(resolved.exactOnly);
 	EXPECT_EQ(sm->clearTempShares(), 0U);
 	EXPECT_EQ(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), route),
 		std::make_pair(cached.path, cached.size));
 
 	EXPECT_TRUE(sm->removeTTHOnlyShare(cached.path, cached.tth, route));
 	EXPECT_THROW(sm->toRealWithSize("TTH/" + cached.tth.toBase32(), route), ShareException);
+}
+
+TEST_F(ShareCacheTest, search_dispatch_reports_global_throttling) {
+	auto search = SearchManager::getInstance();
+	StringList routes { "adc://bbs.example.invalid" };
+	search->lastSearch.store(GET_TICK(), std::memory_order_relaxed);
+	EXPECT_FALSE(search->search(routes, string(39, 'A'), 0, SearchManager::TYPE_TTH,
+		SearchManager::SIZE_DONTCARE, "bbs-throttled", StringList()));
+
+	search->lastSearch.store(GET_TICK() - 6000, std::memory_order_relaxed);
+	EXPECT_TRUE(search->search(routes, string(39, 'A'), 0, SearchManager::TYPE_TTH,
+		SearchManager::SIZE_DONTCARE, "bbs-dispatched", StringList()));
+}
+
+TEST_F(ShareCacheTest, unanswered_bbs_requests_and_queued_downloads_expire) {
+	auto bbs = BBSManager::getInstance();
+	const string route = "adc://bbs.example.invalid";
+	const string boardName = "general";
+	const string tth(39, 'A');
+	BBSBoard board;
+	board.name = boardName;
+	bbs->updateBoard(route, board);
+	BBSEntry entry;
+	entry.tth = tth;
+	entry.size = 3;
+	entry.board = boardName;
+	entry.timestamp = 1;
+	ASSERT_TRUE(bbs->updateEntry(route, entry));
+
+	BBSProbe probe;
+	bbs->addListener(&probe);
+	string error;
+	SearchManager::getInstance()->lastSearch.store(GET_TICK(), std::memory_order_relaxed);
+	ASSERT_TRUE(bbs->requestDocument(route, boardName, tth, error)) << error;
+	ASSERT_TRUE(bbs->isDocumentPending(route, boardName, tth));
+	ASSERT_EQ(bbs->pending[tth].size(), 1U);
+	ASSERT_EQ(bbs->pending[tth].front().lastSearch, 0U);
+	SearchManager::getInstance()->lastSearch.store(GET_TICK() - 6000, std::memory_order_relaxed);
+	bbs->on(TimerManagerListener::Second(), bbs->pending[tth].front().started + 1000);
+	ASSERT_NE(bbs->pending[tth].front().lastSearch, 0U);
+	const auto searchDeadline = bbs->pending[tth].front().started + BBSManager::DOCUMENT_SEARCH_TIMEOUT_MS;
+	probe.updates.clear();
+	probe.statuses.clear();
+	bbs->on(TimerManagerListener::Second(), searchDeadline);
+	EXPECT_FALSE(bbs->isDocumentPending(route, boardName, tth));
+	ASSERT_EQ(probe.updates.size(), 1U);
+	ASSERT_EQ(probe.statuses.size(), 1U);
+	EXPECT_NE(probe.statuses.front().find("No online peer responded"), string::npos);
+
+	const auto now = GET_TICK();
+	bbs->pending[tth].push_back({ route, boardName, entry.size, now, now, now });
+	probe.updates.clear();
+	probe.statuses.clear();
+	bbs->on(TimerManagerListener::Second(), now + BBSManager::DOCUMENT_QUEUE_TIMEOUT_MS);
+	EXPECT_FALSE(bbs->isDocumentPending(route, boardName, tth));
+	ASSERT_EQ(probe.updates.size(), 1U);
+	ASSERT_EQ(probe.statuses.size(), 1U);
+	EXPECT_NE(probe.statuses.front().find("download timed out"), string::npos);
+	bbs->removeListener(&probe);
+}
+
+TEST_F(ShareCacheTest, removing_a_bbs_queue_item_clears_pending_state) {
+	auto bbs = BBSManager::getInstance();
+	const string route = "adc://bbs.example.invalid";
+	const string boardName = "general";
+	const string tth(39, 'A');
+	const auto target = bbs->getCachePath(tth);
+	std::filesystem::create_directories(std::filesystem::path(target).parent_path());
+	uint8_t cidData[CID::SIZE] = { 1 };
+	UserPtr user(new User(CID(cidData)));
+	QueueManager::getInstance()->add(target, 3, TTHValue(tth), HintedUser(user, route),
+		QueueItem::FLAG_CLIENT_VIEW | QueueItem::FLAG_TEXT);
+	const auto now = GET_TICK();
+	bbs->pending[tth].push_back({ route, boardName, 3, now, now, now });
+	BBSProbe probe;
+	bbs->addListener(&probe);
+	QueueManager::getInstance()->remove(target);
+	bbs->removeListener(&probe);
+
+	EXPECT_FALSE(bbs->isDocumentPending(route, boardName, tth));
+	ASSERT_EQ(probe.updates.size(), 1U);
+	ASSERT_EQ(probe.statuses.size(), 1U);
+	EXPECT_NE(probe.statuses.front().find("ended before it could be verified"), string::npos);
+}
+
+TEST_F(ShareCacheTest, failed_bbs_verification_clears_pending_state) {
+	auto bbs = BBSManager::getInstance();
+	const string route = "adc://bbs.example.invalid";
+	const string boardName = "general";
+	const string tth(39, 'A');
+	const string invalid = "bad";
+	BBSBoard board;
+	board.name = boardName;
+	bbs->updateBoard(route, board);
+	BBSEntry entry;
+	entry.tth = tth;
+	entry.size = static_cast<int64_t>(invalid.size());
+	entry.board = boardName;
+	entry.timestamp = 1;
+	ASSERT_TRUE(bbs->updateEntry(route, entry));
+
+	const auto path = bbs->getCachePath(tth);
+	std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+	std::ofstream(path, std::ios::binary) << invalid;
+	const auto now = GET_TICK();
+	bbs->pending[tth].push_back({ route, boardName, entry.size, now, now, now });
+	BBSProbe probe;
+	bbs->addListener(&probe);
+	bbs->completeDocument(tth, path);
+	bbs->removeListener(&probe);
+
+	EXPECT_FALSE(bbs->isDocumentPending(route, boardName, tth));
+	EXPECT_EQ(File::getSize(path), -1);
+	ASSERT_EQ(probe.updates.size(), 1U);
+	ASSERT_EQ(probe.statuses.size(), 1U);
+	EXPECT_NE(probe.statuses.front().find("does not match its TTH"), string::npos);
 }
 
 TEST_F(ShareCacheTest, opened_file_verification_ignores_stale_same_metadata_cache_entries) {

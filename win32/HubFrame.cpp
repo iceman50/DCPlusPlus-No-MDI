@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -45,6 +46,7 @@
 #include <dwt/widgets/SplitterContainer.h>
 #include <dwt/widgets/TextBox.h>
 
+#include "BBSFrame.h"
 #include "MainWindow.h"
 #include "PrivateFrame.h"
 #include "HoldRedraw.h"
@@ -310,6 +312,8 @@ tabIcon(IDI_HUB)
 	}
 
 	initStatus();
+	status->onClicked(STATUS_BBS, [this] { openBBS(); });
+	status->setToolTip(STATUS_BBS, T_("Bulletin boards"));
 
 	status->onDblClicked(STATUS_STATUS, [this] { openLog(false); });
 
@@ -341,6 +345,8 @@ tabIcon(IDI_HUB)
 	client->addListener(this);
 	BBSManager::getInstance()->addListener(this);
 	updateRichTextAvailability();
+	updateBBSAvailability();
+	BBSFrame::attachHub(this);
 	if(connect)
 		client->connect();
 
@@ -368,6 +374,7 @@ bool HubFrame::preClosing() {
 	}
 
 	FavoriteManager::getInstance()->removeListener(this);
+	BBSFrame::detachHub(this);
 	BBSManager::getInstance()->removeListener(this);
 	client->removeListener(this);
 	disconnect(false);
@@ -482,6 +489,26 @@ void HubFrame::updateRichTextAvailability() {
 	const auto connected = client && client->isConnected();
 	setChatAvailability(connected && client->supportsRichText(), connected,
 		client ? client->getHubUrl() : url);
+}
+
+void HubFrame::updateBBSAvailability() {
+	auto adc = dynamic_cast<AdcHub*>(client);
+	const auto supported = adc && adc->supportsBBS();
+	const auto cached = !BBSManager::getInstance()->getBoards(url).empty();
+	const auto available = supported || cached;
+	status->setText(STATUS_BBS, available ? _T("BBS") : Util::emptyStringT, true);
+	status->setIcon(STATUS_BBS, available ? WinUtil::statusIcon(IDI_CHAT) : dwt::IconPtr(), true);
+	status->setToolTip(STATUS_BBS, supported ? T_("Open bulletin boards") : cached ? T_("Open cached bulletin boards") : T_("Bulletin boards are unavailable"));
+	BBSFrame::hubStateChanged(this);
+}
+
+void HubFrame::openBBS() {
+	auto adc = dynamic_cast<AdcHub*>(client);
+	if((!adc || !adc->supportsBBS()) && BBSManager::getInstance()->getBoards(url).empty()) {
+		addStatus(T_("This hub has no available BBS0 boards."));
+		return;
+	}
+	BBSFrame::openWindow(getParent(), url, this);
 }
 
 void HubFrame::initTimer() {
@@ -808,6 +835,7 @@ void HubFrame::handleBBSCommand(const tstring& parameter, bool& resetText) {
 			return;
 		}
 		if(adc->fetchBBS(board, tth, error)) {
+			bbsChatReads.insert(board + '\n' + tth);
 			addStatus(T_("Looking for the post by exact TTH. Reading may be visible to peers that serve it."));
 		}
 	} else if(action == "entry") {
@@ -1040,6 +1068,7 @@ void HubFrame::onConnected() {
 	setIcon(IDI_HUB);
 	updateSecureStatus();
 	updateRichTextAvailability();
+	updateBBSAvailability();
 }
 
 void HubFrame::onDisconnected() {
@@ -1050,6 +1079,7 @@ void HubFrame::onDisconnected() {
 	setIcon(IDI_HUB_OFF);
 	updateSecureStatus();
 	updateRichTextAvailability();
+	updateBBSAvailability();
 }
 
 void HubFrame::onGetPassword() {
@@ -1480,6 +1510,7 @@ void HubFrame::on(HubUpdated, Client*) noexcept {
 	callAsync([this, hubNameT] {
 		setText(hubNameT);
 		updateRichTextAvailability();
+		updateBBSAvailability();
 	});
 }
 
@@ -1517,12 +1548,10 @@ void HubFrame::on(ClientLine, Client*, const string& line, int type) noexcept {
 
 void HubFrame::on(BBSManagerListener::BoardUpdated, const string& hubUrl, const string&) noexcept {
 	if(!hubHintsEqual(hubUrl, url)) return;
-	callAsync([this] { setDirty(SettingsManager::BOLD_HUB); });
+	callAsync([this] { setDirty(SettingsManager::BOLD_HUB); updateBBSAvailability(); });
 }
 
-void HubFrame::on(BBSManagerListener::EntryUpdated, const string& hubUrl, const string& board,
-	const string& tth) noexcept
-{
+void HubFrame::on(BBSManagerListener::EntryUpdated, const string& hubUrl, const string& board, const string& tth) noexcept {
 	if(!hubHintsEqual(hubUrl, url)) return;
 	callAsync([this, board, tth] {
 		setDirty(SettingsManager::BOLD_HUB);
@@ -1538,16 +1567,21 @@ void HubFrame::on(BBSManagerListener::EntryUpdated, const string& hubUrl, const 
 	});
 }
 
-void HubFrame::on(BBSManagerListener::DocumentUpdated, const string& hubUrl, const string& board,
-	const string& tth) noexcept
-{
+void HubFrame::on(BBSManagerListener::DocumentUpdated, const string& hubUrl, const string& board, const string& tth) noexcept {
 	if(!hubHintsEqual(hubUrl, url)) return;
-	callAsync([this, board, tth] { showBBSDocument(board, tth); });
+	callAsync([this, board, tth] {
+		if(bbsChatReads.erase(board + '\n' + tth) != 0) showBBSDocument(board, tth);
+	});
 }
 
 void HubFrame::on(BBSManagerListener::Status, const string& hubUrl, const string& line) noexcept {
 	if(!hubHintsEqual(hubUrl, url)) return;
 	callAsync([this, line] { addStatus(Text::toT(line)); });
+}
+
+void HubFrame::on(BBSManagerListener::SupportUpdated, const string& hubUrl, bool) noexcept {
+	if(!hubHintsEqual(hubUrl, url)) return;
+	callAsync([this] { updateBBSAvailability(); });
 }
 
 
@@ -1776,6 +1810,9 @@ void HubFrame::tabMenuImpl(dwt::Menu* menu) {
 	if (client->isSecure() && Util::isAdcsUrl(client->getHubUrl()) && client->getHubUrl().find("?kp=") == string::npos)
 		menu->appendItem(T_("Copy address with &keyprint to clipboard"), [this] { handleCopyHub(true); });
 	menu->appendItem(T_("&Search hub"), [this] { handleSearchHub(); }, WinUtil::menuIcon(IDI_SEARCH));
+	auto adc = dynamic_cast<AdcHub*>(client);
+	const auto hasBBS = (adc && adc->supportsBBS()) || !BBSManager::getInstance()->getBoards(url).empty();
+	menu->appendItem(T_("&Bulletin boards"), [this] { openBBS(); }, WinUtil::menuIcon(IDI_CHAT), hasBBS);
 	menu->appendItem(T_("&Disconnect"), [this] { disconnect(false); }, WinUtil::menuIcon(IDI_HUB_OFF));
 
 	prepareMenu(menu, UserCommand::CONTEXT_HUB, url);
@@ -1981,6 +2018,7 @@ void HubFrame::redirect(string&& target) {
 		return;
 	}
 
+	BBSFrame::detachHub(this);
 	url = move(target);
 
 	// the client is dead, long live the client!
@@ -1990,6 +2028,8 @@ void HubFrame::redirect(string&& target) {
 	onDisconnected();
 	client = ClientManager::getInstance()->getClient(url);
 	client->addListener(this);
+	BBSFrame::attachHub(this);
+	updateBBSAvailability();
 	client->connect();
 }
 

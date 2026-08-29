@@ -755,10 +755,19 @@ unsigned textFormat(DWORD style, bool multiline = false) {
 	return format;
 }
 
-void drawCheck(Canvas& canvas, const Rectangle& box, bool radio, bool checked, bool indeterminate, bool disabled, const Appearance::Palette& palette)
+void drawCheck(Canvas& canvas, const Rectangle& box, bool radio, bool checked, bool indeterminate, bool disabled, bool pressed, bool hot, const Appearance::Palette& palette)
 {
-	auto fill = checked ? palette.accent : palette.surface;
+	auto fill = radio ? palette.surface : checked ? palette.accent : palette.surface;
 	auto border = checked ? palette.accent : palette.border;
+	if(pressed) {
+		const auto pressedSurface = Appearance::blend(palette.surface, palette.accent, 38);
+		fill = radio || !checked ? pressedSurface : Appearance::blend(palette.accent, RGB(0, 0, 0), 45);
+		if(radio && checked) border = Appearance::blend(palette.accent, RGB(0, 0, 0), 45);
+	} else if(hot) {
+		const auto hotSurface = Appearance::blend(palette.surface, palette.accent, 18);
+		fill = radio || !checked ? hotSurface : Appearance::blend(palette.accent, RGB(0, 0, 0), 25);
+		border = Appearance::blend(border, palette.accent, 110);
+	}
 	if(disabled) {
 		fill = Appearance::blend(fill, palette.background, 120);
 		border = Appearance::blend(border, palette.background, 90);
@@ -768,22 +777,21 @@ void drawCheck(Canvas& canvas, const Rectangle& box, bool radio, bool checked, b
 		Pen pen(border, Pen::Solid, 1);
 		auto selectBrush = canvas.select(brush);
 		auto selectPen = canvas.select(pen);
-		canvas.ellipse(Rectangle(box.left(), box.top(),
-			std::max(1L, box.width() - 1), std::max(1L, box.height() - 1)));
+		canvas.ellipse(box);
 	} else {
 		drawSurface(canvas, box, fill, border);
 	}
 	if(!checked) {
 		return;
 	}
-	const auto mark = disabled ? Appearance::blend(palette.highlightText,
-		fill, 105) : palette.highlightText;
-	Pen pen(mark, Pen::Solid, std::max(1L, box.width() / 7));
+	const auto checkMark = disabled ? Appearance::blend(palette.highlightText, fill, 105) : palette.highlightText;
+	const auto mark = radio ? border : checkMark;
+	Pen pen(mark, Pen::Solid, radio ? std::max(1L, box.width() / 15) : std::max(1L, box.width() / 7));
 	Brush brush(mark);
 	auto selectPen = canvas.select(pen);
 	auto selectBrush = canvas.select(brush);
 	if(radio) {
-		const long inset = std::max(2L, box.width() / 4);
+		const long inset = std::max(3L, box.width() / 3);
 		canvas.ellipse(Rectangle(box.left() + inset, box.top() + inset,
 			std::max(1L, box.width() - inset * 2),
 			std::max(1L, box.height() - inset * 2)));
@@ -850,17 +858,19 @@ void drawButton(HWND window, Canvas& canvas, NativeWindowData& data) {
 	}
 
 	if((check || radio) && !(style & BS_PUSHLIKE)) {
-		const long size = std::max(9L,
-			std::min<long>(15, std::max(9L, bounds.height() - 4)));
+		const auto dpi = getDpi(window);
+		const long minimumSize = scale(9, dpi);
+		const long size = std::max(minimumSize, std::min<long>(
+			scale(radio ? 13 : 15, dpi),
+			std::max(minimumSize, bounds.height() - scale(radio ? 2 : 4, dpi))));
 		const bool right = (style & BS_LEFTTEXT) != 0;
 		Rectangle glyph(right ? bounds.right() - size - 1 : bounds.left() + 1,
 			bounds.top() + std::max(0L, (bounds.height() - size) / 2),
 			size, size);
 		const auto checkState = static_cast<UINT>(
 			::SendMessage(window, BM_GETCHECK, 0, 0));
-		drawCheck(canvas, glyph, radio, checkState != BST_UNCHECKED,
-			checkState == BST_INDETERMINATE, disabled, palette);
-		const long gap = 7;
+		drawCheck(canvas, glyph, radio, checkState != BST_UNCHECKED, checkState == BST_INDETERMINATE, disabled, pressed, data.hot, palette);
+		const long gap = scale(7, dpi);
 		Rectangle textBounds(right ? bounds.left() : glyph.right() + gap,
 			bounds.top(), right ? std::max(0L, glyph.left() - gap - bounds.left()) :
 				std::max(0L, bounds.right() - glyph.right() - gap), bounds.height());

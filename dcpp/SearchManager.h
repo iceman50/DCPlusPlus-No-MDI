@@ -62,14 +62,16 @@ private:
 public:
 	static const char* getTypeStr(int type);
 
-	void search(const string& aName, int64_t aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken);
-	void search(const string& aName, const string& aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken) {
-		search(aName, Util::toInt64(aSize), aTypeMode, aSizeMode, aToken);
+	/** Returns false when the global search throttle prevented dispatch. */
+	bool search(const string& aName, int64_t aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken);
+	bool search(const string& aName, const string& aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken) {
+		return search(aName, Util::toInt64(aSize), aTypeMode, aSizeMode, aToken);
 	}
 
-	void search(StringList& who, const string& aName, int64_t aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken, const StringList& aExtList);
-	void search(StringList& who, const string& aName, const string& aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken, const StringList& aExtList) {
-		search(who, aName, Util::toInt64(aSize), aTypeMode, aSizeMode, aToken, aExtList);
+	/** Returns false when the global search throttle prevented dispatch. */
+	bool search(StringList& who, const string& aName, int64_t aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken, const StringList& aExtList);
+	bool search(StringList& who, const string& aName, const string& aSize, TypeModes aTypeMode, SizeModes aSizeMode, const string& aToken, const StringList& aExtList) {
+		return search(who, aName, Util::toInt64(aSize), aTypeMode, aSizeMode, aToken, aExtList);
 	}
 
 	void respond(const AdcCommand& cmd, const OnlineUser& user);

@@ -133,7 +133,7 @@ void StatusBar::setHelpId(unsigned part, unsigned id) {
 void StatusBar::setWidget(unsigned part, Control* widget, const Rectangle& padding) {
 	dwtassert(part < parts.size(), "Invalid part number");
 	auto p = std::make_unique<WidgetPart>(widget, padding);
-	p->desiredSize = widget->getPreferredSize().x;
+	p->desiredSize = p->preferredSize();
 	p->helpId = widget->getHelpId();
 	parts[part] = std::move(p);
 }
@@ -169,6 +169,11 @@ int StatusBar::refresh() {
 	auto sz = BaseType::getWindowSize();
 	layoutSections(BaseType::getClientSize());
 	return sz.y;
+}
+
+void StatusBar::appearanceChanged() {
+	updatePartSizes();
+	BaseType::appearanceChanged();
 }
 
 bool StatusBar::handleMessage(const MSG& msg, LRESULT& retVal) {
@@ -264,6 +269,11 @@ void StatusBar::Part::updateSize(StatusBar* bar, bool alwaysResize) {
 	}
 }
 
+unsigned StatusBar::WidgetPart::preferredSize() const {
+	const auto content = widget->getPreferredSize().x;
+	return static_cast<unsigned>(std::max(0L, content + padding.left() + padding.width()));
+}
+
 void StatusBar::WidgetPart::layout(POINT* offset) {
 	::SetWindowPos(widget->handle(), HWND_TOP,
 		offset[0].x + padding.left(), offset[0].y + padding.top(),
@@ -292,6 +302,12 @@ void StatusBar::updatePartSizes() {
 		if(auto part = dynamic_cast<Part*>(parts[i].get())) {
 			const auto size = part->preferredSize(this);
 			if(size > part->desiredSize) {
+				part->desiredSize = size;
+				changed = true;
+			}
+		} else if(auto part = dynamic_cast<WidgetPart*>(parts[i].get())) {
+			const auto size = part->preferredSize();
+			if(size != part->desiredSize) {
 				part->desiredSize = size;
 				changed = true;
 			}

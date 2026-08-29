@@ -149,6 +149,7 @@ public:
 protected:
 	// Constructor Taking pointer to parent
 	explicit StatusBar(Widget* parent);
+	virtual void appearanceChanged() override;
 
 	// Protected to avoid direct instantiation, you can inherit and use
 	// WidgetFactory class which is friend
@@ -192,6 +193,7 @@ private:
 		Control* widget;
 		Rectangle padding;
 
+		unsigned preferredSize() const;
 		void layout(POINT* offset);
 	};
 

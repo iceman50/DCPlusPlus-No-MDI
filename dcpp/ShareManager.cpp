@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -334,17 +335,17 @@ ShareManager::ResolvedFileInfo ShareManager::resolveFile(const string& virtualFi
 		const TTHValue tth(virtualFile.substr(4));
 		auto i = tthIndex.find(tth);
 		if(i != tthIndex.end() && isFileAllowed(*i->second, access)) {
-			return { i->second->getRealPath(), i->second->getSize(), tth, false, 0 };
+			return { i->second->getRealPath(), i->second->getSize(), tth, false, 0, false };
 		}
 		if(const auto temp = findTempShare(tth, &hubUrl)) {
-			return { temp->realPath, temp->size, temp->tth, true, temp->timestamp };
+			return { temp->realPath, temp->size, temp->tth, true, temp->timestamp, temp->exactOnly };
 		}
 		throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
 	}
 
 	auto& f = findFile(virtualFile);
 	if(!isFileAllowed(f, access)) throw ShareException(UserConnection::FILE_NOT_AVAILABLE);
-	return { f.getRealPath(), f.getSize(), f.tth, false, 0 };
+	return { f.getRealPath(), f.getSize(), f.tth, false, 0, false };
 }
 
 StringList ShareManager::getRealPaths(const string& virtualPath) {
