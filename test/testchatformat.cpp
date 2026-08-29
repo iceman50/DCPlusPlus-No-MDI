@@ -1,15 +1,46 @@
+/*
+ * Copyright (C) 2001-2026 iceman50
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 #include "testbase.h"
 
 #include <dcpp/ChatMessage.h>
 #include <dcpp/EmoticonManager.h>
 #include <dcpp/File.h>
-#include <dcpp/SettingsManager.h>
 #include <dcpp/RichText.h>
+#include <dcpp/SettingsManager.h>
+#include <dcpp/SimpleXMLReader.h>
 #include <dcpp/Tagger.h>
 #include <dcpp/Util.h>
 #include <dcpp/version.h>
 
+#include <array>
+
 using namespace dcpp;
+
+namespace {
+
+class RichTextXmlCollector : public SimpleXMLReader::CallBack {
+public:
+	void startTag(const string&, StringPairList&, bool simple) override {
+		if(depth == 0) ++roots;
+		if(!simple) ++depth;
+	}
+
+	void data(const string& value) override { text += value; }
+	void endTag(const string&) override { if(depth) --depth; }
+
+	size_t roots = 0;
+	size_t depth = 0;
+	string text;
+};
+
+}
 
 class testchatformat : public testing::Test {
 protected:
@@ -142,6 +173,42 @@ TEST_F(testchatformat, rich_text_parses_the_complete_safe_dialect)
 	ASSERT_TRUE(formattedLink.valid);
 	EXPECT_NE(string::npos, formattedLink.html.find(
 		"<a href=\"https://example.org/download\">release (<b>candidate</b>)</a>"));
+}
+
+TEST_F(testchatformat, rich_text_editor_constructs_are_complete_xml_documents)
+{
+	const string attachment = "magnet:?xt=urn:tree:tiger:VN6PLQ7ZQGKD3NDBK6ZTZG5PYQXSNMFYVJH4TXA&xl=204800&dn=cat.jpg";
+	const std::array<string, 14> samples = {{
+		"**bold text**", "_italic text_", "~~removed text~~", "## Heading",
+		"[link text](https://example.org/)", "> Quoted text", "`code`",
+		"- First item\n- Second item", "1. First item\n2. Second item",
+		"```\ncode\n```", "| Left | Center | Right |\n| :--- | :---: | ---: |\n| A | B | C |", "---",
+		"[cat.jpg](" + attachment + ")", "![cat](" + attachment + ")"
+	}};
+
+	for(const auto& sample: samples) {
+		SCOPED_TRACE(sample);
+		const auto parsed = RichText::parse(sample, 512);
+		ASSERT_TRUE(parsed.valid);
+		ASSERT_TRUE(parsed.formatted);
+		ASSERT_EQ(0U, parsed.html.find("<span>"));
+		ASSERT_EQ(parsed.html.size() - 7, parsed.html.rfind("</span>"));
+
+		RichTextXmlCollector collector;
+		SimpleXMLReader reader(&collector);
+		EXPECT_NO_THROW(reader.parse(parsed.html));
+		EXPECT_EQ(1U, collector.roots);
+		EXPECT_EQ(0U, collector.depth);
+	}
+
+	const auto lists = RichText::parse("- First item\n- Second item\n\n1. Third item\n2. Fourth item", 512);
+	RichTextXmlCollector collector;
+	SimpleXMLReader reader(&collector);
+	ASSERT_NO_THROW(reader.parse(lists.html));
+	EXPECT_NE(string::npos, collector.text.find("First item"));
+	EXPECT_NE(string::npos, collector.text.find("Second item"));
+	EXPECT_NE(string::npos, collector.text.find("Third item"));
+	EXPECT_NE(string::npos, collector.text.find("Fourth item"));
 }
 
 TEST_F(testchatformat, rich_text_uses_magnets_for_attachments_and_inline_media)

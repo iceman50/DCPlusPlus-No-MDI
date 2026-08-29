@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2001-2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -620,6 +620,10 @@ RichText::Parsed RichText::parse(const string& text, size_t maxTargetLength) {
 	{
 		renderer.result.html.erase(renderer.result.html.size() - 5);
 	}
+	// HtmlToRtf consumes a complete XML document, not an XML fragment. A
+	// single root also keeps top-level list markers and every later block.
+	renderer.result.html.insert(0, "<span>");
+	renderer.result.html += "</span>";
 	return std::move(renderer.result);
 }
 
