@@ -6,7 +6,7 @@
 * Add a hub-scoped BBS workspace with board and threaded post browsing, verified document viewing, subscriptions, posting, replies, withdrawals, filtering, offline cache access and session restoration (iceman50)
 * Fix route-scoped BBS document uploads and the BBS post dialog layout (iceman50)
 * Fix RTF0 rendering of multiple top-level blocks by emitting a single complete XML document (iceman50)
-* Update version.xml to use its own version.xml (https://dcplusplus.sourceforge.io/version_exp.xml)
+* Update version.xml to use its own experimental feed (https://dcplusplus.sourceforge.io/version_exp.xml) (iceman50)
 
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
 * Accept shorter Base32 ADC password salts used by older hubsofts while rejecting empty and undecodable challenges

@@ -311,7 +311,7 @@ bool AboutDlg::handleInitDialog() {
 
 	HttpManager::getInstance()->addListener(this);
 	onDestroy([this] { HttpManager::getInstance()->removeListener(this); });
-	c = HttpManager::getInstance()->download("https://dcplusplus.sourceforge.io/version.xml");
+	c = HttpManager::getInstance()->download("https://dcplusplus.sourceforge.io/version_exp.xml");
 
 	return false;
 }
