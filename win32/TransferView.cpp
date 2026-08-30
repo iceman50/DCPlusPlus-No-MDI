@@ -1001,16 +1001,24 @@ TransferView::UserInfoList TransferView::selectedUsersImpl() const {
 void TransferView::execTasks() {
 	updateList = false;
 
-	HoldRedraw hold { transfers };
+	{
+		HoldRedraw hold { transfers };
 
-	for(auto& task: tasks) {
-		task.first(*task.second);
-	}
-	tasks.clear();
+		for(auto& task: tasks) {
+			task.first(*task.second);
+		}
+		tasks.clear();
 
-	if(resortList || needsResort(resortMask)) {
-		transfers->resort();
+		if(resortList || needsResort(resortMask)) {
+			transfers->resort();
+		}
 	}
+
+	// Item text and progress are provided through callbacks, so updating their backing
+	// objects does not invalidate any list-view rows. Repaint after WM_SETREDRAW is
+	// enabled again; otherwise the display may remain stale until user interaction.
+	transfers->Control::redraw(false);
+
 	resortList = false;
 	resortMask = 0;
 }
