@@ -861,6 +861,8 @@ void TransferView::addConn(const UpdateInfo& ui) {
 
 	conn->update(ui);
 	transfer->update();
+	markDirty(*conn);
+	markDirty(*transfer);
 }
 
 void TransferView::updateConn(const UpdateInfo& ui) {
@@ -868,6 +870,8 @@ void TransferView::updateConn(const UpdateInfo& ui) {
 	if(conn) {
 		conn->update(ui);
 		conn->parent.update();
+		markDirty(*conn);
+		markDirty(conn->parent);
 	}
 }
 
@@ -904,6 +908,7 @@ void TransferView::removeConn(ConnectionInfo& conn) {
 
 	transfers->eraseChild(reinterpret_cast<LPARAM>(&conn));
 	connections[transfer.type].erase(conn.token);
+	forgetDirty(conn);
 
 	// Erase the exact node. list::remove(conn) would keep comparing against
 	// conn after erasing the node that owns that reference.
@@ -919,6 +924,7 @@ void TransferView::removeConn(ConnectionInfo& conn) {
 		}
 
 		transfer.update();
+		markDirty(transfer);
 	}
 }
 
@@ -930,6 +936,10 @@ void TransferView::removeTransfer(TransferInfo& transfer) {
 		return;
 	}
 
+	forgetDirty(transfer);
+	for(auto& conn: transfer.conns) {
+		forgetDirty(conn);
+	}
 	transfers->erase(&transfer);
 	transferItems.erase(transferPos);
 }
@@ -945,12 +955,14 @@ void TransferView::addHttpConn(const UpdateInfo& ui) {
 	item->update(ui);
 
 	transfers->insert(item);
+	markDirty(*item);
 }
 
 void TransferView::updateHttpConn(const UpdateInfo& ui) {
 	auto item = findHttpItem(ui.path);
 	if(item) {
 		item->update(ui);
+		markDirty(*item);
 	}
 }
 
@@ -977,6 +989,7 @@ void TransferView::removeHttpItem(HttpInfo& item) {
 		return;
 	}
 
+	forgetDirty(item);
 	transfers->erase(&item);
 	httpItems.erase(itemPos);
 }
@@ -998,8 +1011,53 @@ TransferView::UserInfoList TransferView::selectedUsersImpl() const {
 	return users;
 }
 
+void TransferView::markDirty(ItemInfo& item) {
+	dirtyItems.insert(&item);
+}
+
+void TransferView::forgetDirty(ItemInfo& item) {
+	dirtyItems.erase(&item);
+}
+
+void TransferView::redrawDirtyItems() {
+	if(dirtyItems.empty()) {
+		return;
+	}
+
+	const auto itemCount = static_cast<int>(transfers->size());
+	if(itemCount <= 0) {
+		dirtyItems.clear();
+		return;
+	}
+
+	const auto firstVisible = std::max(0, std::min(transfers->getTopIndex(), itemCount - 1));
+	const auto visibleCount = std::max(transfers->getCountPerPage(), 1);
+	const auto lastVisible = firstVisible + std::min(visibleCount, itemCount - 1 - firstVisible);
+	int firstDirty = -1;
+	int lastDirty = -1;
+
+	for(auto row = firstVisible; row <= lastVisible; ++row) {
+		if(dirtyItems.find(transfers->getData(row)) != dirtyItems.end()) {
+			if(firstDirty == -1) {
+				firstDirty = row;
+			}
+			lastDirty = row;
+		} else if(firstDirty != -1) {
+			transfers->redraw(firstDirty, lastDirty);
+			firstDirty = -1;
+			lastDirty = -1;
+		}
+	}
+
+	if(firstDirty != -1) {
+		transfers->redraw(firstDirty, lastDirty);
+	}
+	dirtyItems.clear();
+}
+
 void TransferView::execTasks() {
 	updateList = false;
+	const bool redrawAll = resortList || needsResort(resortMask);
 
 	{
 		HoldRedraw hold { transfers };
@@ -1009,15 +1067,19 @@ void TransferView::execTasks() {
 		}
 		tasks.clear();
 
-		if(resortList || needsResort(resortMask)) {
+		if(redrawAll) {
 			transfers->resort();
 		}
 	}
 
-	// Item text and progress are provided through callbacks, so updating their backing
-	// objects does not invalidate any list-view rows. Repaint after WM_SETREDRAW is
-	// enabled again; otherwise the display may remain stale until user interaction.
-	transfers->Control::redraw(false);
+	// Sorting and structural changes can move every row. Ordinary callback-backed
+	// updates only require the affected visible parent and connection rows.
+	if(redrawAll) {
+		dirtyItems.clear();
+		transfers->Control::redraw(false);
+	} else {
+		redrawDirtyItems();
+	}
 
 	resortList = false;
 	resortMask = 0;

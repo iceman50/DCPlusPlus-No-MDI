@@ -246,6 +246,7 @@ private:
 	const dwt::IconPtr uploadIcon;
 
 	vector<pair<function<void (const UpdateInfo&)>, unique_ptr<UpdateInfo>>> tasks;
+	unordered_set<ItemInfo*> dirtyItems;
 	bool updateList;
 	bool resortList;
 	uint32_t resortMask;
@@ -286,6 +287,9 @@ private:
 	// AspectUserInfo
 	UserInfoList selectedUsersImpl() const;
 
+	void markDirty(ItemInfo& item);
+	void forgetDirty(ItemInfo& item);
+	void redrawDirtyItems();
 	void execTasks();
 	bool needsResort(uint32_t updateMask) const;
 
