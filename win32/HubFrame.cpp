@@ -1026,12 +1026,18 @@ void HubFrame::addedChat(const tstring& message) {
 	}
 }
 
-void HubFrame::addStatus(const tstring& text, bool legitimate /* = true */) {
+void HubFrame::addStatus(const tstring& text, bool legitimate /* = true */, bool inert /* = false */) {
 	status->setText(STATUS_STATUS, Text::toT("[" + Util::getShortTimeString() + "] ") + text);
 
 	if(legitimate) {
 		if(SETTING(STATUS_IN_CHAT)) {
-			addChat(_T("*** ") + text);
+			const auto message = _T("*** ") + text;
+			if(inert) {
+				addChatPlain(message);
+				addedChat(message);
+			} else {
+				addChat(message);
+			}
 		} else {
 			setDirty(SettingsManager::BOLD_HUB);
 		}
@@ -1587,7 +1593,8 @@ void HubFrame::on(BBSManagerListener::SupportUpdated, const string& hubUrl, bool
 
 void HubFrame::onStatusMessage(const string& line, int flags) {
 	callAsync([=] { addStatus(Text::toT(line),
-		!(flags & ClientListener::FLAG_IS_SPAM) || !SETTING(FILTER_MESSAGES)); });
+		!(flags & ClientListener::FLAG_IS_SPAM) || !SETTING(FILTER_MESSAGES),
+		(flags & ClientListener::FLAG_IS_PROTOCOL_SPOOF) != 0); });
 }
 
 size_t HubFrame::getUserCount() const {

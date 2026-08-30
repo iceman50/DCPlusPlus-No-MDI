@@ -1,1 +1,1 @@
-#define DCPP_REVISION "[f47a01b]"
+#define DCPP_REVISION "[5da8248]"

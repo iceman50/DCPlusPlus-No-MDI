@@ -24,6 +24,7 @@
 #include "ConnectivityManager.h"
 #include "CryptoManager.h"
 #include "format.h"
+#include "LogManager.h"
 #include "SearchManager.h"
 #include "ShareManager.h"
 #include "Socket.h"
@@ -34,6 +35,51 @@
 #include "version.h"
 
 namespace dcpp {
+
+namespace {
+
+bool findStarredStatusPrefix(const string& line, size_t& contentStart) noexcept {
+	size_t start = 0;
+	while(start < line.size() && static_cast<unsigned char>(line[start]) <= 0x20) {
+		++start;
+	}
+	if(line.compare(start, 3, "***") != 0) {
+		return false;
+	}
+
+	contentStart = start + 3;
+	while(contentStart < line.size() && static_cast<unsigned char>(line[contentStart]) <= 0x20) {
+		++contentStart;
+	}
+	return true;
+}
+
+bool hasEmbeddedNmdcCommand(const string& line, size_t start) noexcept {
+	static const char* const commands[] = {
+		"$Search", "$MyINFO", "$Quit", "$ConnectToMe", "$RevConnectToMe", "$SR",
+		"$HubName", "$Supports", "$UserCommand", "$Lock", "$Hello", "$ForceMove",
+		"$HubIsFull", "$ValidateDenide", "$UserIP", "$NickList", "$OpList", "$To:",
+		"$GetPass", "$BadPass", "$ZOn", "$ValidateNick", "$MyPass", "$Version", "$Key",
+		"$GetNickList"
+	};
+
+	for(const auto command: commands) {
+		auto pos = line.find(command, start);
+		while(pos != string::npos) {
+			const auto end = pos + strlen(command);
+			const auto commandPosition = pos == start || static_cast<unsigned char>(line[pos - 1]) > 0x20;
+			if(commandPosition &&
+				(end == line.size() || static_cast<unsigned char>(line[end]) <= 0x20 || line[end] == '|'))
+			{
+				return true;
+			}
+			pos = line.find(command, pos + 1);
+		}
+	}
+	return false;
+}
+
+} // unnamed namespace
 
 NmdcHub::NmdcHub(const string& aHubURL, bool secure) :
 Client(aHubURL, '|', secure),
@@ -173,25 +219,41 @@ void NmdcHub::updateFromTag(Identity& id, const string& tag) {
 	id.set("TA", '<' + tag + '>');
 }
 
-void NmdcHub::onLine(const string& aLine) noexcept {
+NmdcHub::StatusFrameType NmdcHub::classifyStatusFrame(const string& line) noexcept {
+	size_t contentStart = 0;
+	if(!findStarredStatusPrefix(line, contentStart)) {
+		return STATUS_FRAME_NORMAL;
+	}
+	return hasEmbeddedNmdcCommand(line, contentStart) ? STATUS_FRAME_DESYNC : STATUS_FRAME_SPOOF;
+}
+
+string NmdcHub::sanitizeStatusMessage(const string& line) {
+	size_t contentStart = 0;
+	const auto start = findStarredStatusPrefix(line, contentStart) ? contentStart : 0;
+	return LogManager::escapeProtocolData(line.substr(start));
+}
+
+void NmdcHub::onLine(const string& aLine, int statusFlags) noexcept {
 	if(aLine.length() == 0)
 		return;
 
 	if(aLine[0] != '$') {
-		// Check if we're being banned...
-		if(state != STATE_NORMAL) {
-			if(Util::findSubString(aLine, "banned") != string::npos) {
-				setAutoReconnect(false);
-			}
-		}
 		string line = toUtf8(aLine);
+		auto fireStatus = [this, statusFlags](const string& text, int extraFlags = ClientListener::FLAG_NORMAL) {
+			auto display = sanitizeStatusMessage(unescape(text));
+			if(display.empty()) {
+				display = _("(empty)");
+			}
+			fire(ClientListener::StatusMessage(), this,
+				str(F_("Hub status: %1%") % display), statusFlags | extraFlags);
+		};
 		if(line[0] != '<') {
-			fire(ClientListener::StatusMessage(), this, unescape(line));
+			fireStatus(line);
 			return;
 		}
 		string::size_type i = line.find('>', 2);
 		if(i == string::npos) {
-			fire(ClientListener::StatusMessage(), this, unescape(line));
+			fireStatus(line);
 			return;
 		}
 		string nick = line.substr(1, i-1);
@@ -199,15 +261,15 @@ void NmdcHub::onLine(const string& aLine) noexcept {
 		if((line.length()-1) > i) {
 			message = line.substr(i+2);
 		} else {
-			fire(ClientListener::StatusMessage(), this, unescape(line));
+			fireStatus(line);
 			return;
 		}
 
 		if((line.find("Hub-Security") != string::npos) && (line.find("was kicked by") != string::npos)) {
-			fire(ClientListener::StatusMessage(), this, unescape(line), ClientListener::FLAG_IS_SPAM);
+			fireStatus(line, ClientListener::FLAG_IS_SPAM);
 			return;
 		} else if((line.find("is kicking") != string::npos) && (line.find("because:") != string::npos)) {
-			fire(ClientListener::StatusMessage(), this, unescape(line), ClientListener::FLAG_IS_SPAM);
+			fireStatus(line, ClientListener::FLAG_IS_SPAM);
 			return;
 		}
 
@@ -1017,6 +1079,29 @@ void NmdcHub::on(Connected) noexcept {
 
 void NmdcHub::on(Line, const string& aLine) noexcept {
 	Client::on(Line(), aLine);
+
+	const auto frameType = classifyStatusFrame(aLine);
+	if(frameType != STATUS_FRAME_NORMAL) {
+		const auto severity = frameType == STATUS_FRAME_DESYNC ? LogMessage::SEV_ERROR :
+			LogMessage::SEV_WARNING;
+		LogManager::getInstance()->protocol(LogManager::PROTOCOL_NMDC_SPOOF, LogManager::PROTOCOL_IN,
+			getHubUrl(), aLine, severity);
+	}
+
+	if(frameType == STATUS_FRAME_DESYNC) {
+		setAutoReconnect(false);
+		fire(ClientListener::StatusMessage(), this,
+			_("Blocked a suspicious NMDC status frame containing an embedded protocol command; automatic reconnect has been disabled."),
+			ClientListener::FLAG_IS_PROTOCOL_SPOOF);
+		disconnect(true);
+		return;
+	}
+
+	if(frameType == STATUS_FRAME_SPOOF) {
+		// Keep forged local-status text away from network plugins and render it as inert hub output.
+		onLine(aLine, ClientListener::FLAG_IS_PROTOCOL_SPOOF);
+		return;
+	}
 
 	if(PluginManager::getInstance()->runHook(HOOK_NETWORK_HUB_IN, this, validateMessage(aLine, true)))
 		return;

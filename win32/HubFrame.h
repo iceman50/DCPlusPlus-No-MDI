@@ -206,7 +206,7 @@ private:
 	bool tab();
 
 	void addedChat(const tstring& message);
-	void addStatus(const tstring& text, bool legitimate = true);
+	void addStatus(const tstring& text, bool legitimate = true, bool inert = false);
 
 	size_t getUserCount() const;
 	pair<size_t, tstring> getStatusUsers() const;

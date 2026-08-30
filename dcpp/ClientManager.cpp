@@ -24,6 +24,7 @@
 #include "CryptoManager.h"
 #include "FavoriteManager.h"
 #include "File.h"
+#include "LogManager.h"
 #include "NmdcHub.h"
 #include "SearchManager.h"
 #include "SearchResult.h"
@@ -514,6 +515,7 @@ void ClientManager::sendUDP(AdcCommand& cmd, const OnlineUser& user, const strin
 }
 
 void ClientManager::sendUDP(const string& ip, const string& port, const string& data, const string& aKey) {
+	LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_OUT, ip + ':' + port, data);
 	if(PluginManager::getInstance()->onUDP(true, ip, port, data))
 		return;
 

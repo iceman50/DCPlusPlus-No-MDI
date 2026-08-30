@@ -18,7 +18,9 @@
 #include "stdinc.h"
 #include "LogManager.h"
 
+#include "AdcCommand.h"
 #include "File.h"
+#include "Text.h"
 #include "TimerManager.h"
 
 namespace dcpp {
@@ -44,6 +46,92 @@ void LogManager::message(const string& msg, LogMessage::Severity severity, const
 		lastLogs.push_back(messageData);
 	}
 	fire(LogManagerListener::Message(), messageData);
+}
+
+string LogManager::escapeProtocolData(const string& data, size_t maxBytes) {
+	static const char hex[] = "0123456789ABCDEF";
+	const auto validUtf8 = Text::validateUtf8(data);
+	const auto length = std::min(data.size(), maxBytes);
+	string escaped;
+	escaped.reserve(length);
+
+	for(size_t i = 0; i < length; ++i) {
+		const auto c = static_cast<uint8_t>(data[i]);
+		switch(c) {
+		case '\\': escaped += "\\\\"; break;
+		case '\r': escaped += "\\r"; break;
+		case '\n': escaped += "\\n"; break;
+		case '\t': escaped += "\\t"; break;
+		default:
+			if(c < 0x20 || c == 0x7f || (!validUtf8 && c >= 0x80)) {
+				escaped += "\\x";
+				escaped += hex[c >> 4];
+				escaped += hex[c & 0x0f];
+			} else {
+				escaped += static_cast<char>(c);
+			}
+		}
+	}
+
+	if(length < data.size()) {
+		escaped += "... (truncated, ";
+		escaped += Util::toString(static_cast<int64_t>(data.size()));
+		escaped += " bytes total)";
+	}
+	return escaped;
+}
+
+string LogManager::getProtocolArea(ProtocolCategory category) {
+	const string protocol = _("Protocol");
+	switch(category) {
+	case PROTOCOL_ADC_STA: return protocol + " / ADC STA";
+	case PROTOCOL_NMDC_SPOOF: return protocol + " / " + _("NMDC Spoof");
+	default: return protocol;
+	}
+}
+
+void LogManager::protocol(ProtocolCategory category, ProtocolDirection direction, const string& endpoint,
+	const string& data, LogMessage::Severity severity) noexcept
+{
+	string entry = direction == PROTOCOL_IN ? "[IN]" : "[OUT]";
+	if(!endpoint.empty()) {
+		entry += " [";
+		entry += escapeProtocolData(endpoint, 1024);
+		entry += ']';
+	}
+	if(!data.empty()) {
+		entry += ' ';
+		entry += escapeProtocolData(data);
+	}
+	message(entry, severity, getProtocolArea(category));
+}
+
+LogMessage::Severity LogManager::getAdcStatusSeverity(const string& data) noexcept {
+	const auto nmdc = data.compare(0, 7, "$ADCSTA") == 0;
+	try {
+		AdcCommand command(data, nmdc);
+		const size_t statusParam = command.getType() == AdcCommand::TYPE_UDP ? 1 : 0;
+		if(command.getCommand() == AdcCommand::CMD_STA && command.getParameters().size() > statusParam &&
+			!command.getParam(statusParam).empty())
+		{
+			switch(command.getParam(statusParam)[0]) {
+			case '0': return LogMessage::SEV_INFO;
+			case '1': return LogMessage::SEV_WARNING;
+			case '2': return LogMessage::SEV_ERROR;
+			}
+		}
+	} catch(const ParseException&) {
+		// Malformed STA-shaped input is classified as a warning.
+	}
+	return LogMessage::SEV_WARNING;
+}
+
+void LogManager::adcStatus(ProtocolDirection direction, const string& endpoint, const string& data) noexcept {
+	const auto nmdc = data.compare(0, 7, "$ADCSTA") == 0;
+	if(!nmdc && (data.size() < 4 || data[1] != 'S' || data[2] != 'T' || data[3] != 'A')) {
+		return;
+	}
+	protocol(PROTOCOL_ADC_STA, direction, endpoint, data, getAdcStatusSeverity(data));
 }
 
 LogManager::List LogManager::getLastLogs() {

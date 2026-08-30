@@ -55,6 +55,17 @@ public:
 	static string escape(const string& str) { return validateMessage(str, false); }
 	static string unescape(const string& str) { return validateMessage(str, true); }
 
+	enum StatusFrameType {
+		STATUS_FRAME_NORMAL,
+		STATUS_FRAME_SPOOF,
+		STATUS_FRAME_DESYNC
+	};
+
+	/** Classify hub status frames that could impersonate local client output. */
+	static StatusFrameType classifyStatusFrame(const string& line) noexcept;
+	/** Remove a forged local-status prefix and make the remaining text single-line safe. */
+	static string sanitizeStatusMessage(const string& line);
+
 	void emulateCommand(const string& cmd) { onLine(cmd); }
 	virtual void send(const AdcCommand&) { dcassert(0); }
 
@@ -93,7 +104,7 @@ private:
 	virtual ~NmdcHub();
 
 	void clearUsers();
-	void onLine(const string& aLine) noexcept;
+	void onLine(const string& aLine, int statusFlags = ClientListener::FLAG_NORMAL) noexcept;
 
 	OnlineUser& getUser(const string& aNick);
 	OnlineUser* findUser(const string& aNick);

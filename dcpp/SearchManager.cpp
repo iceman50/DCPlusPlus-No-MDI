@@ -219,6 +219,8 @@ int SearchManager::run() {
 					}
 				}
 
+				LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_IN, remoteAddr, data);
+
 				if(PluginManager::getInstance()->onUDP(false, remoteAddr, port, data))
 					continue;
 

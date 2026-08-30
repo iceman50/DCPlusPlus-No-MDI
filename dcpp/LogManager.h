@@ -38,9 +38,25 @@ public:
 
 	enum Area { CHAT, PM, DOWNLOAD, FINISHED_DOWNLOAD, UPLOAD, SYSTEM, STATUS, LAST };
 	enum { FILE, FORMAT };
+	enum ProtocolCategory {
+		PROTOCOL_ADC_STA,
+		PROTOCOL_NMDC_SPOOF
+	};
+	enum ProtocolDirection {
+		PROTOCOL_IN,
+		PROTOCOL_OUT
+	};
 
 	void log(Area area, ParamMap& params) noexcept;
 	void message(const string& msg, LogMessage::Severity severity, const string& area) noexcept;
+	void protocol(ProtocolCategory category, ProtocolDirection direction, const string& endpoint,
+		const string& data, LogMessage::Severity severity = LogMessage::SEV_VERBOSE) noexcept;
+	/** Log an ADC STA-shaped wire line, including malformed variants, with protocol severity mapping. */
+	void adcStatus(ProtocolDirection direction, const string& endpoint, const string& data) noexcept;
+
+	static string escapeProtocolData(const string& data, size_t maxBytes = 4096);
+	static string getProtocolArea(ProtocolCategory category);
+	static LogMessage::Severity getAdcStatusSeverity(const string& data) noexcept;
 
 	List getLastLogs();
 	string getPath(Area area, ParamMap& params) const;

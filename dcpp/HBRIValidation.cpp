@@ -13,6 +13,7 @@
 #include "AdcCommand.h"
 #include "CryptoManager.h"
 #include "format.h"
+#include "LogManager.h"
 #include "SettingsManager.h"
 #include "Socket.h"
 #include "SSLSocket.h"
@@ -87,6 +88,11 @@ namespace {
 		}
 	}
 
+	string formatEndpoint(const string& ip, const string& port, bool v6) {
+		return v6 ? str(dcpp_fmt("[%1%]:%2%") % ip % port) :
+			str(dcpp_fmt("%1%:%2%") % ip % port);
+	}
+
 #ifdef _DEBUG
 	string protocolDebugLine(const string& data) {
 		constexpr size_t MAX_DEBUG_LINE = 2048;
@@ -114,10 +120,6 @@ namespace {
 		}
 	}
 
-	string formatEndpoint(const string& ip, const string& port, bool v6) {
-		return v6 ? str(dcpp_fmt("[%1%]:%2%") % ip % port) :
-			str(dcpp_fmt("%1%:%2%") % ip % port);
-	}
 #define HBRI_DEBUG(callback, message) reportDebug(callback, message)
 #else
 #define HBRI_DEBUG(callback, message) do { } while(false)
@@ -293,6 +295,8 @@ bool HBRIValidator::runValidation(const ConnectInfo& connectInfo, const string& 
 	if(!socket.readLine(response)) {
 		return false;
 	}
+	LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_IN,
+		formatEndpoint(connectInfo.ip, connectInfo.port, connectInfo.v6), response);
 	validateResponse(response);
 	return true;
 }
