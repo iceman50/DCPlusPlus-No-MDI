@@ -50,10 +50,7 @@ QueueManager::FileQueue::~FileQueue() {
 	}
 }
 
-QueueItem* QueueManager::FileQueue::add(const string& aTarget, int64_t aSize,
-						  int aFlags, QueueItem::Priority p, const string& aTempTarget,
-						  time_t aAdded, const TTHValue& root)
-{
+QueueItem* QueueManager::FileQueue::add(const string& aTarget, int64_t aSize, int aFlags, QueueItem::Priority p, const string& aTempTarget, time_t aAdded, const TTHValue& root) {
 	if(p == QueueItem::DEFAULT) {
 		p = QueueItem::NORMAL;
 		if(aSize <= SETTING(PRIO_HIGHEST_SIZE)*1024) {
@@ -69,7 +66,7 @@ QueueItem* QueueManager::FileQueue::add(const string& aTarget, int64_t aSize,
 		}
 	}
 
-	QueueItem* qi = new QueueItem(aTarget, aSize, p, aFlags, aAdded, root);
+	unique_ptr<QueueItem> qi(new QueueItem(aTarget, aSize, p, aFlags, aAdded, root));
 
 	if(qi->isSet(QueueItem::FLAG_USER_LIST)) {
 		qi->setPriority(QueueItem::HIGHEST);
@@ -78,13 +75,20 @@ QueueItem* QueueManager::FileQueue::add(const string& aTarget, int64_t aSize,
 	qi->setTempTarget(aTempTarget);
 
 	dcassert(find(aTarget) == NULL);
-	add(qi);
-	return qi;
+	add(qi.get());
+	return qi.release();
 }
 
 void QueueManager::FileQueue::add(QueueItem* qi) {
 	addTarget(qi);
-	tthIndex.emplace(qi->getTTH(), qi);
+	if(tthIndexValid) {
+		try {
+			tthIndex.emplace(qi->getTTH(), qi);
+		} catch(...) {
+			queue.erase(const_cast<string*>(&qi->getTarget()));
+			throw;
+		}
+	}
 }
 
 void QueueManager::FileQueue::addTarget(QueueItem* qi) {
@@ -92,19 +96,11 @@ void QueueManager::FileQueue::addTarget(QueueItem* qi) {
 }
 
 void QueueManager::FileQueue::remove(QueueItem* qi) {
-	removeTTH(qi);
+	if(tthIndexValid) {
+		removeTTH(qi);
+	}
 	queue.erase(const_cast<string*>(&qi->getTarget()));
 	delete qi;
-}
-
-void QueueManager::FileQueue::removeTTH(QueueItem* qi) {
-	auto range = tthIndex.equal_range(qi->getTTH());
-	for(auto i = range.first; i != range.second; ++i) {
-		if(i->second == qi) {
-			tthIndex.erase(i);
-			break;
-		}
-	}
 }
 
 QueueItem* QueueManager::FileQueue::find(const string& target) {
@@ -113,12 +109,38 @@ QueueItem* QueueManager::FileQueue::find(const string& target) {
 }
 
 QueueManager::QueueItemList QueueManager::FileQueue::find(const TTHValue& tth) {
+	ensureTTHIndex();
 	QueueItemList ql;
 	auto range = tthIndex.equal_range(tth);
 	for(auto i = range.first; i != range.second; ++i) {
 		ql.push_back(i->second);
 	}
 	return ql;
+}
+
+void QueueManager::FileQueue::ensureTTHIndex() {
+	if(tthIndexValid) {
+		return;
+	}
+
+	// Build separately so an allocation failure leaves the cache invalid and retryable.
+	TTHIndex index;
+	index.reserve(queue.size());
+	for(auto& item: queue) {
+		index.emplace(item.second->getTTH(), item.second);
+	}
+	tthIndex.swap(index);
+	tthIndexValid = true;
+}
+
+void QueueManager::FileQueue::removeTTH(QueueItem* qi) {
+	auto range = tthIndex.equal_range(qi->getTTH());
+	for(auto i = range.first; i != range.second; ++i) {
+		if(i->second == qi) {
+			tthIndex.erase(i);
+			return;
+		}
+	}
 }
 
 static QueueItem* findCandidate(QueueItem* cand, QueueItem::StringMap::iterator start, QueueItem::StringMap::iterator end, const StringList& recent) {

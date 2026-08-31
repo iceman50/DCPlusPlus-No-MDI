@@ -212,11 +212,10 @@ private:
 	/** All queue items by target */
 	class FileQueue {
 	public:
-		FileQueue() { }
+		FileQueue() : tthIndexValid(false) { }
 		~FileQueue();
 		void add(QueueItem* qi);
-		QueueItem* add(const string& aTarget, int64_t aSize, int aFlags, QueueItem::Priority p,
-			const string& aTempTarget, time_t aAdded, const TTHValue& root);
+		QueueItem* add(const string& aTarget, int64_t aSize, int aFlags, QueueItem::Priority p, const string& aTempTarget, time_t aAdded, const TTHValue& root);
 
 		QueueItem* find(const string& target);
 		QueueItemList find(const TTHValue& tth);
@@ -228,12 +227,12 @@ private:
 		void remove(QueueItem* qi);
 	private:
 		void addTarget(QueueItem* qi);
+		void ensureTTHIndex();
 		void removeTTH(QueueItem* qi);
-
 		typedef unordered_multimap<TTHValue, QueueItemPtr> TTHIndex;
-
 		QueueItem::StringMap queue;
 		TTHIndex tthIndex;
+		bool tthIndexValid;
 	};
 
 	/** All queue items indexed by user (this is a cache for the FileQueue really...) */
