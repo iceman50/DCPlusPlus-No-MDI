@@ -46,14 +46,39 @@ std::uint64_t preferredImageBase() {
 
 	file.seekg(dos.e_lfanew, std::ios::beg);
 	DWORD signature = 0;
-	IMAGE_NT_HEADERS64 nt = {};
-	if(!file.read(reinterpret_cast<char*>(&signature), sizeof(signature)) || signature != IMAGE_NT_SIGNATURE ||
-		!file.read(reinterpret_cast<char*>(&nt.FileHeader), sizeof(nt.FileHeader)) ||
-		!file.read(reinterpret_cast<char*>(&nt.OptionalHeader), sizeof(nt.OptionalHeader)))
-	{
+	if(!file.read(reinterpret_cast<char*>(&signature), sizeof(signature)) || signature != IMAGE_NT_SIGNATURE) {
 		return 0;
 	}
-	return nt.OptionalHeader.ImageBase;
+
+	IMAGE_FILE_HEADER fileHeader = {};
+	if(!file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader))) {
+		return 0;
+	}
+
+	// Read magic to determine PE32 vs PE32+
+	WORD magic = 0;
+	if(!file.read(reinterpret_cast<char*>(&magic), sizeof(magic))) {
+		return 0;
+	}
+
+	// Seek back to start of optional header so we can read the full struct
+	file.seekg(-static_cast<std::streamoff>(sizeof(magic)), std::ios::cur);
+
+	if(magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+		IMAGE_OPTIONAL_HEADER32 opt32 = {};
+		if(!file.read(reinterpret_cast<char*>(&opt32), sizeof(opt32))) {
+			return 0;
+		}
+		return static_cast<std::uint64_t>(opt32.ImageBase);
+	} else if(magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+		IMAGE_OPTIONAL_HEADER64 opt64 = {};
+		if(!file.read(reinterpret_cast<char*>(&opt64), sizeof(opt64))) {
+			return 0;
+		}
+		return opt64.ImageBase;
+	}
+
+	return 0;
 }
 
 Dwarf_Addr markerDebugAddress() {

@@ -669,7 +669,7 @@ inline DWORD64 getPreferredImageBase(const char* path) {
 	if(magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC && fileHeader.SizeOfOptionalHeader >= sizeof(IMAGE_OPTIONAL_HEADER32)) {
 		IMAGE_OPTIONAL_HEADER32 optionalHeader = {};
 		if(fread(&optionalHeader, sizeof(optionalHeader), 1, file.get()) == 1) {
-			return optionalHeader.ImageBase;
+			return static_cast<DWORD64>(optionalHeader.ImageBase);
 		}
 	} else if(magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC && fileHeader.SizeOfOptionalHeader >= sizeof(IMAGE_OPTIONAL_HEADER64)) {
 		IMAGE_OPTIONAL_HEADER64 optionalHeader = {};
