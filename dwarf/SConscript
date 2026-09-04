@@ -4,9 +4,6 @@ env, target, sources = dev.prepare_build(
     source_path, "dwarf", source_glob="*.c", in_bin=False
 )
 
-# Modern libdwarf no longer ships compatible producer interfaces used by this file.
-sources = [source for source in sources if "pro_encode_nm.c" not in str(source)]
-
 if "gcc" in env["TOOLS"]:
     env.Append(CCFLAGS=["-Wno-unused-but-set-variable"])
 
