@@ -4,11 +4,13 @@
 #include <filesystem>
 
 #include <dcpp/ClientManager.h>
+#include <dcpp/File.h>
 #include <dcpp/HintedUser.h>
 #include <dcpp/LogManager.h>
 #include <dcpp/QueueManager.h>
 #include <dcpp/SearchManager.h>
 #include <dcpp/SettingsManager.h>
+#include <dcpp/Text.h>
 #include <dcpp/TimerManager.h>
 
 using namespace dcpp;
@@ -116,6 +118,62 @@ TEST_F(HubHintQueueTest, accepts_download_targets_beyond_legacy_max_path)
 		EXPECT_EQ(target, items.begin()->second->getTarget());
 	});
 	queue->remove(target);
+}
+
+TEST_F(HubHintQueueTest, shortens_overlong_temporary_names_without_changing_the_target) {
+	SettingsManager::getInstance()->set(SettingsManager::TEMP_DOWNLOAD_DIRECTORY, Util::getPath(Util::PATH_USER_LOCAL));
+	const auto root = TTHValue();
+	const auto shortTarget = Util::getPath(Util::PATH_DOWNLOADS) + "short.cbz";
+	QueueItem shortItem(shortTarget, 1, QueueItem::DEFAULT, 0, GET_TIME(), root);
+	EXPECT_EQ(Util::getPath(Util::PATH_USER_LOCAL) + "short.cbz." + root.toBase32() + ".dctmp", shortItem.getTempTarget());
+	const auto persistedShortTemp = Util::getPath(Util::PATH_USER_LOCAL) + "persisted.part";
+	shortItem.setTempTarget(persistedShortTemp);
+	EXPECT_EQ(persistedShortTemp, shortItem.getTempTarget());
+	const string boundaryName(209, 'b');
+	QueueItem boundary(Util::getPath(Util::PATH_DOWNLOADS) + boundaryName, 1, QueueItem::DEFAULT, 0, GET_TIME(), root);
+	EXPECT_EQ(Util::getPath(Util::PATH_USER_LOCAL) + boundaryName + "." + root.toBase32() + ".dctmp", boundary.getTempTarget());
+
+	const string commonName(180, 'a');
+	string firstCombiningMarks;
+	string secondCombiningMarks;
+	for(size_t i = 0; i < 30; ++i) {
+		firstCombiningMarks += "\xCC\x82";
+		secondCombiningMarks += "\xCC\x88";
+	}
+	const auto firstTarget = Util::getPath(Util::PATH_DOWNLOADS) + commonName + "-" + firstCombiningMarks + ".cbz";
+	const auto secondTarget = Util::getPath(Util::PATH_DOWNLOADS) + commonName + "-" + secondCombiningMarks + ".cbz";
+	QueueItem first(firstTarget, 1, QueueItem::DEFAULT, 0, GET_TIME(), root);
+	QueueItem second(secondTarget, 1, QueueItem::DEFAULT, 0, GET_TIME(), root);
+
+	const auto firstTemp = first.getTempTarget();
+	const auto secondTemp = second.getTempTarget();
+	EXPECT_EQ(firstTarget, first.getTarget());
+	EXPECT_EQ(secondTarget, second.getTarget());
+	EXPECT_EQ(255U, Text::toT(Util::getFileName(firstTemp)).size());
+	EXPECT_EQ(255U, Text::toT(Util::getFileName(secondTemp)).size());
+	EXPECT_NE(string::npos, Util::getFileName(firstTemp).find("..."));
+	EXPECT_NE(firstTemp, secondTemp);
+	EXPECT_NO_THROW(File(firstTemp, File::WRITE, File::CREATE));
+	EXPECT_NO_THROW(File(secondTemp, File::WRITE, File::CREATE));
+	File::deleteFile(firstTemp);
+	File::deleteFile(secondTemp);
+	const auto emojiTarget = Util::getPath(Util::PATH_DOWNLOADS) + string(165, 'b') + "\xF0\x9F\x98\x80" + string(50, 'c') + ".bin";
+	QueueItem emoji(emojiTarget, 1, QueueItem::DEFAULT, 0, GET_TIME(), root);
+	const auto emojiTemp = emoji.getTempTarget();
+	EXPECT_LE(Text::toT(Util::getFileName(emojiTemp)).size(), 255U);
+	EXPECT_EQ(emojiTemp, Text::fromT(Text::toT(emojiTemp)));
+	EXPECT_NO_THROW(File(emojiTemp, File::WRITE, File::CREATE));
+	File::deleteFile(emojiTemp);
+
+	first.setTempTarget(Util::getPath(Util::PATH_USER_LOCAL) + string(256, 'x'));
+	const auto repairedTemp = first.getTempTarget();
+	EXPECT_EQ(firstTemp, repairedTemp);
+	EXPECT_EQ(255U, Text::toT(Util::getFileName(repairedTemp)).size());
+
+	QueueItem userList("remote/path", -1, QueueItem::DEFAULT, QueueItem::FLAG_USER_LIST, GET_TIME(), root);
+	const string longRemotePath(300, 'z');
+	userList.setTempTarget(longRemotePath);
+	EXPECT_EQ(longRemotePath, userList.getTempTarget());
 }
 
 #endif

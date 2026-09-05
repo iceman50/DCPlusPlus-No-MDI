@@ -23,16 +23,72 @@
 #include "File.h"
 #include "Util.h"
 
+#ifdef _WIN32
+#include "Encoder.h"
+#include "Text.h"
+#include "TigerHash.h"
+#endif
+
 namespace dcpp {
 
 namespace {
 	const string TEMP_EXTENSION = ".dctmp";
 
-	string getTempName(const string& aFileName, const TTHValue& aRoot) {
-		string tmp(aFileName);
-		tmp += "." + aRoot.toBase32();
-		tmp += TEMP_EXTENSION;
-		return tmp;
+#ifdef _WIN32
+	const size_t MAX_FILENAME_LENGTH = 255;
+	const size_t ELLIPSIS_LENGTH = 3;
+
+	string cutUtf8ForWindows(const string& aFileName, size_t aMaxLength) {
+		if(aMaxLength <= ELLIPSIS_LENGTH) {
+			return string(aMaxLength, '.');
+		}
+
+		auto wideName = Text::toT(aFileName);
+		if(wideName.size() <= aMaxLength) {
+			return aFileName;
+		}
+
+		wideName.resize(aMaxLength - ELLIPSIS_LENGTH);
+		if(!wideName.empty() && wideName.back() >= 0xD800 && wideName.back() <= 0xDBFF) {
+			wideName.pop_back();
+		}
+		wideName += _T("...");
+		return Text::fromT(wideName);
+	}
+
+	string getTargetId(const string& aTarget) {
+		TigerHash tiger;
+		tiger.update(aTarget.data(), aTarget.size());
+		return Encoder::toBase32(tiger.finalize(), TigerHash::BYTES);
+	}
+
+	bool hasOverlongTempName(const string& aTempTarget) {
+		if(aTempTarget.empty()) {
+			return false;
+		}
+
+		const auto fileName = Util::getFileName(aTempTarget);
+		return fileName.size() > MAX_FILENAME_LENGTH && Text::toT(fileName).size() > MAX_FILENAME_LENGTH;
+	}
+#endif
+
+	string getTempName(const string& aTarget, const TTHValue& aRoot) {
+		const auto fileName = Util::getFileName(aTarget);
+		const auto rootSuffix = "." + aRoot.toBase32() + TEMP_EXTENSION;
+		const auto tempName = fileName + rootSuffix;
+
+#ifdef _WIN32
+		if(tempName.size() > MAX_FILENAME_LENGTH && Text::toT(tempName).size() > MAX_FILENAME_LENGTH) {
+			const auto uniqueSuffix = "." + getTargetId(aTarget) + rootSuffix;
+			const auto uniqueSuffixLength = uniqueSuffix.size();
+			if(uniqueSuffixLength >= MAX_FILENAME_LENGTH) {
+				return getTargetId(aTarget) + TEMP_EXTENSION;
+			}
+			return cutUtf8ForWindows(fileName, MAX_FILENAME_LENGTH - uniqueSuffixLength) + uniqueSuffix;
+		}
+#endif
+
+		return tempName;
 	}
 }
 
@@ -79,13 +135,24 @@ const string& QueueItem::getTempTarget() {
 				params["targetdrive"] = target.substr(0, 3);
 			else
 				params["targetdrive"] = Util::getPath(Util::PATH_USER_LOCAL).substr(0, 3);
-			setTempTarget(Util::formatParams(SETTING(TEMP_DOWNLOAD_DIRECTORY), params) + getTempName(getTargetFileName(), getTTH()));
+			setTempTarget(Util::formatParams(SETTING(TEMP_DOWNLOAD_DIRECTORY), params) + getTempName(getTarget(), getTTH()));
 #else //_WIN32
-			setTempTarget(SETTING(TEMP_DOWNLOAD_DIRECTORY) + getTempName(getTargetFileName(), getTTH()));
+			setTempTarget(SETTING(TEMP_DOWNLOAD_DIRECTORY) + getTempName(getTarget(), getTTH()));
 #endif //_WIN32
 		}
 	}
 	return tempTarget;
+}
+
+void QueueItem::setTempTarget(const string& aTempTarget) {
+#ifdef _WIN32
+	if(!isSet(QueueItem::FLAG_USER_LIST) && hasOverlongTempName(aTempTarget)) {
+		tempTarget.clear();
+		return;
+	}
+#endif
+
+	tempTarget = aTempTarget;
 }
 
 QueueData* QueueItem::getPluginObject() noexcept {

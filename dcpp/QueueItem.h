@@ -190,7 +190,7 @@ public:
 	string getListName() const;
 
 	const string& getTempTarget();
-	void setTempTarget(const string& aTempTarget) { tempTarget = aTempTarget; }
+	void setTempTarget(const string& aTempTarget);
 
 	QueueData* getPluginObject() noexcept;
 
