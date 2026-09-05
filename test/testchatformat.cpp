@@ -141,7 +141,8 @@ TEST_F(testchatformat, plain_magnets_keep_the_link_visible_and_show_the_file_siz
 
 	EXPECT_NE(string::npos, html.find("<a href=\"magnet:?xt=urn:tree:tiger:" + hash));
 	EXPECT_NE(string::npos, html.find("magnet:?xt=urn:tree:tiger:" + hash));
-	EXPECT_NE(string::npos, html.find("cat.jpg — 200.00 KiB"));
+	// File sizes use the current locale, including its decimal separator.
+	EXPECT_NE(string::npos, html.find("cat.jpg \xe2\x80\x94 " + Util::formatBytes(204800))) << html;
 }
 
 TEST_F(testchatformat, rich_text_parses_the_complete_safe_dialect)
@@ -257,8 +258,9 @@ TEST_F(testchatformat, rich_text_uses_magnets_for_attachments_and_inline_media)
 	ASSERT_EQ(size_t(1), builtParsed.attachments.size());
 	EXPECT_TRUE(builtParsed.attachments[0].inlineMedia);
 	EXPECT_EQ("photo (final) [1].jpg", builtParsed.attachments[0].name);
+	EXPECT_EQ(204800, builtParsed.attachments[0].size);
 	EXPECT_NE(string::npos, builtParsed.html.find("magnet:?xt=urn:tree:tiger:" + hash));
-	EXPECT_NE(string::npos, builtParsed.html.find("200.00 KiB"));
+	EXPECT_NE(string::npos, builtParsed.html.find(Util::formatBytes(204800))) << builtParsed.html;
 }
 
 TEST_F(testchatformat, rich_text_message_policy_is_protocol_independent)

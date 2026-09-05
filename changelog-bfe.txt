@@ -1,4 +1,5 @@
 == 08-18-2026 - 0.8841 !!!Experimental!!! ==
+* Fix chat magnet and rich-text attachment tests failing with localized file-size decimal separators (iceman50)
 * Improve FastAlloc performance with aligned per-type slabs and thread-local allocation batches (iceman50)
 * Support Windows paths longer than the legacy MAX_PATH limit across hashing, sharing, downloads, dialogs, drag-and-drop, archives and persistent databases
 * Add a Win7-compatible application dark theme with Windows high-contrast integration, retained visual styles, native dark non-client rendering on Win10+, application-owned button and control rendering, and a configurable Experimental palette
