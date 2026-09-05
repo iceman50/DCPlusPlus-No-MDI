@@ -8,16 +8,20 @@
 
 		* A modern C++ compiler. We are currently using these 2 packages by the MinGW-w64 project for official releases :
 
-		- 64-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/x86_64-11.2.0-release-win32-seh-rt_v9-rev1.7z>
-		- 32-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/i686-11.2.0-release-win32-dwarf-rt_v9-rev1.7z>
+		- 64-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/13.2.0-rt_v11-rev1/x86_64-13.2.0-release-win32-seh-msvcrt-rt_v11-rev1.7z>
+		- 32-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/13.2.0-rt_v11-rev1/i686-13.2.0-release-win32-dwarf-msvcrt-rt_v11-rev1.7z>
 
 		Make sure that the compiler's "bin" directory is in your PATH environment variable.
 
 		Have a look at section 2 for additional steps to configure the compiler.
 		Have a look at section 4 for alternative compilers.
 
-		* Python - 3.5+
+		* Python - versions 3.5 to 3.12
 		<https://www.python.org>
+
+		On Windows if you are using the traditional executable installer (and not Python Install Manager) then
+		it is recommended that you enable registering .pyx file associations and install Python for all users.
+
 		Make sure that Python is in your PATH environment variable.
 
 		* SCons - 4.x.x
@@ -36,7 +40,8 @@
 		When updating the bundled copy, use the official sqlite-amalgamation archive from
 		<https://www.sqlite.org/download.html> and verify the archive hash published by SQLite.
 
-		* Perl - 5.12.0.1 or later (from MSYS, Cygwin or ActivePerl; only needed to build help files)
+		* Perl - 5.12.0.1 or later (Strawberry or ActivePerl for native Windows, also MSYS or Cygwin if *nix
+		like environment is preferred; only needed to build help files)
 		<https://www.perl.org/get.html>
 
 		Make sure that Perl is in your PATH environment variable.
@@ -62,11 +67,17 @@
 		* NSIS - 3.0 or later (only needed to build the installer)
 		<https://nsis.sourceforge.io> 
 
-		After installing NSIS, download the CPUFeatures plug-in from <https://nsis.sourceforge.io/CPUFeatures_plug-in>. 
-		From the .zip archive you have to unpack the following files:
-		 - Plugins\Release_Unicode\CPUFeatures.dll to <NSIS installation folder>\Plugins\x86-unicode\
-		 - Include\CPUFeatures.nsh to <NSIS installation folder>\Include\
-		 
+		After installing NSIS,
+			download the CPUFeatures plug-in from <https://nsis.sourceforge.io/CPUFeatures_plug-in>. 
+				From the .zip archive you have to unpack the following files:
+		 		- Plugins\Release_Unicode\CPUFeatures.dll to <NSIS installation folder>\Plugins\x86-unicode\
+		 		- Include\CPUFeatures.nsh to <NSIS installation folder>\Include\
+
+		 	download the ShellExecAsUser plug-in (ShellExecAsUserUnicodeUpdate.zip) from 
+		 		<https://nsis.sourceforge.io/ShellExecAsUser_plug-in>.
+				From the .zip archive you have to unpack the following file:
+		 		- unicode\ShellExecAsUser.dll to <NSIS installation folder>\Plugins\x86-unicode\
+ 
 		Make sure that makensis.exe is in your PATH environment variable.
 
 		* zip from MSYS / Cygwin or 7-Zip (only needed to build the official distro)
@@ -78,16 +89,19 @@
 
 	a. HTML Help support (only for MinGW)
 
-		To build a version with HTML Help support, copy the following files from a Windows SDK
-		(Windows SDK path -> DC++ source code path):
+		Many modern toolchains include the required HTMLHelp header file and an import library.
+
+		In case the one you use does not, to build a version with HTML Help support, 
+		copy the following files from a Windows SDK (Windows SDK path -> DC++ source code path):
 		Include/shared/winapifamily.h -> mingw/include/winapifamily.h
 		Include/um/HtmlHelp.h -> mingw/include/htmlhelp.h
 		Lib/win8/um/x86/Htmlhelp.Lib -> mingw/lib/htmlhelp.lib
 		Lib/win8/um/x64/Htmlhelp.Lib -> mingw/lib/x64/htmlhelp.lib
-
+		The source path may differ in case of various SDK versions.
+		
 		The latest Windows SDK is currently at
-		<https://msdn.microsoft.com/en-US/windows/desktop/hh852363>; it installs into
-		"C:\Program Files (x86)\Windows Kits\8.0".
+		<https://learn.microsoft.com/en-us/windows/apps/windows-sdk/downloads>; depending on the version
+		it installs into "C:\Program Files <(x86)>\Windows Kits\<version>".
 
 	b. OpenSSL
 
@@ -99,11 +113,11 @@
 			The build process needs Cygwin installed. Above the basic (default) packages the following additional packages needs
 			to be installed under Cygwin:
 
-			* perl (Perl builds for Windows are unsuitable for this process)
+			* perl (native Perl builds for Windows are not suitable for this process)
 			* make
 
 			<https://bennierobinson.com/programming/2016/01/24/perl-windows-2016.html> explains how to set up these
-			packages in detail.
+			packages in great detail.
 
 			You'll also need a GNU Patch executable for the operation in your PATH. It can be either the GNU Win32 binary
 			or a package installed under Cygwin or even any patch executable that may come with your versioning system.
@@ -112,7 +126,7 @@
 
 		Compiling with MSVC
 
-			Compilation requires the following additional packages to be installed above MSVS 2022+:
+			Compilation requires the following additional packages to be installed above MSVS 2022 or later:
 
 			* Perl v5.32.1 or later (from Strawberry [tested] or ActiveState)
 			  <https://www.perl.org/get.html>
@@ -172,28 +186,32 @@
 		All you have to do to use one is to download and extract it to a folder.
 		Prefer DWARF / SEH versions (usually marked with a "-dw") of the 32/64-bit compilers respectively; SJLJ ones should
 		be avoided for performance reasons.
-		Prefer tools coming with MSVCRT rather than UCRT; the latter is currently untested with the project, using it can result unforeseen regressions.
+		Prefer tools built with MSVCRT rather than UCRT; the latter is currently untested with the project.
 
 		We are currently using these 2 packages by the MinGW-w64 project:
-		- 64-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/x86_64-11.2.0-release-win32-seh-rt_v9-rev1.7z>
-		- 32-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/11.2.0-rt_v9-rev1/i686-11.2.0-release-win32-dwarf-rt_v9-rev1.7z>
+		- 64-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/13.2.0-rt_v11-rev1/x86_64-13.2.0-release-win32-seh-msvcrt-rt_v11-rev1.7z>
+		- 32-bit: <https://github.com/niXman/mingw-builds-binaries/releases/download/13.2.0-rt_v11-rev1/i686-13.2.0-release-win32-dwarf-msvcrt-rt_v11-rev1.7z>
 
-		Using compilers from regular MinGW (not MinGW-w64) is not supported as older versions had stability issues
-		and recent releases are not tested. If you still want to use regular MinGW (at your own risk) the easiest way 
-		is to install it by using mingw-get. 
+		Using compilers from regular MinGW (not MinGW-w64) is not supported.
+		If you still want to use regular MinGW (at your own risk) the easiest way is to install it by using mingw-get. 
 		Extract it to C:\MinGW and run:
 			mingw-get install gcc g++
 		A graphical installer around mingw-get is also available to facilitate the above.
 
 		Make sure that MinGW\bin is in your PATH environment variable.
 
-		Alternatively, if you have Cygwin, a MinGW compiler can be installed as part of Cygwin:
+		If you have Cygwin, a MinGW compiler can be installed as part of Cygwin:
 		select it in the "Devel" category when running the Cygwin installer.
 		To make DC++ use it, add "prefix=i686-pc-mingw32-" to the scons arguments or create a
 		custom.py file containing:
 			prefix='i686-pc-mingw32-'
 		Make sure that Cygwin\bin is in your PATH environment variable.
 		Note that building with MinGW compilers provided by Cygwin is not tested.
+
+		Alternatively, if you're on Linux, you can use the MinGW-w64 cross-compilation package 
+		of your distribution, with the all the applications and dependencies listed in Section 1. 
+		installed, to build the DC++ Windows executable.
+		You can run / test the binary under Wine, with which DC++ maintains full compatibility.
 
 	b. Microsoft Visual Studio 2022 or later:
 		
@@ -229,7 +247,7 @@
 
 			We accept both plain patches and pull requests.
 
-		e. Licensing issues with submitted patches	
+		d. Licensing issues with submitted patches
 
 			In order to avoid future licensing issues, the project's author and copyright holder 
 			asks you to give him copyright over any submitted code. 
@@ -244,7 +262,7 @@
 			document, in particular the fact that such tool was used, the tool's name, and the
 			version used.
  
-		f. Developing plugins
+		e. Developing plugins
 
 			The DC plugin SDK is at <https://launchpad.net/dc-plugin-sdk>.
 
