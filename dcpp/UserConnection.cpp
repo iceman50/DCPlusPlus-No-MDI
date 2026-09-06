@@ -22,7 +22,6 @@
 #include "ChatMessage.h"
 #include "ClientManager.h"
 #include "format.h"
-#include "LogManager.h"
 #include "PluginManager.h"
 #include "RichText.h"
 #include "SettingsManager.h"
@@ -59,9 +58,6 @@ void UserConnection::on(BufferedSocketListener::Line, const string& aLine) noexc
 
 	if(aLine[0] == '$')
 		setFlag(FLAG_NMDC);
-
-	LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_IN,
-		socket ? socket->getIp() : hubUrl, aLine);
 
 	if(PluginManager::getInstance()->runHook(HOOK_NETWORK_CONN_IN, this, aLine))
 		return;
@@ -308,8 +304,6 @@ void UserConnection::send(const AdcCommand& command) {
 		return;
 	}
 	const auto line = command.toString(0, isSet(FLAG_NMDC));
-	LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_OUT,
-		socket ? socket->getIp() : hubUrl, line);
 	send(line);
 }
 

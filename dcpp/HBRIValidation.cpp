@@ -13,7 +13,6 @@
 #include "AdcCommand.h"
 #include "CryptoManager.h"
 #include "format.h"
-#include "LogManager.h"
 #include "SettingsManager.h"
 #include "Socket.h"
 #include "SSLSocket.h"
@@ -295,8 +294,6 @@ bool HBRIValidator::runValidation(const ConnectInfo& connectInfo, const string& 
 	if(!socket.readLine(response)) {
 		return false;
 	}
-	LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_IN,
-		formatEndpoint(connectInfo.ip, connectInfo.port, connectInfo.v6), response);
 	validateResponse(response);
 	return true;
 }

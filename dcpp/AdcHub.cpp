@@ -633,7 +633,6 @@ void AdcHub::sendUDP(const AdcCommand& cmd) noexcept {
 		}
 		command = cmd.toString(ou.getUser()->getCID());
 	}
-	LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_OUT, ip + ':' + port, command);
 	try {
 		udp.writeTo(ip, port, command);
 	} catch(const SocketException& e) {
@@ -1623,9 +1622,6 @@ void AdcHub::send(const AdcCommand& cmd) {
 		return;
 	}
 	const auto line = cmd.toString(sid);
-	if(cmd.getCommand() == AdcCommand::CMD_STA) {
-		LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_OUT, getHubUrl(), line);
-	}
 	Client::send(line);
 }
 
@@ -1682,7 +1678,6 @@ void AdcHub::on(Connected c) noexcept {
 
 void AdcHub::on(Line l, const string& aLine) noexcept {
 	Client::on(l, aLine);
-	LogManager::getInstance()->adcStatus(LogManager::PROTOCOL_IN, getHubUrl(), aLine);
 
 	if(!Text::validateUtf8(aLine)) {
 		// @todo report to user?

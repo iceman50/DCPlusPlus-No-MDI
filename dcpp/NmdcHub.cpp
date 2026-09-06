@@ -24,11 +24,11 @@
 #include "ConnectivityManager.h"
 #include "CryptoManager.h"
 #include "format.h"
-#include "LogManager.h"
 #include "SearchManager.h"
 #include "ShareManager.h"
 #include "Socket.h"
 #include "StringTokenizer.h"
+#include "Text.h"
 #include "ThrottleManager.h"
 #include "PluginManager.h"
 #include "UserCommand.h"
@@ -77,6 +77,39 @@ bool hasEmbeddedNmdcCommand(const string& line, size_t start) noexcept {
 		}
 	}
 	return false;
+}
+
+string escapeStatusData(const string& data) {
+	static const char hex[] = "0123456789ABCDEF";
+	const auto validUtf8 = Text::validateUtf8(data);
+	const auto length = std::min(data.size(), size_t { 4096 });
+	string escaped;
+	escaped.reserve(length);
+
+	for(size_t i = 0; i < length; ++i) {
+		const auto c = static_cast<uint8_t>(data[i]);
+		switch(c) {
+		case '\\': escaped += "\\\\"; break;
+		case '\r': escaped += "\\r"; break;
+		case '\n': escaped += "\\n"; break;
+		case '\t': escaped += "\\t"; break;
+		default:
+			if(c < 0x20 || c == 0x7f || (!validUtf8 && c >= 0x80)) {
+				escaped += "\\x";
+				escaped += hex[c >> 4];
+				escaped += hex[c & 0x0f];
+			} else {
+				escaped += static_cast<char>(c);
+			}
+		}
+	}
+
+	if(length < data.size()) {
+		escaped += "... (truncated, ";
+		escaped += Util::toString(static_cast<int64_t>(data.size()));
+		escaped += " bytes total)";
+	}
+	return escaped;
 }
 
 } // unnamed namespace
@@ -230,7 +263,7 @@ NmdcHub::StatusFrameType NmdcHub::classifyStatusFrame(const string& line) noexce
 string NmdcHub::sanitizeStatusMessage(const string& line) {
 	size_t contentStart = 0;
 	const auto start = findStarredStatusPrefix(line, contentStart) ? contentStart : 0;
-	return LogManager::escapeProtocolData(line.substr(start));
+	return escapeStatusData(line.substr(start));
 }
 
 void NmdcHub::onLine(const string& aLine, int statusFlags) noexcept {
@@ -1081,13 +1114,6 @@ void NmdcHub::on(Line, const string& aLine) noexcept {
 	Client::on(Line(), aLine);
 
 	const auto frameType = classifyStatusFrame(aLine);
-	if(frameType != STATUS_FRAME_NORMAL) {
-		const auto severity = frameType == STATUS_FRAME_DESYNC ? LogMessage::SEV_ERROR :
-			LogMessage::SEV_WARNING;
-		LogManager::getInstance()->protocol(LogManager::PROTOCOL_NMDC_SPOOF, LogManager::PROTOCOL_IN,
-			getHubUrl(), aLine, severity);
-	}
-
 	if(frameType == STATUS_FRAME_DESYNC) {
 		setAutoReconnect(false);
 		fire(ClientListener::StatusMessage(), this,
