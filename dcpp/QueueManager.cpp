@@ -211,7 +211,7 @@ void QueueManager::UserQueue::add(QueueItem* qi, const UserPtr& aUser) {
 }
 
 QueueItem* QueueManager::UserQueue::getNext(const UserPtr& aUser, QueueItem::Priority minPrio,
-	int64_t wantedSize, const string* hubUrl)
+	int64_t wantedSize, const string* hubUrl, MCNDownloadType type)
 {
 	int p = QueueItem::LAST - 1;
 
@@ -220,6 +220,10 @@ QueueItem* QueueManager::UserQueue::getNext(const UserPtr& aUser, QueueItem::Pri
 		if(i != userQueue[p].end()) {
 			dcassert(!i->second.empty());
 			for(auto qi: i->second) {
+				if(!qi->matchesMCNDownloadType(type)) {
+					continue;
+				}
+
 				// File lists may be generated from a hub-specific share profile.
 				// Do not satisfy a hinted list request through another hub.
 				if(hubUrl && qi->isSet(QueueItem::FLAG_USER_LIST) &&
@@ -597,6 +601,12 @@ void QueueManager::add(const string& aTarget, int64_t aSize, const TTHValue& roo
 	string tempTarget;
 	if((aFlags & QueueItem::FLAG_USER_LIST) == QueueItem::FLAG_USER_LIST) {
 		target = getListPath(aUser);
+		if(aFlags & QueueItem::FLAG_PARTIAL_LIST) {
+			// Partial lists are independent priority-lane requests. Sharing the
+			// full-list target would merge them into a regular transfer and make
+			// browsing wait for an unrelated full list to finish.
+			target += ".partial[" + Util::cleanPathChars(aTarget) + "]";
+		}
 		tempTarget = aTarget;
 	} else {
 		target = checkTarget(aTarget, /*checkExistence*/ true);
@@ -687,8 +697,10 @@ void QueueManager::add(const string& aTarget, int64_t aSize, const TTHValue& roo
 	}
 
 connect:
-	if(wantConnection && aUser.user->isOnline())
-		ConnectionManager::getInstance()->getDownloadConnection(aUser, (aFlags & QueueItem::FLAG_USER_LIST) != 0);
+	const bool smallSlot = (aFlags & QueueItem::FLAG_PARTIAL_LIST) != 0 ||
+		(!(aFlags & QueueItem::FLAG_USER_LIST) && aSize >= 0 && aSize < MCN::SMALL_FILE_LIMIT);
+	if((wantConnection || smallSlot) && aUser.user->isOnline())
+		ConnectionManager::getInstance()->getDownloadConnection(aUser, smallSlot);
 }
 
 void QueueManager::readd(const string& target, const HintedUser& aUser) {
@@ -830,9 +842,9 @@ bool QueueManager::fallbackRecursiveList(const string& target) noexcept {
 	return true;
 }
 
-QueueItem::Priority QueueManager::hasDownload(const UserPtr& aUser) noexcept {
+QueueItem::Priority QueueManager::hasDownload(const UserPtr& aUser, MCNDownloadType type) noexcept {
 	Lock l(cs);
-	QueueItem* qi = userQueue.getNext(aUser, QueueItem::LOWEST);
+	QueueItem* qi = userQueue.getNext(aUser, QueueItem::LOWEST, 0, nullptr, type);
 	if(!qi) {
 		return QueueItem::PAUSED;
 	}
@@ -982,7 +994,8 @@ Download* QueueManager::getDownload(UserConnection& aSource) noexcept {
 	dcdebug("Getting download for %s...", u->getCID().toBase32().c_str());
 
 	const auto& hubUrl = aSource.getHubUrl();
-	QueueItem* q = userQueue.getNext(u, QueueItem::LOWEST, aSource.getChunkSize(), &hubUrl);
+	QueueItem* q = userQueue.getNext(u, QueueItem::LOWEST, aSource.getChunkSize(), &hubUrl,
+		aSource.getMCNDownloadType());
 
 	if(!q) {
 		dcdebug("none\n");

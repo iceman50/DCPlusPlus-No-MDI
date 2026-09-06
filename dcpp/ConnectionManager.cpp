@@ -33,11 +33,6 @@ namespace dcpp {
 
 namespace {
 
-bool matchesRequestedHint(const HintedUser& queuedUser, const HintedUser& requestedUser) {
-	return queuedUser.user == requestedUser.user &&
-		hubHintMatches(requestedUser.hint, queuedUser.hint);
-}
-
 bool matchesConnectionHub(const HintedUser& queuedUser, const CID& cid, const string& hubUrl) {
 	return queuedUser.user->getCID() == cid &&
 		hubHintMatches(queuedUser.hint, hubUrl);
@@ -75,7 +70,8 @@ string ConnectionManager::makeToken() const {
 	Lock l(cs);
 	do {
 		token = std::to_string(Util::rand());
-	} while(tokens.find(token) != tokens.end() || std::any_of(std::begin(cqis), std::end(cqis), [&](const auto& items) {
+	} while(tokens.find(token) != tokens.end() || removedDownloadTokens.find(token) != removedDownloadTokens.end() ||
+		std::any_of(std::begin(cqis), std::end(cqis), [&](const auto& items) {
 		return std::any_of(items.begin(), items.end(), [&](const ConnectionQueueItem& item) {
 			return item.getToken() == token;
 		});
@@ -111,6 +107,10 @@ ConnectionQueueItem::ConnectionQueueItem(const HintedUser& user, ConnectionType 
 	errors(0),
 	state(WAITING),
 	type(type),
+	downloadType(MCNDownloadType::ANY),
+	mcn(false),
+	running(false),
+	maxRemoteConnections(0),
 	user(user)
 {
 }
@@ -129,140 +129,163 @@ bool ConnectionQueueItem::operator==(const UserPtr& user) const {
  * for downloading.
  * @param aUser The user to connect to.
  */
-void ConnectionManager::getDownloadConnection(const HintedUser& aUser, bool singleConnection) {
+bool ConnectionManager::allowNewMCN(const HintedUser& aUser, bool smallSlot) const {
+	bool mcnUser = false;
+	int runningNormal = 0;
+	int remoteLimit = 0;
+
+	for(const auto& cqi: downloads) {
+		if(!(cqi.getUser() == aUser.user)) {
+			continue;
+		}
+
+		if(!cqi.getMCN()) {
+			// Until the first handshake has negotiated MCN1, opening a second
+			// connection could duplicate a connection to a legacy peer.
+			return false;
+		}
+		mcnUser = true;
+		if(cqi.getMaxRemoteConnections() > 0 &&
+			(remoteLimit == 0 || cqi.getMaxRemoteConnections() < remoteLimit))
+		{
+			remoteLimit = cqi.getMaxRemoteConnections();
+		}
+
+		if(smallSlot) {
+			if(cqi.getDownloadType() == MCNDownloadType::SMALL) {
+				return false;
+			}
+			continue;
+		}
+
+		if(cqi.getDownloadType() == MCNDownloadType::NORMAL) {
+			if(!cqi.getRunning()) {
+				// Keep at most one non-running regular connection. This includes
+				// connecting attempts and reusable idle sockets.
+				return false;
+			}
+			++runningNormal;
+		}
+	}
+
+	if(!mcnUser || smallSlot) {
+		return true;
+	}
+
+	return runningNormal < MCN::effectiveDownloadLimit(SETTING(MAX_MCN_DOWNLOADS), remoteLimit);
+}
+
+void ConnectionManager::getDownloadConnection(const HintedUser& aUser, bool smallSlot) {
 	dcassert((bool)aUser.user);
-	bool checkIdle = false;
+	// Callers that don't know the queue-item type should still put a lone
+	// priority transfer on the dedicated connection.
+	if(!smallSlot && QueueManager::getInstance()->hasDownload(aUser.user, MCNDownloadType::NORMAL) == QueueItem::PAUSED &&
+		QueueManager::getInstance()->hasDownload(aUser.user, MCNDownloadType::SMALL) != QueueItem::PAUSED)
+	{
+		smallSlot = true;
+	}
+	if(DownloadManager::getInstance()->checkIdle(aUser, smallSlot)) {
+		return;
+	}
+
 	unique_ptr<ConnectionQueueItem> added;
-	vector<ConnectionQueueItem> removed;
 	{
 		Lock l(cs);
-
-		if(singleConnection) {
-			// Segmented file downloads may have left several MCN attempts queued.
-			// A full or partial list cannot use them, so retain established transfers
-			// and at most one not-yet-established connection attempt.
-			const auto hasActive = std::any_of(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
-				return matchesRequestedHint(cqi.getUser(), aUser) && cqi.getState() == ConnectionQueueItem::ACTIVE;
-			});
-			string keepToken;
-			if(!hasActive) {
-				auto preferred = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
-					return matchesRequestedHint(cqi.getUser(), aUser) && cqi.getState() == ConnectionQueueItem::CONNECTING;
-				});
-				if(preferred == downloads.end()) {
-					preferred = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
-						return matchesRequestedHint(cqi.getUser(), aUser);
-					});
-				}
-				if(preferred != downloads.end()) {
-					keepToken = preferred->getToken();
-				}
-			}
-
-			for(auto i = downloads.begin(); i != downloads.end();) {
-				const bool redundant = i->getUser() == aUser.user && i->getState() != ConnectionQueueItem::ACTIVE &&
-					(hasActive || i->getToken() != keepToken);
-				if(!redundant) {
-					++i;
-					continue;
-				}
-
-				for(auto uc: userConnections) {
-					if(uc->getToken() == i->getToken()) {
-						uc->unsetFlag(UserConnection::FLAG_ASSOCIATED);
-						uc->disconnect(true);
-					}
-				}
-				removed.push_back(*i);
-				i = downloads.erase(i);
-			}
+		if(!allowNewMCN(aUser, smallSlot)) {
+			return;
 		}
 
-		auto i = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
-			return matchesRequestedHint(cqi.getUser(), aUser);
+		auto& cqi = getCQI(aUser, CONNECTION_TYPE_DOWNLOAD);
+		if(smallSlot) {
+			cqi.setDownloadType(MCNDownloadType::SMALL);
+		}
+
+		// Once one connection has negotiated MCN1, mark new attempts before
+		// their handshake so another queue event can't create duplicates.
+		auto established = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& existing) {
+			return &existing != &cqi && existing.getUser() == aUser.user && existing.getMCN();
 		});
-		if(i == downloads.end()) {
-			added.reset(new ConnectionQueueItem(getCQI(aUser, CONNECTION_TYPE_DOWNLOAD)));
-		} else {
-			checkIdle = true;
+		if(established != downloads.end()) {
+			cqi.setMCN(true);
+			cqi.setMaxRemoteConnections(established->getMaxRemoteConnections());
+			if(!smallSlot) {
+				cqi.setDownloadType(MCNDownloadType::NORMAL);
+			}
 		}
+		added.reset(new ConnectionQueueItem(cqi));
 	}
 	if(added) {
 		fire(ConnectionManagerListener::Added(), added.get());
-	}
-	for(auto& cqi: removed) {
-		fire(ConnectionManagerListener::Removed(), &cqi);
-	}
-	if(checkIdle) {
-		DownloadManager::getInstance()->checkIdle(aUser, singleConnection);
 	}
 }
 
 void ConnectionManager::onDownloadStarted(const UserConnection& connection) {
-	if(!connection.isMCN() || !SETTING(SEGMENTED_DL)) {
-		return;
-	}
-
-	const auto limit = std::min(std::max(1, SETTING(MAX_MCN_DOWNLOADS)), connection.getMaxRemoteConnections());
-	if(limit <= 1 || QueueManager::getInstance()->hasDownload(connection.getUser()) == QueueItem::PAUSED) {
-		return;
-	}
-
-	unique_ptr<ConnectionQueueItem> added;
+	bool mcn = false;
+	bool small = false;
 	{
 		Lock l(cs);
-		const auto count = std::count_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
-			return cqi.getUser() == connection.getUser();
+		auto i = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
+			return cqi.getToken() == connection.getToken();
 		});
-		if(count < limit) {
-			added.reset(new ConnectionQueueItem(getCQI(connection.getHintedUser(), CONNECTION_TYPE_DOWNLOAD)));
+		if(i == downloads.end() || !i->getMCN()) {
+			return;
 		}
+		i->setRunning(true);
+		mcn = true;
+		small = i->getDownloadType() == MCNDownloadType::SMALL;
 	}
-	if(added) {
-		fire(ConnectionManagerListener::Added(), added.get());
+
+	if(mcn && QueueManager::getInstance()->hasDownload(connection.getUser(), MCNDownloadType::SMALL) != QueueItem::PAUSED) {
+		getDownloadConnection(connection.getHintedUser(), true);
+	}
+	if(small) {
+		// A priority connection doesn't consume one of the negotiated regular
+		// connections, so it may also bootstrap the regular pool.
+		if(QueueManager::getInstance()->hasDownload(connection.getUser(), MCNDownloadType::NORMAL) != QueueItem::PAUSED) {
+			getDownloadConnection(connection.getHintedUser(), false);
+		}
+		return;
+	}
+
+	// getNextSegment naturally permits another segment only when segmented
+	// downloading is enabled, while still allowing a different queued file.
+	if(QueueManager::getInstance()->hasDownload(connection.getUser(), MCNDownloadType::NORMAL) != QueueItem::PAUSED) {
+		getDownloadConnection(connection.getHintedUser(), false);
 	}
 }
 
-void ConnectionManager::onFileListDownloadStarted(const UserConnection& connection) {
-	vector<ConnectionQueueItem> removed;
-	{
-		Lock l(cs);
-		for(auto i = downloads.begin(); i != downloads.end();) {
-			if(!(i->getUser() == connection.getUser()) || i->getToken() == connection.getToken()) {
-				++i;
-				continue;
-			}
-
-			UserConnection* peerConnection = nullptr;
-			for(auto uc: userConnections) {
-				if(uc->getToken() == i->getToken()) {
-					peerConnection = uc;
-					break;
-				}
-			}
-
-			// Preserve another connection only when it is carrying an actual download.
-			// ACTIVE also describes reusable idle MCN sockets, which otherwise remain as
-			// blank TransferView rows after an indivisible file-list transfer begins.
-			const auto peerState = peerConnection ? peerConnection->getState() : UserConnection::STATE_UNCONNECTED;
-			const bool transferring = peerConnection && peerConnection->isSet(UserConnection::FLAG_DOWNLOAD) &&
-				(peerState == UserConnection::STATE_SND || peerState == UserConnection::STATE_RUNNING);
-			if(transferring) {
-				++i;
-				continue;
-			}
-
-			if(peerConnection) {
-				peerConnection->unsetFlag(UserConnection::FLAG_ASSOCIATED);
-				peerConnection->disconnect(true);
-			}
-			removed.push_back(*i);
-			i = downloads.erase(i);
-		}
+void ConnectionManager::removeExtraMCN(ConnectionQueueItem& current, unique_ptr<ConnectionQueueItem>& removedEvent) {
+	if(!current.getMCN() || current.getDownloadType() != MCNDownloadType::NORMAL) {
+		return;
 	}
 
-	for(auto& cqi: removed) {
-		fire(ConnectionManagerListener::Removed(), &cqi);
+	auto i = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
+		return &cqi != &current && cqi.getUser() == current.getUser().user && cqi.getMCN() &&
+			cqi.getDownloadType() == MCNDownloadType::NORMAL && cqi.getState() != ConnectionQueueItem::ACTIVE;
+	});
+	if(i != downloads.end()) {
+		removedEvent.reset(new ConnectionQueueItem(*i));
+		removedDownloadTokens[i->getToken()] = GET_TICK();
+		tokens.erase(i->getToken());
+		downloads.erase(i);
+	}
+}
+
+void ConnectionManager::onDownloadIdle(const UserConnection& connection) {
+	unique_ptr<ConnectionQueueItem> removed;
+	{
+		Lock l(cs);
+		auto i = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
+			return cqi.getToken() == connection.getToken();
+		});
+		if(i == downloads.end()) {
+			return;
+		}
+		i->setRunning(false);
+		removeExtraMCN(*i, removed);
+	}
+	if(removed) {
+		fire(ConnectionManagerListener::Removed(), removed.get());
 	}
 }
 
@@ -281,6 +304,10 @@ void ConnectionManager::putCQI(ConnectionQueueItem& cqi) {
 		[&cqi](const ConnectionQueueItem& item) { return &item == &cqi; });
 	dcassert(i != container.end());
 	if(i != container.end()) {
+		if(cqi.getType() == CONNECTION_TYPE_DOWNLOAD) {
+			removedDownloadTokens[cqi.getToken()] = GET_TICK();
+			tokens.erase(cqi.getToken());
+		}
 		container.erase(i);
 	}
 }
@@ -347,13 +374,33 @@ void ConnectionManager::on(TimerManagerListener::Second, uint64_t aTick) noexcep
 		const bool shouldAttempt = current.getLastAttempt() == 0 || (!attemptDone &&
 			current.getLastAttempt() + 60 * 1000 * max(1, current.getErrors()) < aTick);
 		if(shouldAttempt) {
-			const auto prio = QueueManager::getInstance()->hasDownload(current.getUser());
+			auto downloadType = current.getDownloadType();
+			auto prio = QueueManager::getInstance()->hasDownload(current.getUser(), downloadType);
+			if(prio == QueueItem::PAUSED && downloadType == MCNDownloadType::SMALL) {
+				const bool onlyConnection = std::none_of(snapshot.begin(), snapshot.end(), [&](const ConnectionQueueItem& other) {
+					return other.getToken() != current.getToken() && other.getUser() == current.getUser().user;
+				});
+				if(onlyConnection) {
+					prio = QueueManager::getInstance()->hasDownload(current.getUser(), MCNDownloadType::ANY);
+					if(prio != QueueItem::PAUSED) {
+						downloadType = MCNDownloadType::ANY;
+						Lock l(cs);
+						auto i = std::find_if(downloads.begin(), downloads.end(), [&](const ConnectionQueueItem& cqi) {
+							return cqi.getToken() == current.getToken();
+						});
+						if(i != downloads.end()) {
+							i->setDownloadType(downloadType);
+						}
+					}
+				}
+			}
 			if(prio == QueueItem::PAUSED) {
 				removed.push_back(current.getToken());
 				continue;
 			}
 
-			const bool startDown = DownloadManager::getInstance()->startDownload(prio);
+			const bool startDown = DownloadManager::getInstance()->startDownload(prio,
+				downloadType == MCNDownloadType::SMALL);
 			ConnectionQueueItem eventItem = current;
 			bool statusChanged = false;
 			bool failedNoSlots = false;
@@ -424,6 +471,8 @@ void ConnectionManager::on(TimerManagerListener::Second, uint64_t aTick) noexcep
 			});
 			if(i != downloads.end()) {
 				eventItem.reset(new ConnectionQueueItem(*i));
+				removedDownloadTokens[i->getToken()] = aTick;
+				tokens.erase(i->getToken());
 				downloads.erase(i);
 			}
 		}
@@ -444,6 +493,14 @@ void ConnectionManager::on(TimerManagerListener::Minute, uint64_t aTick) noexcep
 		for(auto i = incomingFlood.begin(); i != incomingFlood.end();) {
 			if(i->second.windowStart + 60 * 1000 < aTick) {
 				i = incomingFlood.erase(i);
+			} else {
+				++i;
+			}
+		}
+
+		for(auto i = removedDownloadTokens.begin(); i != removedDownloadTokens.end();) {
+			if(i->second + 90 * 1000 < aTick) {
+				i = removedDownloadTokens.erase(i);
 			} else {
 				++i;
 			}
@@ -899,6 +956,18 @@ void ConnectionManager::addDownloadConnection(UserConnection* uc) {
 			auto& cqi = *i;
 
 			if(cqi.getState() == ConnectionQueueItem::WAITING || cqi.getState() == ConnectionQueueItem::CONNECTING) {
+				if(uc->isMCN()) {
+					cqi.setMCN(true);
+					cqi.setMaxRemoteConnections(uc->getMaxRemoteConnections());
+					if(cqi.getDownloadType() == MCNDownloadType::SMALL) {
+						uc->setFlag(UserConnection::FLAG_MCN_SMALL);
+					} else {
+						cqi.setDownloadType(MCNDownloadType::NORMAL);
+						uc->setFlag(UserConnection::FLAG_MCN_NORMAL);
+					}
+				} else {
+					cqi.setDownloadType(MCNDownloadType::ANY);
+				}
 				cqi.setState(ConnectionQueueItem::ACTIVE);
 				uc->setFlag(UserConnection::FLAG_ASSOCIATED);
 
@@ -932,7 +1001,7 @@ void ConnectionManager::addNewConnection(UserConnection* uc, ConnectionType type
 		const auto userConnections = multiple ? std::count_if(container.begin(), container.end(), [&](const ConnectionQueueItem& cqi) {
 			return cqi.getUser() == uc->getUser();
 		}) : 0;
-		if(i == container.end() && (!multiple || userConnections < std::max(1, SETTING(MAX_MCN_UPLOADS)))) {
+		if(i == container.end() && (!multiple || userConnections < std::max(1, SETTING(MAX_MCN_UPLOADS)) + 1)) {
 			const bool syncQueueToken = type == CONNECTION_TYPE_UPLOAD || type == CONNECTION_TYPE_PM;
 			const auto queueToken = type == CONNECTION_TYPE_UPLOAD ? uc->getToken() :
 				type == CONNECTION_TYPE_PM ? "CCPM-" + std::to_string(++nextPMConnectionId) :
@@ -1032,7 +1101,7 @@ void ConnectionManager::on(AdcCommand::INF, UserConnection* aSource, const AdcCo
 	if(aSource->isMCN()) {
 		string connections;
 		if(cmd.getParam("CO", 0, connections)) {
-			aSource->setMaxRemoteConnections(std::max(1, std::min(100, Util::toInt(connections))));
+			aSource->setMaxRemoteConnections(MCN::normalizeRemoteLimit(Util::toInt(connections)));
 		}
 	}
 
@@ -1072,6 +1141,12 @@ void ConnectionManager::on(AdcCommand::INF, UserConnection* aSource, const AdcCo
 	}
 
 	const bool downloadRequested = type == CONNECTION_TYPE_DOWNLOAD || checkDownload(aSource);
+	if(!downloadRequested && wasRemovedDownload(aSource->getToken())) {
+		// A late outgoing handshake must not be reclassified as an unsolicited
+		// upload after its download queue item was removed.
+		aSource->disconnect(true);
+		return;
+	}
 
 	if(downloadRequested && cmd.hasFlag("PM", 0)) {
 		aSource->send(AdcCommand(AdcCommand::SEV_FATAL, AdcCommand::ERROR_INF_FIELD, "INF PM: invalid token type").addParam("FB", "PM"));
@@ -1150,6 +1225,11 @@ bool ConnectionManager::checkDownload(const UserConnection* uc) const {
 	return false;
 }
 
+bool ConnectionManager::wasRemovedDownload(const string& token) const {
+	Lock l(cs);
+	return removedDownloadTokens.find(token) != removedDownloadTokens.end();
+}
+
 void ConnectionManager::failed(UserConnection* aSource, const string& aError, bool protocolError) {
 	unique_ptr<ConnectionQueueItem> failedEvent;
 	unique_ptr<ConnectionQueueItem> removedEvent;
@@ -1168,9 +1248,11 @@ void ConnectionManager::failed(UserConnection* aSource, const string& aError, bo
 				if(i != downloads.end()) {
 					auto& cqi = *i;
 					cqi.setState(ConnectionQueueItem::WAITING);
+					cqi.setRunning(false);
 					cqi.setLastAttempt(GET_TICK());
 					cqi.setErrors(protocolError ? -1 : (cqi.getErrors() + 1));
 					failedEvent.reset(new ConnectionQueueItem(cqi));
+					removeExtraMCN(cqi, removedEvent);
 				}
 			} else {
 				auto type = aSource->isSet(UserConnection::FLAG_UPLOAD) ? CONNECTION_TYPE_UPLOAD :
@@ -1267,6 +1349,27 @@ void ConnectionManager::disconnectUploads(const string& hubUrl) {
 		if(connection->isSet(UserConnection::FLAG_UPLOAD) && Util::stricmp(connection->getHubUrl(), hubUrl) == 0) {
 			connection->disconnect(true);
 		}
+	}
+}
+
+void ConnectionManager::disconnectExtraMCNUpload(const UserPtr& user, const UserConnection* except) {
+	Lock l(cs);
+	UserConnection* candidate = nullptr;
+	int regularConnections = 0;
+	for(auto connection: userConnections) {
+		if(connection->getUser() != user ||
+			!connection->isSet(UserConnection::FLAG_UPLOAD) || !connection->isMCN() ||
+			!connection->isMCNNormal() || !connection->isSet(UserConnection::FLAG_HASSLOT))
+		{
+			continue;
+		}
+		++regularConnections;
+		if(connection != except && (!candidate || connection->getState() == UserConnection::STATE_GET)) {
+			candidate = connection;
+		}
+	}
+	if(candidate && regularConnections > 1) {
+		candidate->disconnect(true);
 	}
 }
 

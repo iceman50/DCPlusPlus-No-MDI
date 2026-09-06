@@ -38,7 +38,7 @@
 
 namespace dcpp {
 
-UploadManager::UploadManager() noexcept : running(0), extra(0), lastGrant(0), lastFreeSlots(-1) {
+UploadManager::UploadManager() noexcept : running(0), extra(0), mcnConnections(0), lastGrant(0), lastFreeSlots(-1) {
 	ClientManager::getInstance()->addListener(this);
 	TimerManager::getInstance()->addListener(this);
 }
@@ -141,17 +141,65 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 		return false;
 	}
 
+	// MCN1 assigns a permanent purpose to each connection based on its first
+	// transfer. Partial lists and files below 64 KiB use the dedicated priority
+	// connection; full lists, trees and larger files use regular connections.
+	const bool mcnSmallTransfer = type == Transfer::TYPE_PARTIAL_LIST ||
+		(type == Transfer::TYPE_FILE && expectedFileSize >= 0 && expectedFileSize < MCN::SMALL_FILE_LIMIT);
+	bool mcnSmallConnection = false;
+	if(aSource.isMCN()) {
+		bool invalidRole = false;
+		{
+			Lock l(cs);
+			if(mcnSmallTransfer) {
+				if(aSource.isMCNNormal()) {
+					invalidRole = true;
+				} else if(!aSource.isMCNSmall()) {
+					if(!mcnSmallUsers.insert(aSource.getUser()).second) {
+						invalidRole = true;
+					} else {
+						aSource.setFlag(UserConnection::FLAG_MCN_SMALL);
+					}
+				}
+			} else {
+				if(aSource.isMCNSmall()) {
+					invalidRole = true;
+				} else if(!aSource.isMCNNormal()) {
+					aSource.setFlag(UserConnection::FLAG_MCN_NORMAL);
+				}
+			}
+			mcnSmallConnection = aSource.isMCNSmall();
+		}
+
+		if(invalidRole) {
+			aSource.send(AdcCommand(AdcCommand::SEV_FATAL, AdcCommand::ERROR_PROTOCOL_GENERIC,
+				"MCN connection used for an invalid transfer type"));
+			aSource.disconnect(true);
+			return false;
+		}
+	}
+
 	/* let's see if a slot is available to serve the upload. */
 
 	bool extraSlot = false;
 	bool gotFullSlot = false;
+	bool additionalMCNSlot = false;
+	bool grantedRegularSlot = false;
 
-	if(!aSource.isSet(UserConnection::FLAG_HASSLOT)) {
+	if(!mcnSmallConnection && !aSource.isSet(UserConnection::FLAG_HASSLOT)) {
+		additionalMCNSlot = aSource.isMCN() && isUploadingMCN(aSource.getUser());
+		if(additionalMCNSlot && !allowNewMultiConn(aSource.getUser())) {
+			// Refusing surplus MCN sockets silently avoids placing an already
+			// uploading user in the normal slot queue.
+			aSource.disconnect(true);
+			return false;
+		}
+
 		bool hasReserved = hasReservedSlot(aSource.getUser());
 		bool isFavorite = FavoriteManager::getInstance()->hasSlot(aSource.getUser());
 		bool hasFreeSlot = [&]() -> bool { Lock l(cs); return (getFreeSlots() > 0) && ((waitingFiles.empty() && connectingUsers.empty()) || isConnecting(aSource.getUser())); }();
 
-		if(!(hasReserved || isFavorite || getAutoSlot() || hasFreeSlot)) {
+		if(!(additionalMCNSlot || hasReserved || isFavorite || getAutoSlot() || hasFreeSlot)) {
 			bool supportsMini = aSource.isSet(UserConnection::FLAG_SUPPORTS_MINISLOTS);
 			bool allowedMini = aSource.isSet(UserConnection::FLAG_HASEXTRASLOT) || aSource.isSet(UserConnection::FLAG_OP) || getFreeExtraSlots() > 0;
 			if(miniSlot && supportsMini && allowedMini) {
@@ -363,48 +411,63 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 		return false;
 	}
 
-	Lock l(cs);
+	{
+		Lock l(cs);
 
-	Upload* u = new Upload(aSource, sourceFile, TTHValue());
-	u->setStream(is);
-	u->setSegment(Segment(start, size));
-	if(fullSize >= 0 && (start != 0 || size != fullSize)) {
-		u->setFlag(Upload::FLAG_CHUNKED);
-	}
-
-	u->setType(type);
-
-	uploads.push_back(u);
-
-	/* the upload is all set. update slot counts if the user just gained a slot. */
-
-	if(!aSource.isSet(UserConnection::FLAG_HASSLOT)) {
-		lastGrant = GET_TICK();
-
-		if(extraSlot) {
-			if(!aSource.isSet(UserConnection::FLAG_HASEXTRASLOT)) {
-				aSource.setFlag(UserConnection::FLAG_HASEXTRASLOT);
-				extra++;
-			}
-		} else {
-			if(aSource.isSet(UserConnection::FLAG_HASEXTRASLOT)) {
-				aSource.unsetFlag(UserConnection::FLAG_HASEXTRASLOT);
-				extra--;
-			}
-			aSource.setFlag(UserConnection::FLAG_HASSLOT);
-			running++;
+		Upload* u = new Upload(aSource, sourceFile, TTHValue());
+		u->setStream(is);
+		u->setSegment(Segment(start, size));
+		if(fullSize >= 0 && (start != 0 || size != fullSize)) {
+			u->setFlag(Upload::FLAG_CHUNKED);
 		}
 
-		reservedSlots.erase(aSource.getUser());
+		u->setType(type);
+		uploads.push_back(u);
 
-		if(gotFullSlot) {
-			clearUserFiles(aSource.getUser());	// this user is using a full slot, nix them.
+		/* the upload is all set. update slot counts if the user just gained a slot. */
+		if(!mcnSmallConnection && !aSource.isSet(UserConnection::FLAG_HASSLOT)) {
+			lastGrant = GET_TICK();
 
-			// remove user from connecting list
-			auto cu = connectingUsers.find(aSource.getUser());
-			if(cu != connectingUsers.end()) {
-				connectingUsers.erase(cu);
+			if(extraSlot) {
+				if(!aSource.isSet(UserConnection::FLAG_HASEXTRASLOT)) {
+					aSource.setFlag(UserConnection::FLAG_HASEXTRASLOT);
+					extra++;
+				}
+			} else {
+				if(aSource.isSet(UserConnection::FLAG_HASEXTRASLOT)) {
+					aSource.unsetFlag(UserConnection::FLAG_HASEXTRASLOT);
+					extra--;
+				}
+				aSource.setFlag(UserConnection::FLAG_HASSLOT);
+				grantedRegularSlot = true;
+				if(aSource.isMCN()) {
+					addMCNSlot(aSource.getUser());
+				} else {
+					running++;
+				}
 			}
+
+			reservedSlots.erase(aSource.getUser());
+
+			if(gotFullSlot) {
+				clearUserFiles(aSource.getUser());	// this user is using a full slot, nix them.
+
+				// remove user from connecting list
+				auto cu = connectingUsers.find(aSource.getUser());
+				if(cu != connectingUsers.end()) {
+					connectingUsers.erase(cu);
+				}
+			}
+		}
+	}
+
+	// A newly admitted user may make the physical connection total exceed the
+	// regular slot count. Rebalance by dropping one connection from the most
+	// overrepresented MCN uploader (never its only connection).
+	if(grantedRegularSlot) {
+		auto rebalanceUser = getMCNRebalanceUser(aSource.isMCN() ? aSource.getUser() : UserPtr());
+		if(rebalanceUser) {
+			ConnectionManager::getInstance()->disconnectExtraMCNUpload(rebalanceUser, &aSource);
 		}
 	}
 
@@ -429,6 +492,83 @@ bool UploadManager::getAutoSlot() {
 		return false;
 	/** Grant if upload speed is less than the threshold speed */
 	return getRunningAverage() < (SETTING(MIN_UPLOAD_SPEED)*1024);
+}
+
+bool UploadManager::isUploadingMCN(const UserPtr& user) const {
+	Lock l(cs);
+	return multiUploads.find(user) != multiUploads.end();
+}
+
+bool UploadManager::allowNewMultiConn(const UserPtr& user) const {
+	Lock l(cs);
+	auto current = multiUploads.find(user);
+	if(current == multiUploads.end()) {
+		return getFreeSlots() > 0;
+	}
+
+	int highestOther = 0;
+	for(const auto& item: multiUploads) {
+		if(item.first != user) {
+			highestOther = std::max(highestOther, item.second);
+		}
+	}
+
+	const bool queuedUsers = !waitingUsers.empty() ||
+		(!connectingUsers.empty() && connectingUsers.find(user) == connectingUsers.end());
+	return MCN::allowNewRegularConnection(current->second, highestOther,
+		MCN::freeRegularConnections(SETTING(SLOTS), running, mcnConnections,
+			static_cast<int>(multiUploads.size())),
+		queuedUsers, std::max(1, SETTING(MAX_MCN_UPLOADS)));
+}
+
+void UploadManager::addMCNSlot(const UserPtr& user) {
+	auto i = multiUploads.find(user);
+	if(i == multiUploads.end()) {
+		multiUploads[user] = 1;
+		running++;
+	} else {
+		++i->second;
+	}
+	++mcnConnections;
+}
+
+void UploadManager::removeMCNSlot(const UserPtr& user) {
+	auto i = multiUploads.find(user);
+	if(i == multiUploads.end()) {
+		return;
+	}
+
+	i->second = std::max(i->second - 1, 0);
+	mcnConnections = std::max(mcnConnections - 1, 0);
+	if(i->second == 0) {
+		multiUploads.erase(i);
+		running = std::max(running - 1, 0);
+	}
+}
+
+UserPtr UploadManager::getMCNRebalanceUser(const UserPtr& newlyGrantedUser) const {
+	Lock l(cs);
+	if(MCN::freeRegularConnections(SETTING(SLOTS), running, mcnConnections,
+		static_cast<int>(multiUploads.size())) >= 0)
+	{
+		return UserPtr();
+	}
+
+	auto highest = multiUploads.end();
+	for(auto i = multiUploads.begin(); i != multiUploads.end(); ++i) {
+		if(i->first != newlyGrantedUser && i->second > 1 &&
+			(highest == multiUploads.end() || i->second > highest->second))
+		{
+			highest = i;
+		}
+	}
+	if(highest == multiUploads.end()) {
+		auto own = multiUploads.find(newlyGrantedUser);
+		if(own != multiUploads.end() && own->second > 1) {
+			highest = own;
+		}
+	}
+	return highest != multiUploads.end() ? highest->first : UserPtr();
 }
 
 void UploadManager::removeUpload(Upload* aUpload) {
@@ -631,12 +771,19 @@ void UploadManager::removeConnection(UserConnection* aSource) {
 	aSource->removeListener(this);
 	Lock l(cs);
 	if(aSource->isSet(UserConnection::FLAG_HASSLOT)) {
-		running = std::max(running - 1, 0);
+		if(aSource->isMCN()) {
+			removeMCNSlot(aSource->getUser());
+		} else {
+			running = std::max(running - 1, 0);
+		}
 		aSource->unsetFlag(UserConnection::FLAG_HASSLOT);
 	}
 	if(aSource->isSet(UserConnection::FLAG_HASEXTRASLOT)) {
 		extra = std::max(extra - 1, 0);
 		aSource->unsetFlag(UserConnection::FLAG_HASEXTRASLOT);
+	}
+	if(aSource->isMCNSmall()) {
+		mcnSmallUsers.erase(aSource->getUser());
 	}
 }
 

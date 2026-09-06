@@ -229,9 +229,9 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		auto group = transferGrid->addChild(GroupBox::Seed(T_("Multi-connection transfers (MCN)")));
 		auto cur = group->addChild(Grid::Seed(2, 1));
 		cur->column(0).mode = GridInfo::FILL;
-		addIntItem(cur, T_("Maximum download connections per user"), SettingsManager::MAX_MCN_DOWNLOADS,
+		addIntItem(cur, T_("Maximum regular download connections per user"), SettingsManager::MAX_MCN_DOWNLOADS,
 			IDH_SETTINGS_EXPERIMENTAL_MCN_DOWNLOADS, T_("connections"), 1, 100);
-		addIntItem(cur, T_("Maximum upload connections per user"), SettingsManager::MAX_MCN_UPLOADS,
+		addIntItem(cur, T_("Maximum regular upload connections per user"), SettingsManager::MAX_MCN_UPLOADS,
 			IDH_SETTINGS_EXPERIMENTAL_MCN_UPLOADS, T_("connections"), 1, 100);
 	}
 

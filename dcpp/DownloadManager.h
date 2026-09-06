@@ -42,7 +42,7 @@ public:
 
 	/** @internal */
 	void addConnection(UserConnectionPtr conn);
-	void checkIdle(const HintedUser& user, bool singleConnection = false);
+	bool checkIdle(const HintedUser& user, bool smallSlot = false);
 
 	/** @return Running average download speed in Bytes/s */
 	int64_t getRunningAverage();
@@ -53,7 +53,7 @@ public:
 		return downloads.size();
 	}
 
-	bool startDownload(QueueItem::Priority prio);
+	bool startDownload(QueueItem::Priority prio, bool smallSlot = false);
 	
 private:
 	

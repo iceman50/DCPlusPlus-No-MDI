@@ -24,6 +24,7 @@
 #include "User.h"
 #include "FastAlloc.h"
 #include "MerkleTree.h"
+#include "MCN.h"
 #include "Flags.h"
 #include "forward.h"
 #include "Segment.h"
@@ -185,6 +186,15 @@ public:
 	}
 	bool isWaiting() const {
 		return downloads.empty();
+	}
+	/** Whether this item belongs on MCN1's dedicated priority connection. */
+	bool usesMCNSmallSlot() const {
+		return isSet(FLAG_PARTIAL_LIST) ||
+			(!isSet(FLAG_USER_LIST) && size >= 0 && size < MCN::SMALL_FILE_LIMIT);
+	}
+	bool matchesMCNDownloadType(MCNDownloadType type) const {
+		return type == MCNDownloadType::ANY ||
+			(type == MCNDownloadType::SMALL) == usesMCNSmallSlot();
 	}
 
 	string getListName() const;

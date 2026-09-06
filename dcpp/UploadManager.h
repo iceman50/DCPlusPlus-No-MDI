@@ -95,7 +95,13 @@ private:
 	mutable CriticalSection cs;
 	int running;
 	int extra;
+	int mcnConnections;
 	uint64_t lastGrant;
+
+	typedef unordered_map<UserPtr, int, User::Hash> MultiUploadMap;
+	MultiUploadMap multiUploads;
+	typedef unordered_set<UserPtr, User::Hash> UserSet;
+	UserSet mcnSmallUsers;
 
 	typedef unordered_set<UserPtr, User::Hash> SlotSet;
 	typedef SlotSet::iterator SlotIter;
@@ -121,6 +127,11 @@ private:
 
 	bool hasReservedSlot(const UserPtr& user) const;
 	bool getAutoSlot();
+	bool isUploadingMCN(const UserPtr& user) const;
+	bool allowNewMultiConn(const UserPtr& user) const;
+	void addMCNSlot(const UserPtr& user);
+	void removeMCNSlot(const UserPtr& user);
+	UserPtr getMCNRebalanceUser(const UserPtr& newlyGrantedUser) const;
 	void removeConnection(UserConnection* aConn);
 	void removeUpload(Upload* aUpload);
 

@@ -7,6 +7,7 @@
 #include <dcpp/File.h>
 #include <dcpp/HintedUser.h>
 #include <dcpp/LogManager.h>
+#include <dcpp/MCN.h>
 #include <dcpp/QueueManager.h>
 #include <dcpp/SearchManager.h>
 #include <dcpp/SettingsManager.h>
@@ -80,6 +81,37 @@ TEST(testhinteduser, keeps_user_identity_independent_of_the_route)
 	UserPtr user(new User(CID()));
 
 	EXPECT_TRUE(HintedUser(user, "adc://one.example") == HintedUser(user, "adc://two.example"));
+}
+
+TEST(testhinteduser, mcn_limits_preserve_unlimited_co_and_fair_connection_growth)
+{
+	EXPECT_EQ(0, MCN::normalizeRemoteLimit(0));
+	EXPECT_EQ(0, MCN::normalizeRemoteLimit(-1));
+	EXPECT_EQ(100, MCN::normalizeRemoteLimit(101));
+	EXPECT_EQ(4, MCN::effectiveDownloadLimit(4, 0));
+	EXPECT_EQ(2, MCN::effectiveDownloadLimit(4, 2));
+
+	EXPECT_EQ(-1, MCN::freeRegularConnections(3, 2, 3, 1));
+	EXPECT_TRUE(MCN::allowNewRegularConnection(1, 2, 0, false, 4));
+	EXPECT_FALSE(MCN::allowNewRegularConnection(2, 2, 0, false, 4));
+	EXPECT_FALSE(MCN::allowNewRegularConnection(1, 2, 1, true, 4));
+	EXPECT_FALSE(MCN::allowNewRegularConnection(4, 4, 1, false, 4));
+}
+
+TEST(testhinteduser, mcn_priority_lane_accepts_only_partial_lists_and_small_files)
+{
+	QueueItem partial("partial", -1, QueueItem::DEFAULT, QueueItem::FLAG_USER_LIST | QueueItem::FLAG_PARTIAL_LIST,
+		GET_TIME(), TTHValue());
+	QueueItem full("full", -1, QueueItem::DEFAULT, QueueItem::FLAG_USER_LIST, GET_TIME(), TTHValue());
+	QueueItem small("small", MCN::SMALL_FILE_LIMIT - 1, QueueItem::DEFAULT, 0, GET_TIME(), TTHValue());
+	QueueItem boundary("boundary", MCN::SMALL_FILE_LIMIT, QueueItem::DEFAULT, 0, GET_TIME(), TTHValue());
+
+	EXPECT_TRUE(partial.matchesMCNDownloadType(MCNDownloadType::SMALL));
+	EXPECT_FALSE(partial.matchesMCNDownloadType(MCNDownloadType::NORMAL));
+	EXPECT_FALSE(full.matchesMCNDownloadType(MCNDownloadType::SMALL));
+	EXPECT_TRUE(full.matchesMCNDownloadType(MCNDownloadType::NORMAL));
+	EXPECT_TRUE(small.matchesMCNDownloadType(MCNDownloadType::SMALL));
+	EXPECT_FALSE(boundary.matchesMCNDownloadType(MCNDownloadType::SMALL));
 }
 
 TEST_F(HubHintQueueTest, replaces_the_route_for_a_hub_specific_file_list)
@@ -233,7 +265,7 @@ TEST_F(HubHintQueueTest, nmdc_directory_downloads_keep_the_full_list_path)
 	queue->remove(listTarget);
 }
 
-TEST_F(HubHintQueueTest, an_existing_full_list_remains_full_when_a_directory_request_is_merged)
+TEST_F(HubHintQueueTest, a_partial_directory_list_stays_independent_from_an_existing_full_list)
 {
 	uint8_t cidData[CID::SIZE] = { 4 };
 	UserPtr user(new User(CID(cidData)));
@@ -243,20 +275,27 @@ TEST_F(HubHintQueueTest, an_existing_full_list_remains_full_when_a_directory_req
 	queue->addList(hintedUser, QueueItem::FLAG_CLIENT_VIEW);
 	queue->addDirectory("Share\\Nested\\", hintedUser, Util::getPath(Util::PATH_DOWNLOADS));
 
-	string listTarget;
+	StringList listTargets;
 	queue->lockedOperation([&](const QueueItem::StringMap& items) {
-		ASSERT_EQ(1U, items.size());
-		auto item = items.begin()->second;
-		listTarget = item->getTarget();
-		EXPECT_TRUE(item->isSet(QueueItem::FLAG_CLIENT_VIEW));
-		EXPECT_TRUE(item->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD));
-		EXPECT_FALSE(item->isSet(QueueItem::FLAG_PARTIAL_LIST));
-		EXPECT_FALSE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
+		ASSERT_EQ(2U, items.size());
+		for(const auto& entry: items) {
+			auto item = entry.second;
+			listTargets.push_back(item->getTarget());
+			if(item->isSet(QueueItem::FLAG_PARTIAL_LIST)) {
+				EXPECT_TRUE(item->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD));
+				EXPECT_TRUE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
+			} else {
+				EXPECT_TRUE(item->isSet(QueueItem::FLAG_CLIENT_VIEW));
+				EXPECT_FALSE(item->isSet(QueueItem::FLAG_DIRECTORY_DOWNLOAD));
+			}
+		}
 	});
-	queue->remove(listTarget);
+	for(const auto& target: listTargets) {
+		queue->remove(target);
+	}
 }
 
-TEST_F(HubHintQueueTest, a_waiting_partial_list_upgrades_when_a_full_list_purpose_is_merged)
+TEST_F(HubHintQueueTest, a_waiting_partial_list_stays_independent_from_a_full_list_purpose)
 {
 	uint8_t cidData[CID::SIZE] = { 5 };
 	UserPtr user(new User(CID(cidData)));
@@ -266,16 +305,22 @@ TEST_F(HubHintQueueTest, a_waiting_partial_list_upgrades_when_a_full_list_purpos
 	queue->addList(hintedUser, QueueItem::FLAG_CLIENT_VIEW | QueueItem::FLAG_PARTIAL_LIST, "Share\\");
 	queue->addList(hintedUser, QueueItem::FLAG_MATCH_QUEUE);
 
-	string listTarget;
+	StringList listTargets;
 	queue->lockedOperation([&](const QueueItem::StringMap& items) {
-		ASSERT_EQ(1U, items.size());
-		auto item = items.begin()->second;
-		listTarget = item->getTarget();
-		EXPECT_TRUE(item->isSet(QueueItem::FLAG_CLIENT_VIEW));
-		EXPECT_TRUE(item->isSet(QueueItem::FLAG_MATCH_QUEUE));
-		EXPECT_FALSE(item->isSet(QueueItem::FLAG_PARTIAL_LIST));
-		EXPECT_FALSE(item->isSet(QueueItem::FLAG_RECURSIVE_LIST));
-		EXPECT_FALSE(item->isSet(QueueItem::FLAG_DEFERRED_FULL_LIST));
+		ASSERT_EQ(2U, items.size());
+		for(const auto& entry: items) {
+			auto item = entry.second;
+			listTargets.push_back(item->getTarget());
+			if(item->isSet(QueueItem::FLAG_PARTIAL_LIST)) {
+				EXPECT_TRUE(item->isSet(QueueItem::FLAG_CLIENT_VIEW));
+				EXPECT_EQ("Share\\", item->getTempTarget());
+			} else {
+				EXPECT_TRUE(item->isSet(QueueItem::FLAG_MATCH_QUEUE));
+				EXPECT_FALSE(item->isSet(QueueItem::FLAG_CLIENT_VIEW));
+			}
+		}
 	});
-	queue->remove(listTarget);
+	for(const auto& target: listTargets) {
+		queue->remove(target);
+	}
 }

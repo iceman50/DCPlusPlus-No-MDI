@@ -29,6 +29,7 @@
 #include "HintedUser.h"
 #include "AdcCommand.h"
 #include "MerkleTree.h"
+#include "MCN.h"
 #include "PluginEntity.h"
 
 namespace dcpp {
@@ -90,7 +91,12 @@ public:
 		FLAG_SUPPORTS_TTHF = FLAG_SUPPORTS_TTHL << 1,
 		FLAG_SUPPORTS_CPMI = FLAG_SUPPORTS_TTHF << 1,
 		FLAG_SUPPORTS_MCN1 = FLAG_SUPPORTS_CPMI << 1,
-		FLAG_SUPPORTS_RTF0 = FLAG_SUPPORTS_MCN1 << 1
+		FLAG_SUPPORTS_RTF0 = FLAG_SUPPORTS_MCN1 << 1,
+
+		// MCN1 connection roles are inferred from the first transfer and may
+		// not be changed during the lifetime of the connection.
+		FLAG_MCN_SMALL = FLAG_SUPPORTS_RTF0 << 1,
+		FLAG_MCN_NORMAL = FLAG_MCN_SMALL << 1
 	};
 
 	enum States {
@@ -215,6 +221,12 @@ public:
 	bool supportsCPMI() const { return isSet(FLAG_SUPPORTS_CPMI); }
 	bool supportsRTF0() const { return isSet(FLAG_SUPPORTS_RTF0); }
 	bool isMCN() const { return isSet(FLAG_SUPPORTS_MCN1); }
+	bool isMCNSmall() const { return isSet(FLAG_MCN_SMALL); }
+	bool isMCNNormal() const { return isSet(FLAG_MCN_NORMAL); }
+	MCNDownloadType getMCNDownloadType() const {
+		return !isMCN() ? MCNDownloadType::ANY :
+			isMCNSmall() ? MCNDownloadType::SMALL : MCNDownloadType::NORMAL;
+	}
 
 	GETSET(string, hubUrl, HubUrl);
 	GETSET(string, token, Token);
@@ -244,7 +256,7 @@ private:
 	};
 
 	// We only want ConnectionManager to create this...
-	UserConnection(bool secure_) noexcept : encoding(Text::systemCharset), speed(0), maxRemoteConnections(1),
+	UserConnection(bool secure_) noexcept : encoding(Text::systemCharset), speed(0), maxRemoteConnections(0),
 		lastActivity(0), state(STATE_UNCONNECTED), chunkSize(0), socket(0), secure(secure_), download(NULL) {
 	}
 

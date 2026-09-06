@@ -129,7 +129,7 @@ public:
 	pair<size_t, int64_t> getQueued(const UserPtr& aUser) const;
 
 	/** @return The highest priority download the user has, PAUSED may also mean no downloads */
-	QueueItem::Priority hasDownload(const UserPtr& aUser) noexcept;
+	QueueItem::Priority hasDownload(const UserPtr& aUser, MCNDownloadType type = MCNDownloadType::ANY) noexcept;
 
 	int countOnlineSources(const string& aTarget);
 
@@ -241,7 +241,8 @@ private:
 		void add(QueueItem* qi);
 		void add(QueueItem* qi, const UserPtr& aUser);
 		QueueItem* getNext(const UserPtr& aUser, QueueItem::Priority minPrio = QueueItem::LOWEST,
-			int64_t wantedSize = 0, const string* hubUrl = nullptr);
+			int64_t wantedSize = 0, const string* hubUrl = nullptr,
+			MCNDownloadType type = MCNDownloadType::ANY);
 		QueueItem* getRunning(const UserPtr& aUser);
 		void addDownload(QueueItem* qi, Download* d);
 		void removeDownload(QueueItem* qi, Download* d);

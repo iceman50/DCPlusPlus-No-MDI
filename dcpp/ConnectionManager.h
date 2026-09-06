@@ -28,6 +28,7 @@
 #include "ConnectionType.h"
 #include "CriticalSection.h"
 #include "HintedUser.h"
+#include "MCN.h"
 #include "Singleton.h"
 #include "TimerManager.h"
 #include "UserConnectionListener.h"
@@ -56,6 +57,10 @@ public:
 	GETSET(int, errors, Errors); // Number of connection errors, or -1 after a protocol error
 	GETSET(State, state, State);
 	GETSET(ConnectionType, type, Type);
+	GETSET(MCNDownloadType, downloadType, DownloadType);
+	GETSET(bool, mcn, MCN);
+	GETSET(bool, running, Running);
+	GETSET(int, maxRemoteConnections, MaxRemoteConnections);
 
 	const HintedUser& getUser() const { return user; }
 
@@ -117,14 +122,15 @@ public:
 	void adcConnect(const OnlineUser& aUser, const string& aPort, const string& aToken, bool secure);
 	void adcConnect(const OnlineUser& aUser, const string& aPort, const string& localPort, BufferedSocket::NatRoles natRole, const string& aToken, bool secure);
 
-	void getDownloadConnection(const HintedUser& aUser, bool singleConnection = false);
+	void getDownloadConnection(const HintedUser& aUser, bool smallSlot = false);
 	void onDownloadStarted(const UserConnection& connection);
-	void onFileListDownloadStarted(const UserConnection& connection);
+	void onDownloadIdle(const UserConnection& connection);
 	void force(const UserPtr& aUser);
 
 	void disconnect(const UserPtr& user); // disconnect all transfers for the user
 	void disconnect(const UserPtr& user, ConnectionType type);
 	void disconnectUploads(const string& hubUrl);
+	void disconnectExtraMCNUpload(const UserPtr& user, const UserConnection* except = nullptr);
 	void disconnectAll(); // disconnect all transfers for all users
 
 	// Used when handing a parked CCPM connection to a newly registered
@@ -179,6 +185,7 @@ private:
 		string hubUrl;
 	};
 	unordered_map<string, TokenInfo> tokens;
+	unordered_map<string, uint64_t> removedDownloadTokens;
 	uint64_t nextPMConnectionId = 0;
 
 	ExpectedMap expectedConnections;
@@ -215,6 +222,9 @@ private:
 	bool checkKeyprint(UserConnection* aSource);
 	pair<bool, ConnectionType> checkToken(UserConnection* uc);
 	bool checkDownload(const UserConnection* uc) const;
+	bool wasRemovedDownload(const string& token) const;
+	bool allowNewMCN(const HintedUser& user, bool smallSlot) const;
+	void removeExtraMCN(ConnectionQueueItem& current, unique_ptr<ConnectionQueueItem>& removedEvent);
 
 	void failed(UserConnection* aSource, const string& aError, bool protocolError);
 

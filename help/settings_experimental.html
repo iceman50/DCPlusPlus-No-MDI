@@ -64,10 +64,12 @@ hashing, RTF0, defensive protocol, and application theme controls. The controls 
 
 <h2>Multi-connection transfers (MCN)</h2>
 <dl style="margin-left: 40px;">
-  <dt>Maximum download connections per user</dt>
-  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MCN_DOWNLOADS">Limits simultaneous ADC MCN1 download connections opened to one user. The remote limit is also respected, and segmented downloading plus MCN1 support are required.</dd>
-  <dt>Maximum upload connections per user</dt>
-  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MCN_UPLOADS">Limits simultaneous ADC MCN1 upload connections accepted from one user. This value is advertised to MCN1-capable peers and does not increase upload slots.</dd>
+  <dt>Maximum regular download connections per user</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MCN_DOWNLOADS">Limits simultaneous regular ADC MCN1 download connections opened to one user. The peer's <code>CO</code> limit is also respected; a missing <code>CO</code> field or <code>CO0</code> means that the peer has no separate per-user limit. Multiple connections can download different files, and may also download different segments when segmented downloading is enabled.</dd>
+  <dt>Maximum regular upload connections per user</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MCN_UPLOADS">Limits simultaneous regular ADC MCN1 upload connections accepted from one user. This value is advertised to MCN1-capable peers. Upload slots count unique regular upload users rather than their physical MCN connections, and excess connections are redistributed when another user needs a slot.</dd>
+  <dt>Priority connection</dt>
+  <dd>MCN1 automatically maintains one additional connection for partial file lists and files smaller than 64 KiB. It is outside both regular per-user connection limits and the normal upload/download slot totals. Its transfer role is fixed for the life of the connection; full file lists, file trees, and larger files remain on regular connections.</dd>
 </dl>
 
 <h2>Hashing and share database</h2>

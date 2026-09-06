@@ -103,20 +103,24 @@ void DownloadManager::on(TimerManagerListener::Second, uint64_t aTick) noexcept 
 	}
 }
 
-void DownloadManager::checkIdle(const HintedUser& user, bool singleConnection) {
+bool DownloadManager::checkIdle(const HintedUser& user, bool smallSlot) {
 	Lock l(cs);
+	bool revived = false;
 	for(auto uc: idlers) {
 		if(uc->getUser() == user.user &&
 			hubHintMatches(user.hint, uc->getHubUrl()))
 		{
+			if(uc->isMCN() && uc->isMCNSmall() != smallSlot) {
+				continue;
+			}
 			uc->callAsync([this, uc] { revive(uc); });
-			// File lists are indivisible transfers. Reusing more than one idle MCN
-			// connection merely creates redundant peer connections for the same list.
-			if(singleConnection || !uc->isMCN()) {
-				return;
+			revived = true;
+			if(smallSlot || !uc->isMCN()) {
+				break;
 			}
 		}
 	}
+	return revived;
 }
 
 void DownloadManager::revive(UserConnection* uc) {
@@ -144,7 +148,11 @@ void DownloadManager::addConnection(UserConnectionPtr conn) {
 	checkDownloads(conn);
 }
 
-bool DownloadManager::startDownload(QueueItem::Priority prio) {
+bool DownloadManager::startDownload(QueueItem::Priority prio, bool smallSlot) {
+	if(smallSlot) {
+		return prio != QueueItem::PAUSED;
+	}
+
 	size_t downloadCount = getDownloadCount();
 
 	bool full = (SETTING(DOWNLOAD_SLOTS) != 0) && (downloadCount >= (size_t)SETTING(DOWNLOAD_SLOTS));
@@ -168,8 +176,9 @@ bool DownloadManager::startDownload(QueueItem::Priority prio) {
 void DownloadManager::checkDownloads(UserConnection* aConn) {
 	dcassert(aConn->getDownload() == NULL);
 
-	QueueItem::Priority prio = QueueManager::getInstance()->hasDownload(aConn->getUser());
-	if(!startDownload(prio)) {
+	const auto downloadType = aConn->getMCNDownloadType();
+	QueueItem::Priority prio = QueueManager::getInstance()->hasDownload(aConn->getUser(), downloadType);
+	if(!startDownload(prio, downloadType == MCNDownloadType::SMALL)) {
 		removeConnection(aConn);
 		return;
 	}
@@ -177,9 +186,19 @@ void DownloadManager::checkDownloads(UserConnection* aConn) {
 	Download* d = QueueManager::getInstance()->getDownload(*aConn);
 
 	if(!d) {
-		Lock l(cs);
-		aConn->setState(UserConnection::STATE_IDLE);
-		idlers.push_back(aConn);
+		ConnectionManager::getInstance()->onDownloadIdle(*aConn);
+		{
+			Lock l(cs);
+			aConn->setState(UserConnection::STATE_IDLE);
+			idlers.push_back(aConn);
+		}
+		if(aConn->isMCN()) {
+			const bool nextSmall = !aConn->isMCNSmall();
+			const auto nextType = nextSmall ? MCNDownloadType::SMALL : MCNDownloadType::NORMAL;
+			if(QueueManager::getInstance()->hasDownload(aConn->getUser(), nextType) != QueueItem::PAUSED) {
+				ConnectionManager::getInstance()->getDownloadConnection(aConn->getHintedUser(), nextSmall);
+			}
+		}
 		return;
 	}
 
@@ -250,14 +269,7 @@ void DownloadManager::startData(UserConnection* aSource, int64_t start, int64_t 
 	d->setStart(GET_TICK());
 	d->tick();
 	aSource->setState(UserConnection::STATE_RUNNING);
-	// MCN segmentation is only meaningful for regular files. Starting another
-	// connection for a full/partial list makes both transfers target the same
-	// queue item (and full lists truncate the same file).
-	if(d->getType() == Transfer::TYPE_FILE) {
-		ConnectionManager::getInstance()->onDownloadStarted(*aSource);
-	} else if(d->getType() == Transfer::TYPE_FULL_LIST || d->getType() == Transfer::TYPE_PARTIAL_LIST) {
-		ConnectionManager::getInstance()->onFileListDownloadStarted(*aSource);
-	}
+	ConnectionManager::getInstance()->onDownloadStarted(*aSource);
 
 	fire(DownloadManagerListener::Starting(), d);
 
