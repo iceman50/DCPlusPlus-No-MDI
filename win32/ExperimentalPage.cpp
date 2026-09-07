@@ -15,6 +15,7 @@
 
 #include <dcpp/File.h>
 #include <dcpp/HashManager.h>
+#include <dcpp/LogManager.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/ShareManager.h>
 #include <dcpp/version.h>
@@ -297,6 +298,18 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 			IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES, T_("KiB"), 1, MAX_KIB_SETTING, BYTES_PER_KIB);
 	}
 
+	auto interfaceGrid = tabs->addPage(T_("Interface"), 1)->content();
+
+	{
+		auto group = interfaceGrid->addChild(GroupBox::Seed(T_("System Log")));
+		group->setHelpId(IDH_SETTINGS_EXPERIMENTAL_MAX_SYSTEM_LOG_ITEMS);
+		auto cur = group->addChild(Grid::Seed(1, 1));
+		cur->column(0).mode = GridInfo::FILL;
+		addIntItem(cur, T_("Maximum System Log items"), SettingsManager::MAX_SYSTEM_LOG_ITEMS,
+			IDH_SETTINGS_EXPERIMENTAL_MAX_SYSTEM_LOG_ITEMS, T_("messages"),
+			LogManager::MIN_HISTORY_ITEMS, LogManager::MAX_HISTORY_ITEMS);
+	}
+
 	auto themeGrid = tabs->addPage(T_("Theme"), 3)->content();
 
 	{
@@ -394,6 +407,11 @@ void ExperimentalPage::write() {
 	clamp(SettingsManager::MAX_PARTIAL_LIST_BYTES, 1024);
 	clamp(SettingsManager::CHAT_LINK_MAX_LENGTH, 1);
 	clamp(SettingsManager::RICH_TEXT_MAX_SIZE, 1024);
+	const auto systemLogItems = settings->get(SettingsManager::MAX_SYSTEM_LOG_ITEMS);
+	if(systemLogItems < LogManager::MIN_HISTORY_ITEMS || systemLogItems > LogManager::MAX_HISTORY_ITEMS) {
+		settings->set(SettingsManager::MAX_SYSTEM_LOG_ITEMS, std::clamp(systemLogItems,
+			static_cast<int>(LogManager::MIN_HISTORY_ITEMS), static_cast<int>(LogManager::MAX_HISTORY_ITEMS)));
+	}
 }
 
 void ExperimentalPage::addThemeColor(GridPtr target, const tstring& text, int setting) {

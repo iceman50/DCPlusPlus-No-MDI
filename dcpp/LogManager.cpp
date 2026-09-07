@@ -38,15 +38,24 @@ void LogManager::message(const string& msg, LogMessage::Severity severity, const
 	}
 	{
 		Lock l(cs);
-		// Keep the last 100 messages (completely arbitrary number...)
-		while(lastLogs.size() >= 100)
+		const auto limit = getHistoryLimit();
+		while(lastLogs.size() >= limit)
 			lastLogs.pop_front();
 		lastLogs.push_back(messageData);
 	}
 	fire(LogManagerListener::Message(), messageData);
 }
+
+size_t LogManager::getHistoryLimit() noexcept {
+	return static_cast<size_t>(std::clamp(SETTING(MAX_SYSTEM_LOG_ITEMS),
+		static_cast<int>(MIN_HISTORY_ITEMS), static_cast<int>(MAX_HISTORY_ITEMS)));
+}
+
 LogManager::List LogManager::getLastLogs() {
 	Lock l(cs);
+	const auto limit = getHistoryLimit();
+	while(lastLogs.size() > limit)
+		lastLogs.pop_front();
 	return lastLogs;
 }
 

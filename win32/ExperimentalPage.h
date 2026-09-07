@@ -16,7 +16,7 @@
 #include "PropPage.h"
 #include "ThemeManager.h"
 
-/** Experimental sharing, hashing, MCN, RTF0 and defensive protocol controls. */
+/** Experimental sharing, hashing, MCN, RTF0, interface and defensive protocol controls. */
 class ExperimentalPage : public PropPage
 {
 public:

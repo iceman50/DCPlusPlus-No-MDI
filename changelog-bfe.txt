@@ -12,6 +12,7 @@
 * Update version.xml to use its own experimental feed (https://dcplusplus.sourceforge.io/version_exp.xml) (iceman50)
 * Fix MiniUPnP socket timeouts on Windows being interpreted as milliseconds instead of timeval seconds (iceman50)
 * Harden starred NMDC status frames against client manipulation (iceman50)
+* Prevent System Log stalls by batching RichEdit updates, preserve severity colors for timestamps, and make its retained message limit configurable (iceman50)
 * Fix TransferView progress bars occasionally stopping until their row is clicked (https://github.com/iceman50/DCPlusPlus-No-MDI/issues/3) (iceman50)
 * Track individual TransferView updates and redraw only affected visible rows while safely handling sorting, grouping and removal (iceman50)
 * Restore startup performance with large download queues by building the queued-file TTH index only when first needed (https://github.com/iceman50/DCPlusPlus-No-MDI/issues/2) (iceman50)

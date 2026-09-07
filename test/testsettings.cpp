@@ -1,6 +1,7 @@
 #include "testbase.h"
 
 #include <dcpp/File.h>
+#include <dcpp/LogManager.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/Util.h>
 
@@ -44,4 +45,19 @@ TEST_F(SettingsMigrationTest, repairs_values_truncated_by_experimental_page_spin
 	EXPECT_EQ(32767, settings->get(SettingsManager::MAX_SUDP_PACKET));
 
 	File::deleteFile(path);
+}
+
+TEST_F(SettingsMigrationTest, bounds_system_log_history_setting)
+{
+	auto settings = SettingsManager::getInstance();
+	EXPECT_EQ(size_t(100), LogManager::getHistoryLimit());
+
+	settings->set(SettingsManager::MAX_SYSTEM_LOG_ITEMS, 0);
+	EXPECT_EQ(size_t(LogManager::MIN_HISTORY_ITEMS), LogManager::getHistoryLimit());
+
+	settings->set(SettingsManager::MAX_SYSTEM_LOG_ITEMS, LogManager::MAX_HISTORY_ITEMS + 1);
+	EXPECT_EQ(size_t(LogManager::MAX_HISTORY_ITEMS), LogManager::getHistoryLimit());
+
+	settings->set(SettingsManager::MAX_SYSTEM_LOG_ITEMS, 250);
+	EXPECT_EQ(size_t(250), LogManager::getHistoryLimit());
 }

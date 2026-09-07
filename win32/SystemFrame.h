@@ -20,7 +20,10 @@
 
 #include <dcpp/LogManagerListener.h>
 
+#include <atomic>
 #include <deque>
+#include <memory>
+#include <mutex>
 
 #include "StaticFrame.h"
 
@@ -44,6 +47,10 @@ private:
 
 	RichTextBoxPtr log;
 	std::deque<LogMessagePtr> messages;
+	std::mutex pendingMessagesMutex;
+	std::deque<LogMessagePtr> pendingMessages;
+	bool logFlushScheduled;
+	std::shared_ptr<std::atomic_bool> logAlive;
 
 	SystemFrame(TabViewPtr parent);
 	virtual ~SystemFrame();
@@ -51,7 +58,8 @@ private:
 	void layout();
 	bool preClosing();
 
-	void addLine(const LogMessagePtr& message, bool remember = true);
+	void addLines(const std::deque<LogMessagePtr>& batch, bool remember = true);
+	void flushLog();
 	void refreshLog();
 	void openFile(const string& path) const;
 

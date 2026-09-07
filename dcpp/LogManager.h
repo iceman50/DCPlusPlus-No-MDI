@@ -38,10 +38,12 @@ public:
 
 	enum Area { CHAT, PM, DOWNLOAD, FINISHED_DOWNLOAD, UPLOAD, SYSTEM, STATUS, LAST };
 	enum { FILE, FORMAT };
+	enum { MIN_HISTORY_ITEMS = 1, MAX_HISTORY_ITEMS = 1000 };
 
 	void log(Area area, ParamMap& params) noexcept;
 	void message(const string& msg, LogMessage::Severity severity, const string& area) noexcept;
 
+	static size_t getHistoryLimit() noexcept;
 	List getLastLogs();
 	string getPath(Area area, ParamMap& params) const;
 	string getPath(Area area) const;

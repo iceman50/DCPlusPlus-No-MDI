@@ -19,6 +19,8 @@
 
 #include "SystemFrame.h"
 
+#include <iterator>
+
 #include <dcpp/DirectoryListing.h>
 #include <dcpp/File.h>
 #include <dcpp/LogManager.h>
@@ -37,7 +39,9 @@ const string& SystemFrame::getId() const { return id; }
 
 SystemFrame::SystemFrame(TabViewPtr parent) :
 	BaseType(parent, T_("System Log"), IDH_SYSTEM_LOG, IDI_DCPP),
-	log(0)
+	log(0),
+	logFlushScheduled(false),
+	logAlive(std::make_shared<std::atomic_bool>(true))
 {
 	{
 		RichTextBox::Seed cs = WinUtil::Seeds::richTextBox;
@@ -59,92 +63,121 @@ SystemFrame::SystemFrame(TabViewPtr parent) :
 
 	layout();
 
-	LogManager::List oldMessages = LogManager::getInstance()->getLastLogs();
-	// Technically, we might miss a message or two here, but who cares...
 	LogManager::getInstance()->addListener(this);
+	LogManager::List oldMessages = LogManager::getInstance()->getLastLogs();
 	SettingsManager::getInstance()->addListener(this);
-
-	for(const auto& i: oldMessages) {
-		addLine(i);
-	}
+	addLines(oldMessages);
 }
 
 SystemFrame::~SystemFrame() {
-
+	logAlive->store(false);
 }
 
-void SystemFrame::addLine(const LogMessagePtr& message, bool remember) {
-	if(!message)
+void SystemFrame::addLines(const std::deque<LogMessagePtr>& batch, bool remember) {
+	if(batch.empty())
 		return;
-	if(remember) {
-		if(std::find(messages.begin(), messages.end(), message) != messages.end())
-			return;
-		while(messages.size() >= 100)
-			messages.pop_front();
-		messages.push_back(message);
+
+	const auto maxMessages = LogManager::getHistoryLimit();
+	std::vector<tstring> documents;
+	documents.reserve(std::min(batch.size(), maxMessages));
+	bool addLine = log->length() != 0;
+	auto first = batch.begin();
+	if(batch.size() > maxMessages)
+		std::advance(first, batch.size() - maxMessages);
+	for(auto i = first; i != batch.end(); ++i) {
+		const auto& message = *i;
+		if(!message)
+			continue;
+		if(remember) {
+			if(std::find(messages.begin(), messages.end(), message) != messages.end())
+				continue;
+			while(messages.size() >= maxMessages)
+				messages.pop_front();
+			messages.push_back(message);
+		}
+
+		const char* style = "log";
+		unsigned icon = IDI_HELP;
+		const char* levelName = _("Unknown");
+		switch(message->getSeverity()) {
+		case LogMessage::SEV_VERBOSE:
+			style = "systemLogVerbose";
+			icon = IDI_LOGS;
+			levelName = _("Verbose");
+			break;
+		case LogMessage::SEV_INFO:
+			style = "systemLogInfo";
+			icon = IDI_GET_STARTED;
+			levelName = _("Info");
+			break;
+		case LogMessage::SEV_WARNING:
+			style = "systemLogWarning";
+			icon = IDI_DCPP_WARNING;
+			levelName = _("Warning");
+			break;
+		case LogMessage::SEV_ERROR:
+			style = "systemLogError";
+			icon = IDI_EXIT;
+			levelName = _("Error");
+			break;
+		default:
+			break;
+		}
+
+		auto escape = [](string text) {
+			SimpleXML::escape(text, false);
+			return text;
+		};
+		const auto level = escape(levelName);
+		const auto timestamp = escape("[" + Util::getShortTimeString(message->getTime()) + "]");
+		const auto area = escape("[" + message->getArea() + "]");
+		const auto text = escape(message->getText());
+		const auto html = "<span id=\"" + string(style) + "\"><resourceicon id=\"" + Util::toString(icon) +
+			"\"/> [" + level + "] " + timestamp + " " +
+			"<span id=\"systemLogArea\">" + area + "</span> " + text + "</span>";
+
+		tstring document = _T("{\\urtf1\n");
+		if(addLine)
+			document += _T("\\line\n");
+		document += HtmlToRtf::convert(html, log);
+		document += _T("}\n");
+		documents.push_back(std::move(document));
+		addLine = true;
 	}
 
-	const char* style = "log";
-	unsigned icon = IDI_HELP;
-	const char* levelName = _("Unknown");
-	switch(message->getSeverity()) {
-	case LogMessage::SEV_VERBOSE:
-		style = "systemLogVerbose";
-		icon = IDI_LOGS;
-		levelName = _("Verbose");
-		break;
-	case LogMessage::SEV_INFO:
-		style = "systemLogInfo";
-		icon = IDI_GET_STARTED;
-		levelName = _("Info");
-		break;
-	case LogMessage::SEV_WARNING:
-		style = "systemLogWarning";
-		icon = IDI_DCPP_WARNING;
-		levelName = _("Warning");
-		break;
-	case LogMessage::SEV_ERROR:
-		style = "systemLogError";
-		icon = IDI_EXIT;
-		levelName = _("Error");
-		break;
-	default:
-		break;
-	}
-
-	auto escape = [](string text) {
-		SimpleXML::escape(text, false);
-		return text;
-	};
-	const auto level = escape(levelName);
-	const auto timestamp = escape("[" + Util::getShortTimeString(message->getTime()) + "]");
-	const auto area = escape("[" + message->getArea() + "]");
-	const auto text = escape(message->getText());
-	const auto html = "<span id=\"" + string(style) + "\"><resourceicon id=\"" + Util::toString(icon) +
-		"\"/> [" + level + "] " +
-		"<span id=\"log\">" + timestamp + "</span> " +
-		"<span id=\"systemLogArea\">" + area + "</span> " + text + "</span>";
-
-	tstring document = _T("{\\urtf1\n");
-	if(log->length() != 0)
-		document += _T("\\line\n");
-	document += HtmlToRtf::convert(html, log);
-	document += _T("}\n");
-	log->addTextSteady(document);
-
+	if(documents.empty())
+		return;
+	log->addTextSteadyBatch(documents);
 	if(remember)
 		setDirty(SettingsManager::BOLD_SYSTEM_LOG);
 }
 
+void SystemFrame::flushLog() {
+	std::deque<LogMessagePtr> batch;
+	{
+		std::lock_guard<std::mutex> lock(pendingMessagesMutex);
+		batch.swap(pendingMessages);
+		logFlushScheduled = false;
+	}
+	const auto maxMessages = LogManager::getHistoryLimit();
+	while(batch.size() > maxMessages)
+		batch.pop_front();
+	addLines(batch);
+}
+
 void SystemFrame::refreshLog() {
+	const auto maxMessages = LogManager::getHistoryLimit();
+	while(messages.size() > maxMessages)
+		messages.pop_front();
+
+	// Clear first: changing RichEdit defaults otherwise preserves formatting one character at a time.
+	log->setText(Util::emptyStringT);
+	log->clearMessageMetadata();
 	dwt::FontPtr font;
 	WinUtil::updateFont(font, SettingsManager::LOG_FONT);
 	log->setFont(font ? font : WinUtil::Seeds::richTextBox.font);
 	log->setColor(SETTING(LOG_COLOR), SETTING(LOG_BG_COLOR));
-	log->setText(Util::emptyStringT);
-	log->clearMessageMetadata();
-	for(const auto& message: messages)
-		addLine(message, false);
+	addLines(messages, false);
 }
 
 void SystemFrame::openFile(const string& path) const {
@@ -174,8 +207,14 @@ void SystemFrame::layout() {
 }
 
 bool SystemFrame::preClosing() {
+	logAlive->store(false);
 	LogManager::getInstance()->removeListener(this);
 	SettingsManager::getInstance()->removeListener(this);
+	{
+		std::lock_guard<std::mutex> lock(pendingMessagesMutex);
+		pendingMessages.clear();
+		logFlushScheduled = false;
+	}
 	return true;
 }
 
@@ -216,9 +255,37 @@ bool SystemFrame::handleDoubleClick(const dwt::MouseEvent& mouseEvent) {
 }
 
 void SystemFrame::on(Message, const LogMessagePtr& message) noexcept {
-	callAsync([=] { addLine(message); });
+	if(!message || !logAlive->load())
+		return;
+
+	bool schedule = false;
+	{
+		std::lock_guard<std::mutex> lock(pendingMessagesMutex);
+		if(!logAlive->load())
+			return;
+		const auto maxMessages = LogManager::getHistoryLimit();
+		while(pendingMessages.size() >= maxMessages)
+			pendingMessages.pop_front();
+		pendingMessages.push_back(message);
+		if(!logFlushScheduled) {
+			logFlushScheduled = true;
+			schedule = true;
+		}
+	}
+
+	if(schedule) {
+		auto alive = logAlive;
+		callAsync([this, alive] {
+			if(alive->load())
+				flushLog();
+		});
+	}
 }
 
 void SystemFrame::on(SettingsManagerListener::Save, SimpleXML&) noexcept {
-	callAsync([this] { refreshLog(); });
+	auto alive = logAlive;
+	callAsync([this, alive] {
+		if(alive->load())
+			refreshLog();
+	});
 }
