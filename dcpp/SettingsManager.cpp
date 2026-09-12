@@ -103,6 +103,8 @@ const string SettingsManager::settingTags[] =
 	"GlobalWindow", "GlobalLimit", "PeerLimit", "PeerWindow", "MaxTrackedPeers",
 	"MaxSUDPPacket", "MaxSUDPKeys", "MaxPartialListBytes", "HashDbWriteBatchSize",
 	"ChatLinkMaxLength", "RichTextMaxSize", "RTFTempShareLimit", "MaxSystemLogItems",
+	"CCPMReconnectBaseDelay", "CCPMReconnectMaxDelay", "CCPMStableConnectionTime",
+	"CCPMMaxAutomaticAttempts",
 	"ThemeMode", "ThemeBackgroundColor", "ThemeSurfaceColor", "ThemeTextColor",
 	"ThemeDisabledTextColor", "ThemeBorderColor", "ThemeAccentColor",
 	"ThemeHighlightTextColor",
@@ -244,6 +246,10 @@ SettingsManager::SettingsManager() {
 	setDefault(RICH_TEXT_MAX_SIZE, 64 * 1024);
 	setDefault(RTF_TEMP_SHARE_LIMIT, 256);
 	setDefault(MAX_SYSTEM_LOG_ITEMS, 100);
+	setDefault(CCPM_RECONNECT_BASE_DELAY, 5);
+	setDefault(CCPM_RECONNECT_MAX_DELAY, 60);
+	setDefault(CCPM_STABLE_CONNECTION_TIME, 60);
+	setDefault(CCPM_MAX_AUTOMATIC_ATTEMPTS, 5);
 	setDefault(THEME_MODE, THEME_SYSTEM);
 	setDefault(THEME_BACKGROUND_COLOR, RGB(32, 32, 32));
 	setDefault(THEME_SURFACE_COLOR, RGB(45, 45, 48));

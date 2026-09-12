@@ -31,6 +31,7 @@
 #include <dcpp/PluginManager.h>
 #include <dcpp/PrivateChatManager.h>
 #include <dcpp/RichText.h>
+#include <dcpp/TimerManager.h>
 #include <dcpp/User.h>
 #include <dcpp/UserConnection.h>
 #include <dcpp/WindowInfo.h>
@@ -48,6 +49,38 @@ namespace {
 bool matchesCurrentHub(const HintedUser& queuedUser, const HintedUser& frameUser) {
 	return queuedUser.user == frameUser.user &&
 		hubHintMatches(frameUser.hint, queuedUser.hint);
+}
+
+constexpr uint64_t MILLISECONDS_PER_SECOND = 1000;
+
+int getCCPMSetting(SettingsManager::IntSetting setting, int minimum, int maximum) {
+	return std::clamp(SettingsManager::getInstance()->get(setting), minimum, maximum);
+}
+
+unsigned getCCPMMaxAutomaticAttempts() {
+	return static_cast<unsigned>(getCCPMSetting(SettingsManager::CCPM_MAX_AUTOMATIC_ATTEMPTS,
+		SettingsManager::CCPM_AUTOMATIC_ATTEMPTS_MIN, SettingsManager::CCPM_AUTOMATIC_ATTEMPTS_MAX));
+}
+
+uint64_t getCCPMStableConnectionTime() {
+	return static_cast<uint64_t>(getCCPMSetting(SettingsManager::CCPM_STABLE_CONNECTION_TIME,
+		SettingsManager::CCPM_STABLE_CONNECTION_TIME_MIN,
+		SettingsManager::CCPM_STABLE_CONNECTION_TIME_MAX)) * MILLISECONDS_PER_SECOND;
+}
+
+uint32_t getCCPMReconnectDelay(unsigned attempts) {
+	// Jitter prevents two identical clients from remaining synchronized after
+	// both sides lose and immediately try to recreate the same channel.
+	const auto baseSeconds = getCCPMSetting(SettingsManager::CCPM_RECONNECT_BASE_DELAY,
+		SettingsManager::CCPM_RECONNECT_DELAY_MIN, SettingsManager::CCPM_RECONNECT_DELAY_MAX);
+	const auto maxSeconds = std::max(baseSeconds, getCCPMSetting(SettingsManager::CCPM_RECONNECT_MAX_DELAY,
+		SettingsManager::CCPM_RECONNECT_DELAY_MIN, SettingsManager::CCPM_RECONNECT_DELAY_MAX));
+	const auto baseDelay = static_cast<uint64_t>(baseSeconds) * MILLISECONDS_PER_SECOND;
+	const auto maxDelay = static_cast<uint64_t>(maxSeconds) * MILLISECONDS_PER_SECOND;
+	const auto shift = std::min(attempts > 0 ? attempts - 1 : 0, 4u);
+	const auto delay = std::min(baseDelay << shift, maxDelay);
+	const auto jitterLimit = static_cast<uint32_t>(std::min(delay / 4, maxDelay - delay));
+	return static_cast<uint32_t>(delay + Util::rand(0, jitterLimit));
 }
 
 } // namespace
@@ -308,11 +341,15 @@ replyTo(replyTo_),
 online(false),
 conn(nullptr),
 connRevision(0),
+connEstablishedTick(0),
 acceptCCPMConnections(true),
 localTyping(false),
 remoteTyping(false),
 messageSeenPending(false),
 allowAutoCCPM(true),
+nextAutoCCPMAttempt(0),
+autoCCPMAttempts(0),
+autoCCPMReconnectScheduled(false),
 lastMessageTime(time(NULL))
 {
 	createChat(this);
@@ -388,6 +425,7 @@ lastMessageTime(time(NULL))
 		conn.store(activeConn);
 		if(activeConn) {
 			connToken = activeConn->getToken();
+			connEstablishedTick = GET_TICK();
 			++connRevision;
 		}
 	}
@@ -431,6 +469,7 @@ void PrivateFrame::addStatus(const tstring& text) {
 
 bool PrivateFrame::preClosing() {
 	updateTypingState(false);
+	cancelAutoCCPMReconnect();
 	{
 		Lock lifetimeLock(connLifetimeMutex);
 		UserConnection* activeConn;
@@ -442,6 +481,7 @@ bool PrivateFrame::preClosing() {
 			activeConn = conn.exchange(nullptr);
 			activeToken = connToken;
 			connToken.clear();
+			connEstablishedTick = 0;
 			++connRevision;
 		}
 
@@ -547,6 +587,11 @@ void PrivateFrame::updateOnlineStatus(bool newChannel) {
 		if(!newChannel) {
 			addStatus(online ? T_("User went online") : T_("User went offline"));
 		}
+		if(!online) {
+			cancelAutoCCPMReconnect();
+			nextAutoCCPMAttempt = 0;
+			autoCCPMAttempts = 0;
+		}
 		setIcon(online ? IDI_PRIVATE : IDI_PRIVATE_OFF);
 		status->setIcon(STATUS_CHANNEL, WinUtil::statusIcon(ccReady() ? IDI_SECURE : online ? IDI_HUB : IDI_HUB_OFF));
 		newChannel = true;
@@ -597,9 +642,32 @@ void PrivateFrame::updateRichTextAvailability() {
 }
 
 void PrivateFrame::startCC(bool silent) {
+	if(!silent) {
+		// An explicit request closes the circuit and starts a fresh retry budget.
+		allowAutoCCPM = true;
+		autoCCPMAttempts = 0;
+		nextAutoCCPMAttempt = 0;
+		cancelAutoCCPMReconnect();
+	} else if(!online || !allowAutoCCPM || !SETTING(ALWAYS_CCPM)) {
+		return;
+	}
+
 	if(ccReady()) {
 		if(!silent) { addStatus(T_("A direct encrypted channel is already available")); }
+		cancelAutoCCPMReconnect();
 		return;
+	}
+
+	const auto now = GET_TICK();
+	if(silent) {
+		if(autoCCPMAttempts >= getCCPMMaxAutomaticAttempts()) {
+			pauseAutoCCPMReconnect();
+			return;
+		}
+		if(nextAutoCCPMAttempt > now) {
+			scheduleAutoCCPMReconnect();
+			return;
+		}
 	}
 
 	{
@@ -623,8 +691,16 @@ void PrivateFrame::startCC(bool silent) {
 	}
 
 	if(!silent) { addStatus(T_("Establishing a direct encrypted channel...")); }
-	if(!silent) { allowAutoCCPM = true; }
+	if(silent) {
+		++autoCCPMAttempts;
+	}
+	nextAutoCCPMAttempt = now + getCCPMReconnectDelay(autoCCPMAttempts);
 	ClientManager::getInstance()->connect(replyTo.getUser(), ConnectionManager::getInstance()->makeToken(), CONNECTION_TYPE_PM);
+	if(allowAutoCCPM && SETTING(ALWAYS_CCPM)) {
+		// Also acts as an attempt timeout when a failed CTM/RCM handshake never
+		// produces a ConnectionManager event.
+		scheduleAutoCCPMReconnect();
+	}
 }
 
 void PrivateFrame::closeCC(bool silent) {
@@ -651,10 +727,48 @@ void PrivateFrame::closeCC(bool silent) {
 	}
 
 	if(found) {
+		cancelAutoCCPMReconnect();
 		if(!silent) { addStatus(T_("Disconnecting the direct encrypted channel...")); }
 	} else {
 		if(!silent) { addStatus(T_("No direct encrypted channel available")); }
 	}
+}
+
+void PrivateFrame::cancelAutoCCPMReconnect() {
+	if(autoCCPMReconnectScheduled) {
+		setTimer(nullptr, 0, TIMER_CCPM_RECONNECT);
+		autoCCPMReconnectScheduled = false;
+	}
+}
+
+void PrivateFrame::scheduleAutoCCPMReconnect() {
+	if(!online || !allowAutoCCPM || !SETTING(ALWAYS_CCPM) || ccReady()) {
+		cancelAutoCCPMReconnect();
+		return;
+	}
+
+	const auto now = GET_TICK();
+	if(nextAutoCCPMAttempt <= now) {
+		nextAutoCCPMAttempt = now + getCCPMReconnectDelay(autoCCPMAttempts);
+	}
+	const auto delay = static_cast<unsigned>(nextAutoCCPMAttempt - now);
+	autoCCPMReconnectScheduled = true;
+	setTimer([this] {
+		autoCCPMReconnectScheduled = false;
+		// Returning false kills this timer ID. Queue the attempt so startCC can
+		// safely arm the same timer again after this callback returns.
+		callAsync([this] { startCC(true); });
+		return false;
+	}, std::max(1u, delay), TIMER_CCPM_RECONNECT);
+}
+
+void PrivateFrame::pauseAutoCCPMReconnect() {
+	if(!allowAutoCCPM) {
+		return;
+	}
+	allowAutoCCPM = false;
+	cancelAutoCCPMReconnect();
+	addStatus(T_("Automatic direct channel reconnection was paused after repeated failures; use the channel menu to try again"));
 }
 
 void PrivateFrame::changeHub(const string& hubHint) {
@@ -710,6 +824,7 @@ void PrivateFrame::adoptPMConnection(const string& connectionToken) {
 		}
 		conn.store(activeConn);
 		connToken = connectionToken;
+		connEstablishedTick = GET_TICK();
 		revision = ++connRevision;
 		adopted = true;
 	}
@@ -717,6 +832,8 @@ void PrivateFrame::adoptPMConnection(const string& connectionToken) {
 	if(adopted) {
 		callAsync([this, connectionToken, revision] {
 			if(isCurrentConnection(connectionToken, revision)) {
+				cancelAutoCCPMReconnect();
+				nextAutoCCPMAttempt = 0;
 				localTyping = false;
 				remoteTyping = false;
 				updateOnlineStatus(true);
@@ -763,6 +880,7 @@ void PrivateFrame::updatePMInfo(PMInfo type) {
 		break;
 	case PM_INFO_NO_AUTOCONNECT:
 		allowAutoCCPM = false;
+		cancelAutoCCPMReconnect();
 		break;
 	case PM_INFO_QUIT:
 		remoteTyping = false;
@@ -1097,6 +1215,7 @@ void PrivateFrame::on(ConnectionManagerListener::Connected, ConnectionQueueItem*
 				} else {
 					conn.store(uc);
 					connToken = token;
+					connEstablishedTick = GET_TICK();
 					revision = ++connRevision;
 				}
 			}
@@ -1137,6 +1256,8 @@ void PrivateFrame::on(ConnectionManagerListener::Connected, ConnectionQueueItem*
 			}
 		}
 		if(current) {
+			cancelAutoCCPMReconnect();
+			nextAutoCCPMAttempt = 0;
 			localTyping = false;
 			remoteTyping = false;
 			updateOnlineStatus(true);
@@ -1154,6 +1275,7 @@ void PrivateFrame::on(ConnectionManagerListener::Removed, ConnectionQueueItem* c
 
 	const auto token = cqi->getToken();
 	uint64_t revision = 0;
+	uint64_t establishedTick = 0;
 	bool removedCurrent = false;
 	{
 		Lock lifetimeLock(connLifetimeMutex);
@@ -1162,6 +1284,8 @@ void PrivateFrame::on(ConnectionManagerListener::Removed, ConnectionQueueItem* c
 			if(conn.load() && connToken == token) {
 				conn.store(nullptr);
 				connToken.clear();
+				establishedTick = connEstablishedTick;
+				connEstablishedTick = 0;
 				revision = ++connRevision;
 				removedCurrent = true;
 			}
@@ -1175,12 +1299,17 @@ void PrivateFrame::on(ConnectionManagerListener::Removed, ConnectionQueueItem* c
 		return;
 	}
 
-	callAsync([this, revision] {
+	callAsync([this, revision, establishedTick] {
 		if(isDisconnectedConnection(revision)) {
+			const auto now = GET_TICK();
+			if(establishedTick != 0 && now - establishedTick >= getCCPMStableConnectionTime()) {
+				autoCCPMAttempts = 0;
+			}
+			nextAutoCCPMAttempt = now + getCCPMReconnectDelay(autoCCPMAttempts);
 			updateTypingState(false);
 			remoteTyping = false;
-			updateOnlineStatus(true);
 			addStatus(T_("The direct encrypted channel has been disconnected"));
+			updateOnlineStatus(true);
 		}
 	});
 }

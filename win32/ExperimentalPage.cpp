@@ -268,7 +268,27 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		buttons->setWidget(hashDbStatus, 1, 0, 1, 4);
 	}
 
-	auto protocolGrid = tabs->addPage(T_("Protocol limits"), 1)->content();
+	auto protocolGrid = tabs->addPage(T_("Protocol limits"), 2)->content();
+
+	{
+		auto group = protocolGrid->addChild(GroupBox::Seed(T_("Direct private-message channels (CCPM)")));
+		group->setHelpId(IDH_SETTINGS_EXPERIMENTAL_CCPM_RECONNECT_BASE_DELAY);
+		auto cur = group->addChild(Grid::Seed(4, 1));
+		cur->column(0).mode = GridInfo::FILL;
+		addIntItem(cur, T_("Initial automatic reconnect delay"), SettingsManager::CCPM_RECONNECT_BASE_DELAY,
+			IDH_SETTINGS_EXPERIMENTAL_CCPM_RECONNECT_BASE_DELAY, T_("seconds"),
+			SettingsManager::CCPM_RECONNECT_DELAY_MIN, SettingsManager::CCPM_RECONNECT_DELAY_MAX);
+		addIntItem(cur, T_("Maximum automatic reconnect delay"), SettingsManager::CCPM_RECONNECT_MAX_DELAY,
+			IDH_SETTINGS_EXPERIMENTAL_CCPM_RECONNECT_MAX_DELAY, T_("seconds"),
+			SettingsManager::CCPM_RECONNECT_DELAY_MIN, SettingsManager::CCPM_RECONNECT_DELAY_MAX);
+		addIntItem(cur, T_("Stable connection reset time"), SettingsManager::CCPM_STABLE_CONNECTION_TIME,
+			IDH_SETTINGS_EXPERIMENTAL_CCPM_STABLE_CONNECTION_TIME, T_("seconds"),
+			SettingsManager::CCPM_STABLE_CONNECTION_TIME_MIN,
+			SettingsManager::CCPM_STABLE_CONNECTION_TIME_MAX);
+		addIntItem(cur, T_("Maximum automatic reconnect attempts"), SettingsManager::CCPM_MAX_AUTOMATIC_ATTEMPTS,
+			IDH_SETTINGS_EXPERIMENTAL_CCPM_MAX_AUTOMATIC_ATTEMPTS, T_("attempts"),
+			SettingsManager::CCPM_AUTOMATIC_ATTEMPTS_MIN, SettingsManager::CCPM_AUTOMATIC_ATTEMPTS_MAX);
+	}
 
 	{
 		auto group = protocolGrid->addChild(GroupBox::Seed(T_("Protocol resource limits")));
@@ -298,10 +318,10 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 			IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES, T_("KiB"), 1, MAX_KIB_SETTING, BYTES_PER_KIB);
 	}
 
-	auto interfaceGrid = tabs->addPage(T_("Interface"), 1)->content();
+	auto themeGrid = tabs->addPage(T_("Interface and theme"), 4)->content();
 
 	{
-		auto group = interfaceGrid->addChild(GroupBox::Seed(T_("System Log")));
+		auto group = themeGrid->addChild(GroupBox::Seed(T_("System Log")));
 		group->setHelpId(IDH_SETTINGS_EXPERIMENTAL_MAX_SYSTEM_LOG_ITEMS);
 		auto cur = group->addChild(Grid::Seed(1, 1));
 		cur->column(0).mode = GridInfo::FILL;
@@ -309,8 +329,6 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 			IDH_SETTINGS_EXPERIMENTAL_MAX_SYSTEM_LOG_ITEMS, T_("messages"),
 			LogManager::MIN_HISTORY_ITEMS, LogManager::MAX_HISTORY_ITEMS);
 	}
-
-	auto themeGrid = tabs->addPage(T_("Theme"), 3)->content();
 
 	{
 		auto group = themeGrid->addChild(GroupBox::Seed(T_("Application theme")));
@@ -389,11 +407,28 @@ void ExperimentalPage::write() {
 	auto clamp = [settings](SettingsManager::IntSetting setting, int minimum) {
 		if(settings->get(setting) < minimum) settings->set(setting, minimum);
 	};
+	auto clampRange = [settings](SettingsManager::IntSetting setting, int minimum, int maximum) {
+		settings->set(setting, std::clamp(settings->get(setting), minimum, maximum));
+	};
 	clamp(SettingsManager::MAX_MCN_DOWNLOADS, 1);
 	clamp(SettingsManager::MAX_MCN_UPLOADS, 1);
 	clamp(SettingsManager::MAX_HASH_SPEED, 0);
 	clamp(SettingsManager::HASH_DB_WRITE_BATCH_SIZE, 1);
 	clamp(SettingsManager::RTF_TEMP_SHARE_LIMIT, 1);
+	clampRange(SettingsManager::CCPM_RECONNECT_BASE_DELAY,
+		SettingsManager::CCPM_RECONNECT_DELAY_MIN, SettingsManager::CCPM_RECONNECT_DELAY_MAX);
+	clampRange(SettingsManager::CCPM_RECONNECT_MAX_DELAY,
+		SettingsManager::CCPM_RECONNECT_DELAY_MIN, SettingsManager::CCPM_RECONNECT_DELAY_MAX);
+	clampRange(SettingsManager::CCPM_STABLE_CONNECTION_TIME,
+		SettingsManager::CCPM_STABLE_CONNECTION_TIME_MIN, SettingsManager::CCPM_STABLE_CONNECTION_TIME_MAX);
+	clampRange(SettingsManager::CCPM_MAX_AUTOMATIC_ATTEMPTS,
+		SettingsManager::CCPM_AUTOMATIC_ATTEMPTS_MIN, SettingsManager::CCPM_AUTOMATIC_ATTEMPTS_MAX);
+	if(settings->get(SettingsManager::CCPM_RECONNECT_MAX_DELAY) <
+		settings->get(SettingsManager::CCPM_RECONNECT_BASE_DELAY))
+	{
+		settings->set(SettingsManager::CCPM_RECONNECT_MAX_DELAY,
+			settings->get(SettingsManager::CCPM_RECONNECT_BASE_DELAY));
+	}
 	clamp(SettingsManager::MAX_QUEUED_PROTOCOL_DATA, 1024);
 	clamp(SettingsManager::MAX_CONCURRENT_CONNECTIONS, 1);
 	clamp(SettingsManager::FLOOD_WINDOW, 1);

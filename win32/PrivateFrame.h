@@ -90,7 +90,10 @@ public:
 	bool sendMessage(const tstring& msg, bool thirdPerson = false, bool explicitRichText = false);
 
 private:
-	enum { TIMER_CPMI_TYPING = 1 };
+	enum {
+		TIMER_CPMI_TYPING = 1,
+		TIMER_CCPM_RECONNECT
+	};
 
 	UserInfoBase replyTo;
 	bool online;
@@ -103,11 +106,15 @@ private:
 	std::atomic<UserConnection*> conn;
 	string connToken;
 	std::atomic<uint64_t> connRevision;
+	uint64_t connEstablishedTick;
 	bool acceptCCPMConnections;
 	bool localTyping;
 	bool remoteTyping;
 	bool messageSeenPending;
 	bool allowAutoCCPM;
+	uint64_t nextAutoCCPMAttempt;
+	unsigned autoCCPMAttempts;
+	bool autoCCPMReconnectScheduled;
 	tstring lastStatus;
 
 	time_t lastMessageTime;
@@ -140,6 +147,9 @@ private:
 	void updateRichTextAvailability();
 	void startCC(bool silent = false);
 	void closeCC(bool silent = false);
+	void cancelAutoCCPMReconnect();
+	void scheduleAutoCCPMReconnect();
+	void pauseAutoCCPMReconnect();
 	void changeHub(const string& hubHint);
 	void adoptPMConnection(const string& connectionToken);
 	bool ccReady() const;

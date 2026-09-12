@@ -10,7 +10,7 @@
 <h1>Experimental</h1>
 <p>This page is a top-level Settings category immediately above <em>Plugins</em> and collects experimental sharing, transfer,
 hashing, RTF0, defensive protocol, interface, and application theme controls. The controls are divided among the
-<em>Chat and sharing</em>, <em>Transfers and hashing</em>, <em>Protocol limits</em>, <em>Interface</em>, and <em>Theme</em> tabs.</p>
+<em>Chat and sharing</em>, <em>Transfers and hashing</em>, <em>Protocol limits</em>, and <em>Interface and theme</em> tabs.</p>
 
 <h2>System Log</h2>
 <dl style="margin-left: 40px;">
@@ -122,6 +122,20 @@ restarting DC++.</p>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_SUDP_KEYS">Maximum recent search encryption keys retained for decrypting SUDP results. Oldest keys are discarded first. Minimum: 1. Default: 64.</dd>
   <dt>Generated partial file list limit</dt>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES">Maximum uncompressed XML size generated in response to a partial file-list request, in KiB. Minimum: 1 KiB. Default: 65536 KiB.</dd>
+</dl>
+
+<h2>Direct private-message channels (CCPM)</h2>
+<p>These controls govern automatic recovery of an encrypted direct private-message channel. Each failed attempt uses
+an exponentially longer delay, with random jitter to keep two identical clients from retrying in lockstep.</p>
+<dl style="margin-left: 40px;">
+  <dt>Initial automatic reconnect delay</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_CCPM_RECONNECT_BASE_DELAY">Delay before the first automatic reconnect and the starting point for exponential backoff. Minimum: 1 second. Maximum: 3600 seconds. Default: 5 seconds.</dd>
+  <dt>Maximum automatic reconnect delay</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_CCPM_RECONNECT_MAX_DELAY">Upper bound for the exponential reconnect delay. A value below the initial delay is raised to match it when Settings is applied. Minimum: 1 second. Maximum: 3600 seconds. Default: 60 seconds.</dd>
+  <dt>Stable connection reset time</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_CCPM_STABLE_CONNECTION_TIME">Time a direct channel must remain connected before a later disconnect resets the accumulated automatic-attempt count. Minimum: 1 second. Maximum: 86400 seconds. Default: 60 seconds.</dd>
+  <dt>Maximum automatic reconnect attempts</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_CCPM_MAX_AUTOMATIC_ATTEMPTS">Number of automatic attempts permitted before reconnection is paused. Starting the direct channel manually resets the attempt budget. Minimum: 1. Maximum: 100. Default: 5.</dd>
 </dl>
 </body>
 </html>

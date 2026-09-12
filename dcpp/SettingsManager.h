@@ -135,17 +135,26 @@ public:
 		AUTO_SEARCH_INTERVAL, MAX_EXTRA_SLOTS, TESTING_STATUS,
 		MAX_MCN_DOWNLOADS, MAX_MCN_UPLOADS,
 
-		// Experimental resource and flood-control limits. Values are stored in bytes,
-		// milliseconds, packet/connection counts, or entry counts as documented by the UI.
+		// Experimental resource, reconnect, and flood-control limits. Values are stored in
+		// bytes, milliseconds, seconds, packet/connection counts, or entry counts as documented by the UI.
 		MAX_QUEUED_PROTOCOL_DATA, MAX_CONCURRENT_CONNECTIONS, FLOOD_WINDOW,
 		GLOBAL_WINDOW, GLOBAL_LIMIT, PEER_LIMIT, PEER_WINDOW, MAX_TRACKED_PEERS,
 		MAX_SUDP_PACKET, MAX_SUDP_KEYS, MAX_PARTIAL_LIST_BYTES, HASH_DB_WRITE_BATCH_SIZE,
 		CHAT_LINK_MAX_LENGTH, RICH_TEXT_MAX_SIZE, RTF_TEMP_SHARE_LIMIT, MAX_SYSTEM_LOG_ITEMS,
+		CCPM_RECONNECT_BASE_DELAY, CCPM_RECONNECT_MAX_DELAY, CCPM_STABLE_CONNECTION_TIME,
+		CCPM_MAX_AUTOMATIC_ATTEMPTS,
 		THEME_MODE, THEME_BACKGROUND_COLOR, THEME_SURFACE_COLOR, THEME_TEXT_COLOR,
 		THEME_DISABLED_TEXT_COLOR, THEME_BORDER_COLOR, THEME_ACCENT_COLOR,
 		THEME_HIGHLIGHT_TEXT_COLOR,
 
 		INT_LAST };
+
+	static constexpr int CCPM_RECONNECT_DELAY_MIN = 1;
+	static constexpr int CCPM_RECONNECT_DELAY_MAX = 3600;
+	static constexpr int CCPM_STABLE_CONNECTION_TIME_MIN = 1;
+	static constexpr int CCPM_STABLE_CONNECTION_TIME_MAX = 86400;
+	static constexpr int CCPM_AUTOMATIC_ATTEMPTS_MIN = 1;
+	static constexpr int CCPM_AUTOMATIC_ATTEMPTS_MAX = 100;
 
 	enum BoolSetting { BOOL_FIRST = INT_LAST + 1,
 		ADD_FINISHED_INSTANTLY = BOOL_FIRST, ADLS_BREAK_ON_FIRST,

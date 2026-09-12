@@ -61,3 +61,33 @@ TEST_F(SettingsMigrationTest, bounds_system_log_history_setting)
 	settings->set(SettingsManager::MAX_SYSTEM_LOG_ITEMS, 250);
 	EXPECT_EQ(size_t(250), LogManager::getHistoryLimit());
 }
+
+TEST_F(SettingsMigrationTest, persists_ccpm_reconnect_policy)
+{
+	const auto path = Util::getTempPath() + "dcpp-test-ccpm-reconnect-settings.xml";
+	File::deleteFile(path);
+
+	auto settings = SettingsManager::getInstance();
+	EXPECT_EQ(5, settings->get(SettingsManager::CCPM_RECONNECT_BASE_DELAY));
+	EXPECT_EQ(60, settings->get(SettingsManager::CCPM_RECONNECT_MAX_DELAY));
+	EXPECT_EQ(60, settings->get(SettingsManager::CCPM_STABLE_CONNECTION_TIME));
+	EXPECT_EQ(5, settings->get(SettingsManager::CCPM_MAX_AUTOMATIC_ATTEMPTS));
+
+	settings->set(SettingsManager::CCPM_RECONNECT_BASE_DELAY, 7);
+	settings->set(SettingsManager::CCPM_RECONNECT_MAX_DELAY, 90);
+	settings->set(SettingsManager::CCPM_STABLE_CONNECTION_TIME, 120);
+	settings->set(SettingsManager::CCPM_MAX_AUTOMATIC_ATTEMPTS, 8);
+	settings->save(path);
+
+	SettingsManager::deleteInstance();
+	SettingsManager::newInstance();
+	settings = SettingsManager::getInstance();
+	settings->load(path);
+
+	EXPECT_EQ(7, settings->get(SettingsManager::CCPM_RECONNECT_BASE_DELAY));
+	EXPECT_EQ(90, settings->get(SettingsManager::CCPM_RECONNECT_MAX_DELAY));
+	EXPECT_EQ(120, settings->get(SettingsManager::CCPM_STABLE_CONNECTION_TIME));
+	EXPECT_EQ(8, settings->get(SettingsManager::CCPM_MAX_AUTOMATIC_ATTEMPTS));
+
+	File::deleteFile(path);
+}
