@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Hot Magenta" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#180817" Surface="#34102F" Text="#FFF0FC" DisabledText="#CC97C2" Border="#773468" Accent="#FF38E1" HighlightText="#260022" />
+</DCPlusPlusTheme>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Neon Pink Pulse" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#140B14" Surface="#271229" Text="#FFF2FB" DisabledText="#C59ABC" Border="#6A365F" Accent="#FF4FC3" HighlightText="#220018" />
+</DCPlusPlusTheme>

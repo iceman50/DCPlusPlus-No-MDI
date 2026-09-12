@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Cyber Blue" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#071522" Surface="#0D2940" Text="#EFF9FF" DisabledText="#91B7CE" Border="#356985" Accent="#19A7FF" HighlightText="#001722" />
+</DCPlusPlusTheme>

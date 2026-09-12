@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Electric Purple" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#100B1F" Surface="#21163A" Text="#F8F3FF" DisabledText="#B6A4CF" Border="#604C82" Accent="#B96CFF" HighlightText="#170022" />
+</DCPlusPlusTheme>

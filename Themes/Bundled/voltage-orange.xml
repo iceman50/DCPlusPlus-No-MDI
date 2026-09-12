@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Voltage Orange" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#1A0E05" Surface="#33200E" Text="#FFF5E8" DisabledText="#CEAA83" Border="#7A5126" Accent="#FF8A1F" HighlightText="#241000" />
+</DCPlusPlusTheme>

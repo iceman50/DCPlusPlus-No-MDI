@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Neon Sunset" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#1A0B19" Surface="#35142D" Text="#FFF2F7" DisabledText="#D0A1B8" Border="#7C3F62" Accent="#FF6B35" HighlightText="#2A0900" />
+</DCPlusPlusTheme>
