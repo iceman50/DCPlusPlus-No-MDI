@@ -3,6 +3,7 @@
 * Fix downloads of long Unicode filenames on Windows by shortening overlong temporary names without changing final targets (iceman50)
 * Fix chat magnet and rich-text attachment tests failing with localized file-size decimal separators (iceman50)
 * Improve FastAlloc performance with aligned per-type slabs and thread-local allocation batches (iceman50)
+* Add bounded multi-threaded Tiger Tree hashing with configurable Experimental worker limits, stable-handle POSIX reads, exact cached-read blocks and immediate cancellation (iceman50)
 * Support Windows paths longer than the legacy MAX_PATH limit across hashing, sharing, downloads, dialogs, drag-and-drop, archives and persistent databases
 * Add a Win7-compatible application dark theme with Windows high-contrast integration, retained visual styles, native dark non-client rendering on Win10+, application-owned button and control rendering, and a configurable Experimental palette
 * Add ADC BBS0 durable bulletin boards with dynamic board discovery, persistent replay/resume indexes, posts, replies and withdrawals, canonical TTH-verified plain or rich-text documents, explicit exact-TTH retrieval and route-scoped serving, and a /bbs command interface

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -166,7 +167,28 @@ private:
 
 		void stopHashing(const string& baseDir);
 		virtual int run();
-		bool fastHash(const string& fname, uint8_t* buf, TigerTree& tth, int64_t size, CRC32Filter* xcrc32);
+		/**
+		 * Hash one validated file snapshot with bounded parallel TTH leaf workers.
+		 *
+		 * File bytes are read and observed in order on this Hasher thread so speed
+		 * limiting, pause/cancellation checks, and optional SFV CRC32 processing
+		 * remain serialized. TigerTreeHasher owns and joins every worker before
+		 * returning; the output tree is replaced only after the expected byte count
+		 * and all ordered leaves have been verified.
+		 *
+		 * @param file Open file positioned at the first byte to hash. The caller
+		 *             keeps the handle alive through result publication.
+		 * @param tth Receives the completed tree on success and supplies its block size.
+		 * @param size Exact number of bytes expected from the file snapshot.
+		 * @param xcrc32 Optional ordered SFV CRC32 accumulator; may be null.
+		 * @param workerCount Already-bounded number of TTH worker threads.
+		 * @param lastRead Running speed-limit timestamp, updated as bytes are read.
+		 * @return true only when all expected bytes and leaves were processed;
+		 *         false for orderly cancellation or a size mismatch.
+		 * @throw FileException for read failures. Worker and callback exceptions are
+		 *        propagated only after all workers have joined.
+		 */
+		bool fastHash(File& file, TigerTree& tth, int64_t size, CRC32Filter* xcrc32, size_t workerCount, uint64_t& lastRead);
 		void getStats(string& curFile, uint64_t& bytesLeft, size_t& filesLeft) const;
 		void shutdown() {
 			bool wakePaused;

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +20,7 @@
 #define DCPLUSPLUS_DCPP_STREAMS_H
 
 #include <algorithm>
+#include <cstring>
 
 #include "typedefs.h"
 #include "format.h"

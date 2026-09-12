@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2026 iceman50
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 #include "testbase.h"
 
 #include <dcpp/File.h>
@@ -89,5 +98,24 @@ TEST_F(SettingsMigrationTest, persists_ccpm_reconnect_policy)
 	EXPECT_EQ(120, settings->get(SettingsManager::CCPM_STABLE_CONNECTION_TIME));
 	EXPECT_EQ(8, settings->get(SettingsManager::CCPM_MAX_AUTOMATIC_ATTEMPTS));
 
+	File::deleteFile(path);
+}
+
+TEST_F(SettingsMigrationTest, persists_multithreaded_hashing_limit)
+{
+	const auto path = Util::getTempPath() + "dcpp-test-hashing-thread-settings.xml";
+	File::deleteFile(path);
+
+	auto settings = SettingsManager::getInstance();
+	EXPECT_EQ(2, settings->get(SettingsManager::HASHING_THREADS));
+	settings->set(SettingsManager::HASHING_THREADS, 6);
+	settings->save(path);
+
+	SettingsManager::deleteInstance();
+	SettingsManager::newInstance();
+	settings = SettingsManager::getInstance();
+	settings->load(path);
+
+	EXPECT_EQ(6, settings->get(SettingsManager::HASHING_THREADS));
 	File::deleteFile(path);
 }

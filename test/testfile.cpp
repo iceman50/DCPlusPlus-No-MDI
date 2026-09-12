@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2026 iceman50
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 #include "testbase.h"
 
 #include <dcpp/Archive.h>
@@ -6,6 +15,8 @@
 #include <dcpp/SQLiteDB.h>
 #include <dcpp/Text.h>
 #include <dcpp/Util.h>
+
+#include <chrono>
 
 using namespace dcpp;
 
@@ -104,3 +115,63 @@ TEST(FileTest, opensLongPathsInIntegratedFileConsumers) {
 }
 
 #endif
+
+namespace {
+
+class ShortReadFile : public File {
+public:
+	ShortReadFile(const string& path, size_t maximumRead) : File(path, File::READ, File::OPEN | File::SHARED), maximumRead(maximumRead) { }
+
+	size_t read(void* buffer, size_t& bytes) override {
+		bytes = std::min(bytes, maximumRead);
+		return File::read(buffer, bytes);
+	}
+
+private:
+	size_t maximumRead;
+};
+
+string readerTestPath(const string& name) {
+	return Util::getTempPath() + "dcpp-filereader-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + '-' + name;
+}
+
+}
+
+TEST(FileReaderTest, fills_requested_blocks_across_short_operating_system_reads) {
+	const auto path = readerTestPath("short-reads.bin");
+	const size_t blockSize = 1024 * 1024;
+	string expected(blockSize + 37, '\0');
+	for(size_t i = 0; i < expected.size(); ++i) expected[i] = static_cast<char>((i * 31U + 7U) & 0xffU);
+	File(path, File::WRITE, File::CREATE | File::TRUNCATE).write(expected);
+
+	ShortReadFile input(path, 4093);
+	vector<size_t> chunks;
+	string actual;
+	const auto bytes = FileReader(false, blockSize).read(input, [&](const void* data, size_t size) {
+		chunks.push_back(size);
+		actual.append(static_cast<const char*>(data), size);
+		return true;
+	});
+
+	EXPECT_EQ(expected.size(), bytes);
+	EXPECT_EQ(expected, actual);
+	ASSERT_EQ(2U, chunks.size());
+	EXPECT_EQ(blockSize, chunks[0]);
+	EXPECT_EQ(37U, chunks[1]);
+	File::deleteFile(path);
+}
+
+TEST(FileReaderTest, stops_callbacks_immediately_after_cancellation) {
+	const auto path = readerTestPath("cancel.bin");
+	const string data(3 * 1024 * 1024, 'x');
+	File(path, File::WRITE, File::CREATE | File::TRUNCATE).write(data);
+
+	size_t callbacks = 0;
+	FileReader(true).read(path, [&](const void*, size_t) {
+		++callbacks;
+		return false;
+	});
+
+	EXPECT_EQ(1U, callbacks);
+	File::deleteFile(path);
+}

@@ -82,6 +82,8 @@ hashing, RTF0, defensive protocol, interface, and application theme controls. Th
 <dl style="margin-left: 40px;">
   <dt>Maximum hash speed</dt>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_MAX_HASH_SPEED">Limits file hashing speed in MiB/s. Zero means unlimited.</dd>
+  <dt>Hashing worker threads</dt>
+  <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_HASHING_THREADS">Maximum number of CPU workers used to calculate independent Tiger Tree Hash blocks for one file. File input remains sequential and SFV checks remain ordered. DC++ may use fewer workers when the file has too few blocks, the computer exposes fewer logical processors, or the fixed 256 MiB pipeline-memory limit would be exceeded. Use one thread to retain serial hashing. Default: 2 threads. Minimum: 1. Maximum: 64.</dd>
   <dt>Hash database write batch size</dt>
   <dd cshelp="IDH_SETTINGS_EXPERIMENTAL_HASH_BATCH_SIZE">Number of SQLite hash database row changes grouped into one transaction. Larger values improve bulk hashing throughput; smaller values commit newly hashed files sooner.</dd>
   <dt>Verify hash database on startup</dt>

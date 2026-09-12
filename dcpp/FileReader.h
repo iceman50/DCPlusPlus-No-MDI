@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,6 +31,8 @@ using std::pair;
 using std::string;
 using std::vector;
 
+class File;
+
 /** Helper class for reading an entire file */
 
 class FileReader {
@@ -47,18 +50,21 @@ public:
 	FileReader(bool direct = false, size_t blockSize = 0) : direct(direct), blockSize(blockSize) { }
 
 	/**
-	 * Read file - callback will be called for each read chunk which may or may not be a multiple of the requested block size.
+	 * Read the file. Cached reads fill the requested block size across short system reads; only the final block may be short.
+	 * The direct Windows path may use alignment-derived chunk sizes.
 	 * @param file File name
-	 * @param callback Called for each block - the memory is owned by the reader object and
+	 * @param callback Called for each block. The reader owns the memory until the callback returns; false stops all further callbacks.
 	 * @return The number of bytes actually read
 	 * @throw FileException if the read fails
 	 */
 	size_t read(const string& file, const DataCallback& callback);
 
+	/** Read from the handle's current position so validation and hashing use the same filesystem object. */
+	size_t read(File& file, const DataCallback& callback);
+
 private:
 	static const size_t DEFAULT_BLOCK_SIZE = 1024*1024;
 
-	string file;
 	bool direct;
 	size_t blockSize;
 
@@ -70,6 +76,7 @@ private:
 
 	size_t readDirect(const string& file, const DataCallback& callback);
 	size_t readCached(const string& file, const DataCallback& callback);
+	size_t readCached(File& file, const DataCallback& callback);
 };
 
 }

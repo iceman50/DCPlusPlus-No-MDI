@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,6 +25,7 @@
 #include "ScopedFunctor.h"
 #include "SimpleXML.h"
 #include "SFVReader.h"
+#include "TigerTreeHasher.h"
 #include "ZUtils.h"
 
 namespace dcpp {
@@ -1319,6 +1321,33 @@ void HashManager::Hasher::scheduleRebuild() {
 	LogManager::getInstance()->message(_("Hash database rebuild has been scheduled"), LogMessage::SEV_INFO, _("Hash database"));
 }
 
+bool HashManager::Hasher::fastHash(File& file, TigerTree& tth, int64_t size, CRC32Filter* xcrc32, size_t workerCount, uint64_t& lastRead) {
+	// The coordinator invokes this observer in file order before dispatching each
+	// buffer, keeping rate limiting, CRC32 state, and cancellation single-threaded.
+	auto observe = [this, xcrc32, &lastRead](const void* data, size_t bytes) {
+		const auto maxSpeed = SETTING(MAX_HASH_SPEED);
+		if(maxSpeed > 0) {
+			const auto now = GET_TICK();
+			const auto minTime = bytes * 1000ULL / (static_cast<uint64_t>(maxSpeed) * 1024ULL * 1024ULL);
+			if(lastRead + minTime > now) Thread::sleep(static_cast<uint32_t>(lastRead + minTime - now));
+			lastRead += minTime;
+		} else {
+			lastRead = GET_TICK();
+		}
+
+		if(xcrc32) (*xcrc32)(data, bytes);
+		instantPause();
+		return !stop;
+	};
+	// Leaf workers may finish out of order; progress reports completed bytes while
+	// TigerTreeHasher retains responsibility for publishing leaves in file order.
+	auto progress = [this](size_t bytes) {
+		Lock l(cs);
+		currentSize = bytes >= static_cast<uint64_t>(currentSize) ? 0 : currentSize - static_cast<int64_t>(bytes);
+	};
+	return TigerTreeHasher::hash(file, size, tth.getBlockSize(), workerCount, tth, observe, progress);
+}
+
 int HashManager::Hasher::run() {
 	setThreadPriority(Thread::IDLE);
 
@@ -1404,52 +1433,58 @@ int HashManager::Hasher::run() {
 
 				auto lastRead = GET_TICK();
 
-				FileReader fr(true);
-
-				fr.read(fname, [&](const void* buf, size_t n) -> bool {
-					if(SETTING(MAX_HASH_SPEED)> 0) {
-						uint64_t now = GET_TICK();
-						uint64_t minTime = n * 1000LL / (SETTING(MAX_HASH_SPEED) * 1024LL * 1024LL);
-						if(lastRead + minTime> now) {
-							Thread::sleep(minTime - (now - lastRead));
+				const auto configuredWorkers = std::clamp(SETTING(HASHING_THREADS), SettingsManager::HASHING_THREADS_MIN, SettingsManager::HASHING_THREADS_MAX);
+				const auto workerCount = TigerTreeHasher::getWorkerCount(static_cast<size_t>(configuredWorkers), size, bs);
+				if(workerCount > 1) {
+					if(fastHash(f, tt, size, xcrc32, workerCount, lastRead)) sizeLeft = 0;
+				} else {
+					FileReader fr(true);
+					auto process = [&](const void* buf, size_t n) {
+						const auto maxSpeed = SETTING(MAX_HASH_SPEED);
+						if(maxSpeed > 0) {
+							const auto now = GET_TICK();
+							const auto minTime = n * 1000ULL / (static_cast<uint64_t>(maxSpeed) * 1024ULL * 1024ULL);
+							if(lastRead + minTime > now) Thread::sleep(static_cast<uint32_t>(lastRead + minTime - now));
+							lastRead += minTime;
+						} else {
+							lastRead = GET_TICK();
 						}
-						lastRead = lastRead + minTime;
-					} else {
-						lastRead = GET_TICK();
-					}
 
-					tt.update(buf, n);
-					if(xcrc32)
-						(*xcrc32)(buf, n);
-
-					{
-						Lock l(cs);
-						currentSize = max(static_cast<uint64_t>(currentSize - n), static_cast<uint64_t>(0));
-					}
-					sizeLeft -= n;
-
-					instantPause();
-					return !stop;
-				});
+						tt.update(buf, n);
+						if(xcrc32) (*xcrc32)(buf, n);
+						{
+							Lock l(cs);
+							currentSize = n >= static_cast<uint64_t>(currentSize) ? 0 : currentSize - static_cast<int64_t>(n);
+						}
+						sizeLeft -= static_cast<int64_t>(n);
+						instantPause();
+						return !stop;
+					};
+#ifdef _WIN32
+					fr.read(fname, process);
+#else
+					fr.read(f, process);
+#endif
+					tt.finalize();
+				}
 
 				// Keep the write-denying snapshot handle alive through hashDone and
 				// listener publication. On Windows this prevents the path from being
 				// replaced between the final read and snapshot attribution.
-				tt.finalize();
+				if(sizeLeft == 0 && (f.getSize() != size || f.getLastModified() != timestamp)) {
+					const auto detail = _("The file changed while it was being hashed");
+					beginTerminal();
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp, requestedJobId, HashManagerListener::Failure::FILE_CHANGED, detail);
+					LogManager::getInstance()->message(str(F_("%1% not shared; the file changed while it was being hashed.") % Util::addBrackets(fname)), LogMessage::SEV_WARNING, _("Hashing"));
+					throw SnapshotChanged();
+				}
 				uint64_t end = GET_TICK();
 				int64_t speed = 0;
 				if(end > start) {
 					speed = size * 1000 / (end - start);
 				}
 
-				if(xcrc32 && xcrc32->getValue() != sfv.getCRC()) {
-					beginTerminal();
-					LogManager::getInstance()->message(str(F_("%1% not shared; calculated CRC32 does not match the one found in SFV file.") % Util::addBrackets(fname)),
-						LogMessage::SEV_WARNING, _("Hashing"));
-					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
-						requestedJobId,
-						HashManagerListener::Failure::CRC_MISMATCH, _("The file failed its SFV CRC32 check"));
-				} else if(sizeLeft != 0) {
+				if(sizeLeft != 0) {
 					beginTerminal();
 					LogManager::getInstance()->message(str(F_("%1% not shared; hashing did not complete.") % Util::addBrackets(fname)),
 						LogMessage::SEV_WARNING, _("Hashing"));
@@ -1457,6 +1492,13 @@ int HashManager::Hasher::run() {
 						requestedJobId,
 						stop ? HashManagerListener::Failure::CANCELLED : HashManagerListener::Failure::INCOMPLETE,
 						stop ? _("Hashing was cancelled") : _("Hashing did not read the complete file"));
+				} else if(xcrc32 && xcrc32->getValue() != sfv.getCRC()) {
+					beginTerminal();
+					LogManager::getInstance()->message(str(F_("%1% not shared; calculated CRC32 does not match the one found in SFV file.") % Util::addBrackets(fname)),
+						LogMessage::SEV_WARNING, _("Hashing"));
+					HashManager::getInstance()->hashFailed(fname, requestedSize, requestedTimestamp,
+						requestedJobId,
+						HashManagerListener::Failure::CRC_MISMATCH, _("The file failed its SFV CRC32 check"));
 				} else {
 					beginTerminal();
 					HashManager::getInstance()->hashDone(fname, timestamp, tt, speed, size, requestedJobId);

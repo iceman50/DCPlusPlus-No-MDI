@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -50,21 +51,45 @@ size_t FileReader::read(const string& file, const DataCallback& callback) {
 	return ret;
 }
 
+size_t FileReader::read(File& file, const DataCallback& callback) {
+#if !defined(_WIN32) && defined(POSIX_FADV_SEQUENTIAL)
+	// Advice is deliberately best-effort: unsupported filesystems must still hash normally.
+	if(direct) ::posix_fadvise(file.h, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif
+
+	const auto ret = readCached(file, callback);
+
+#if !defined(_WIN32) && defined(POSIX_FADV_DONTNEED)
+	if(direct) ::posix_fadvise(file.h, 0, 0, POSIX_FADV_DONTNEED);
+#endif
+
+	return ret;
+}
+
 
 /** Read entire file, never returns READ_FAILED */
 size_t FileReader::readCached(const string& file, const DataCallback& callback) {
+	File f(file, File::READ, File::OPEN | File::SHARED);
+	return readCached(f, callback);
+}
+
+size_t FileReader::readCached(File& file, const DataCallback& callback) {
 	buffer.resize(getBlockSize(0));
 
-	auto buf = &buffer[0];
-	File f(file, File::READ, File::OPEN | File::SHARED);
-
 	size_t total = 0;
-	size_t n = buffer.size();
 	bool go = true;
-	while(f.read(buf, n) > 0 && go) {
-		go = callback(buf, n);
-		total += n;
-		n = buffer.size();
+	while(go) {
+		size_t filled = 0;
+		while(filled < buffer.size()) {
+			size_t bytes = buffer.size() - filled;
+			if(file.read(buffer.data() + filled, bytes) == 0) break;
+			filled += bytes;
+		}
+		if(filled == 0) break;
+
+		go = callback(buffer.data(), filled);
+		total += filled;
+		if(filled < buffer.size()) break;
 	}
 
 	return total;
@@ -188,7 +213,7 @@ size_t FileReader::readDirect(const string& file, const DataCallback& callback) 
 		swap(rn, hn);
 	}
 
-	if(hn != 0) {
+	if(hn != 0 && go) {
 		// Process leftovers
 		callback(hbuf, hn);
 	}

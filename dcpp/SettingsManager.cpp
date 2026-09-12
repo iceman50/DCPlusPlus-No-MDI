@@ -31,6 +31,11 @@
 
 namespace dcpp {
 
+#ifndef RGB
+/** Match the Windows COLORREF byte layout when building the shared settings core on POSIX. */
+constexpr int RGB(uint8_t red, uint8_t green, uint8_t blue) noexcept { return red | (green << 8) | (blue << 16); }
+#endif
+
 StringList SettingsManager::connectionSpeeds;
 
 const string SettingsManager::settingTags[] =
@@ -95,7 +100,7 @@ const string SettingsManager::settingTags[] =
 	"PublicHubsFrameSort", "QueueFrameSort", "SearchFrameSort", "TransfersSort", "UsersFrameSort",
 	"AwayIdle", "AutoRefreshTime", "AutoSearchLimit", "BufferSize", "DownloadSlots",
 	"HubLastLogLines", "MagnetAction", "MaxCommandLength", "MaxCompression", "MaxDownloadSpeed",
-	"MaxFilelistSize", "MaxHashSpeed", "MaxMessageLines", "MaxPMWindows", "MinMessageLines",
+	"MaxFilelistSize", "MaxHashSpeed", "HashingThreads", "MaxMessageLines", "MaxPMWindows", "MinMessageLines",
 	"MinUploadSpeed", "PMLastLogLines", "SearchHistory", "SetMinislotSize",
 	"SettingsSaveInterval", "Slots", "TabStyle", "TabWidth", "ToolbarSize", "AutoSearchInterval",
 	"MaxExtraSlots", "TestingStatus", "MaxMCNDownloads", "MaxMCNUploads",
@@ -318,6 +323,7 @@ SettingsManager::SettingsManager() {
 	setDefault(LOG_SYSTEM, false);
 	setDefault(SEND_UNKNOWN_COMMANDS, true);
 	setDefault(MAX_HASH_SPEED, 0);
+	setDefault(HASHING_THREADS, 2);
 	setDefault(OPEN_USER_CMD_HELP, true);
 	setDefault(GEO_CITY, false);
 	setDefault(GEO_REGION, false);
