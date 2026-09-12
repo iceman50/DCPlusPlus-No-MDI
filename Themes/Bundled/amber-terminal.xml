@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Amber Terminal" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#17130C" Surface="#271F12" Text="#FFF4D6" DisabledText="#BCAA84" Border="#6A5835" Accent="#8A5A00" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

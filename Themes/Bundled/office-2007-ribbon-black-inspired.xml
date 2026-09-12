@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2007 Ribbon Black Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#0F1012" Surface="#1C1E22" Text="#F3F3F3" DisabledText="#A4A7AC" Border="#494D54" Accent="#3D6D9E" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

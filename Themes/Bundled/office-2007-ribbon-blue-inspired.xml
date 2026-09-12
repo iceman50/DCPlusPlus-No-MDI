@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2007 Ribbon Blue Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#142434" Surface="#20394F" Text="#F5F8FB" DisabledText="#A9B8C5" Border="#4B6C88" Accent="#1F4E79" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

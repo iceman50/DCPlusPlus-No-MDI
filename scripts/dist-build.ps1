@@ -5,7 +5,7 @@ Build and package x64 MinGW DC++ debug/release artifacts.
 .DESCRIPTION
 Interactive helper for producing a small diagnostic distribution zip. The zip
 contains the unstripped executable, its GNU debug companion PDB, and
-changelog-bfe.txt.
+changelog-bfe.txt, plus the distributable theme collection.
 
 Package names use:
 DCPlusPlus-Experimental-VERSION-COMPILER-[Release|Debug]-MSVCRT-gitrev-yyyyMMdd-HHmmssZ.zip
@@ -14,6 +14,9 @@ By default the script prompts for the build configuration and writes packages
 to the root-level dist directory. It can also be used non-interactively:
 
   powershell -ExecutionPolicy Bypass -File scripts\dist-build.ps1 -Configuration Both
+
+.NOTES
+Copyright (C) 2026 iceman50
 #>
 
 [CmdletBinding()]
@@ -273,10 +276,14 @@ function New-DistPackage {
 	$exePath = Join-Path $binDir "DCPlusPlus.exe"
 	$pdbPath = Join-Path $binDir "DCPlusPlus.pdb"
 	$changelogPath = Join-Path $RepoRoot "changelog-bfe.txt"
+	$themesPath = Join-Path $RepoRoot "Themes"
 
 	Assert-RequiredFile -Path $exePath -Description "Unstripped executable"
 	Assert-RequiredFile -Path $pdbPath -Description "Debug companion PDB"
 	Assert-RequiredFile -Path $changelogPath -Description "BFE changelog"
+	if(-not (Test-Path -LiteralPath $themesPath -PathType Container)) {
+		throw "Bundled themes directory was not found: $themesPath"
+	}
 
 	$configurationName = Get-PackageConfigurationName -Mode $Mode
 	$zipName = "DCPlusPlus-Experimental-$VersionNumber-$CompilerName-$configurationName-MSVCRT-$GitRevision-$BuildTimestamp.zip"
@@ -294,12 +301,13 @@ function New-DistPackage {
 		Copy-Item -LiteralPath $exePath -Destination (Join-Path $stageDir "DCPlusPlus.exe") -Force
 		Copy-Item -LiteralPath $pdbPath -Destination (Join-Path $stageDir "DCPlusPlus.pdb") -Force
 		Copy-Item -LiteralPath $changelogPath -Destination (Join-Path $stageDir "changelog-bfe.txt") -Force
+		Copy-Item -LiteralPath $themesPath -Destination (Join-Path $stageDir "Themes") -Recurse -Force
 
 		if(Test-Path -LiteralPath $zipPath) {
 			Remove-Item -LiteralPath $zipPath -Force
 		}
 
-		Get-ChildItem -LiteralPath $stageDir -File | Compress-Archive -DestinationPath $zipPath -CompressionLevel Optimal -Force
+		Get-ChildItem -LiteralPath $stageDir | Compress-Archive -DestinationPath $zipPath -CompressionLevel Optimal -Force
 		Write-Host "Created $zipPath"
 		return $zipPath
 	} finally {

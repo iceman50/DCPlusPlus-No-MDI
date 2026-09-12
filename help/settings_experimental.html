@@ -25,8 +25,9 @@ hashing, RTF0, defensive protocol, interface, and application theme controls. Th
   <em>Dark</em> select a mode explicitly. On Windows 7 and Windows 8, <em>Follow Windows</em> uses the native light
   appearance because those versions do not expose an application dark preference.</dd>
   <dt>Dark theme palette</dt>
-  <dd>The preset list provides several built-in dark palettes and every valid XML theme found in the per-user
-  <code>Themes</code> directory. <em>Save XML</em> writes the current palette and installs it in that directory, while
+  <dd>The preset list provides built-in dark palettes, the XML collection shipped in the application's
+  <code>Themes/Bundled</code> directory, and every valid XML theme found in the per-user <code>Themes</code> directory.
+  A per-user file overrides a bundled theme with the same file name. <em>Save XML</em> writes the current palette and installs it in the user directory, while
   <em>Import XML</em> validates an existing file and copies it there. <em>Custom</em> represents a palette that does not
   match a loaded preset and does not save it automatically.
   <em>Open folder</em> opens the directory so XML files can be added or edited directly; use <em>Reload</em> afterward.
@@ -45,6 +46,11 @@ hashing, RTF0, defensive protocol, interface, and application theme controls. Th
     DisabledText="#A0A0A0" Border="#494949" Accent="#0078D7"
     HighlightText="#FFFFFF" /&gt;
 &lt;/DCPlusPlusTheme&gt;</pre></dd>
+  <dt>Bundled theme collection</dt>
+  <dd>The distributed themes are dark-mode adaptations inspired by several generations of productivity-suite chrome
+  plus original solar, arctic, plum, forest, and amber palettes. Their names describe visual inspiration rather than
+  exact reproductions or product affiliation. Select <em>Dark</em> color mode before choosing one. Windows high contrast
+  continues to override the collection.</dd>
   <dt>High contrast</dt>
   <dd>Windows high contrast takes precedence over every color-mode and palette choice. DC++ then uses the
   current Windows system colors so contrast and accessibility choices remain under operating-system control.</dd>

@@ -73,15 +73,31 @@ std::vector<ThemeManager::Theme> ThemeManager::getThemes() {
 		{ T_("Dark slate"), { RGB(24, 28, 32), RGB(38, 44, 50), RGB(232, 235, 238), RGB(151, 158, 164), RGB(68, 76, 84), RGB(38, 166, 154), RGB(255, 255, 255) } }
 	};
 
-	const auto directory = getDirectory();
-	File::ensureDirectory(directory);
 	std::vector<Theme> files;
-	for(const auto& path: File::findFiles(directory, "*.xml")) {
-		try {
-			files.push_back(load(path));
-		} catch(const Exception&) {
+	auto loadDirectory = [&files](const std::string& directory) {
+		for(const auto& path: File::findFiles(directory, "*.xml")) {
+			try {
+				auto theme = load(path);
+				auto existing = std::find_if(files.begin(), files.end(), [&path](const Theme& item) {
+					return Util::stricmp(Util::getFileName(item.path), Util::getFileName(path)) == 0;
+				});
+				if(existing == files.end()) {
+					files.push_back(std::move(theme));
+				} else {
+					*existing = std::move(theme);
+				}
+			} catch(const Exception&) {
+			}
 		}
-	}
+	};
+
+	// Distribution themes stay beside the executable and remain read-only.
+	// Loading the per-user directory afterward lets an imported file with the
+	// same name override its bundled counterpart without producing duplicates.
+	loadDirectory(Util::getPath(Util::PATH_GLOBAL_CONFIG) + "Themes" PATH_SEPARATOR_STR "Bundled" PATH_SEPARATOR_STR);
+	const auto userDirectory = getDirectory();
+	File::ensureDirectory(userDirectory);
+	loadDirectory(userDirectory);
 	std::sort(files.begin(), files.end(), [](const Theme& lhs, const Theme& rhs) { return lhs.name < rhs.name; });
 	themes.insert(themes.end(), files.begin(), files.end());
 	return themes;

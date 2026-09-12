@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2010 Azure Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#102638" Surface="#1B3B52" Text="#F5FAFD" DisabledText="#A9BDC9" Border="#426B83" Accent="#1E6C9E" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2003 Classic Blue Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#172536" Surface="#243A52" Text="#F4F7FB" DisabledText="#A8B4C2" Border="#4D6985" Accent="#2B579A" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

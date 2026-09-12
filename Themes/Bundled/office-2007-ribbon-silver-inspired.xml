@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2007 Ribbon Silver Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#25272B" Surface="#363A40" Text="#F5F5F5" DisabledText="#B3B6BA" Border="#626870" Accent="#59697A" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

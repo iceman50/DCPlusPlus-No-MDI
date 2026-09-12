@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2010 Silver Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#22272B" Surface="#343C42" Text="#F5F7F8" DisabledText="#ADB7BC" Border="#5D6970" Accent="#4E7186" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

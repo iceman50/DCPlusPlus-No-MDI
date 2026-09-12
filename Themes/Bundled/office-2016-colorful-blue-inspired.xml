@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2016 Colorful Blue Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#14212B" Surface="#213542" Text="#F4F8FA" DisabledText="#A8B5BD" Border="#4F6877" Accent="#0078D4" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

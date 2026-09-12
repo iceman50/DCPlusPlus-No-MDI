@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Microsoft 365 Fluent Blue Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#1F1F1F" Surface="#292929" Text="#FFFFFF" DisabledText="#ADADAD" Border="#666666" Accent="#0F6CBD" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

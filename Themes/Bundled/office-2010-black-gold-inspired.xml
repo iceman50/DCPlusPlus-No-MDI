@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Office 2010 Black Gold Inspired" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#121212" Surface="#222222" Text="#F5F3EE" DisabledText="#AAA69E" Border="#4B4944" Accent="#9A6700" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

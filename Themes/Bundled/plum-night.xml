@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Plum Night" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#1D1825" Surface="#2A2234" Text="#F7F1FA" DisabledText="#B9ABBF" Border="#62536B" Accent="#70458C" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DCPlusPlusTheme Name="Solar Dusk" Author="iceman50" License="GPL-3.0-or-later">
+  <!-- Copyright (C) 2026 iceman50 -->
+  <Palette Background="#002B36" Surface="#073642" Text="#EEE8D5" DisabledText="#93A1A1" Border="#586E75" Accent="#2A6F89" HighlightText="#FFFFFF" />
+</DCPlusPlusTheme>
