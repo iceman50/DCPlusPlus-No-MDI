@@ -20,6 +20,7 @@
 * Track individual TransferView updates and redraw only affected visible rows while safely handling sorting, grouping and removal (iceman50)
 * Restore progress bars for grouped uploads by aggregating per-connection transfer ranges (iceman50)
 * Reduce large file-list UI stalls with low-priority loading, single-pass directory totals and an off-thread initial file cache (iceman50)
+* Smooth the Network Statistics traffic graph with bounded supersampling and shape-preserving curve interpolation (iceman50)
 * Restore startup performance with large download queues by building the queued-file TTH index only when first needed (https://github.com/iceman50/DCPlusPlus-No-MDI/issues/2) (iceman50)
 
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -45,20 +46,21 @@ private:
 	enum { PANEL_PADDING = 14 };
 	enum { MIN_PANE_WIDTH = 200 };
 	enum { SPLITTER_HIT_RADIUS = 5 };
+	enum { GRAPH_SUPERSAMPLE = 3 };
 
 	StatsFrame(TabViewPtr parent);
 	virtual ~StatsFrame();
 
 	dwt::FontPtr headingFont;
 	dwt::PenPtr borderPen;
-	dwt::PenPtr gridPen;
 	dwt::PenPtr upPen;
 	dwt::PenPtr downPen;
-	dwt::PenPtr upGlowPen;
-	dwt::PenPtr downGlowPen;
 	dwt::BrushPtr backgroundBrush;
 	dwt::BrushPtr cardBrush;
 	dwt::BrushPtr graphBrush;
+	dwt::BitmapPtr smoothPlotBitmap;
+	long smoothPlotWidth;
+	long smoothPlotHeight;
 	COLORREF secondaryTextColor;
 
 	struct Stat {
@@ -96,7 +98,9 @@ private:
 	void draw(dwt::Canvas& canvas, const dwt::Rectangle& rect);
 	void drawInfo(dwt::Canvas& canvas, const dwt::Rectangle& rect);
 	void drawGraph(dwt::Canvas& canvas, const dwt::Rectangle& rect);
-	void drawSeries(dwt::Canvas& canvas, const StatList& stats, const dwt::Rectangle& plot);
+	void drawPlot(dwt::Canvas& canvas, const dwt::Rectangle& plot, int timeStep, int scale);
+	bool drawSupersampledPlot(dwt::Canvas& canvas, const dwt::Rectangle& plot, int timeStep);
+	void drawSeries(HDC dc, const StatList& stats, const dwt::Rectangle& plot, int scale);
 	long getSplitterPosition(long clientWidth) const;
 	void moveSplitter(long x);
 
