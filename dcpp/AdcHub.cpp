@@ -529,13 +529,8 @@ void AdcHub::handle(AdcCommand::CTM, AdcCommand& c) noexcept {
 	const string& port = c.getParam(1);
 	const string& token = c.getParam(2);
 
-	bool secure = false;
-	if(protocol == CLIENT_PROTOCOL && !SETTING(REQUIRE_TLS)) {
-		// Nothing special
-	} else if(protocol == SECURE_CLIENT_PROTOCOL && CryptoManager::getInstance()->TLSOk()) {
-		secure = true;
-	} else {
-		unknownProtocol(c.getFrom(), protocol, token);
+	bool secure;
+	if(!secureAvail(c.getFrom(), protocol, token, secure)) {
 		return;
 	}
 
@@ -560,12 +555,7 @@ void AdcHub::handle(AdcCommand::RCM, AdcCommand& c) noexcept {
 	const string& token = c.getParam(1);
 
 	bool secure;
-	if(protocol == CLIENT_PROTOCOL && !SETTING(REQUIRE_TLS)) {
-		secure = false;
-	} else if(protocol == SECURE_CLIENT_PROTOCOL && CryptoManager::getInstance()->TLSOk()) {
-		secure = true;
-	} else {
-		unknownProtocol(c.getFrom(), protocol, token);
+	if(!secureAvail(c.getFrom(), protocol, token, secure)) {
 		return;
 	}
 
@@ -811,14 +801,8 @@ void AdcHub::handle(AdcCommand::NAT, AdcCommand& c) noexcept {
 	const string& port = c.getParam(1);
 	const string& token = c.getParam(2);
 
-	// bool secure = secureAvail(c.getFrom(), protocol, token);
-	bool secure = false;
-	if(protocol == CLIENT_PROTOCOL) {
-		// Nothing special
-	} else if(protocol == SECURE_CLIENT_PROTOCOL && CryptoManager::getInstance()->TLSOk()) {
-		secure = true;
-	} else {
-		unknownProtocol(c.getFrom(), protocol, token);
+	bool secure;
+	if(!secureAvail(c.getFrom(), protocol, token, secure)) {
 		return;
 	}
 
@@ -847,13 +831,8 @@ void AdcHub::handle(AdcCommand::RNT, AdcCommand& c) noexcept {
 	const string& port = c.getParam(1);
 	const string& token = c.getParam(2);
 
-	bool secure = false;
-	if(protocol == CLIENT_PROTOCOL) {
-		// Nothing special
-	} else if(protocol == SECURE_CLIENT_PROTOCOL && CryptoManager::getInstance()->TLSOk()) {
-		secure = true;
-	} else {
-		unknownProtocol(c.getFrom(), protocol, token);
+	bool secure;
+	if(!secureAvail(c.getFrom(), protocol, token, secure)) {
 		return;
 	}
 
@@ -1358,6 +1337,18 @@ pair<bool, bool> AdcHub::getAdvertisedConnectivity(bool hubUsesIPv6, bool ipv4En
 	return { !hubUsesIPv6 || ipv4Enabled, hubUsesIPv6 || ipv6Enabled };
 }
 
+AdcHub::ProtocolMode AdcHub::resolveProtocolMode(const string& protocol, bool requireTls, bool tlsAvailable) noexcept {
+	if(protocol == CLIENT_PROTOCOL) {
+		return requireTls ? ProtocolMode::UNAVAILABLE : ProtocolMode::PLAINTEXT;
+	}
+
+	if(protocol == SECURE_CLIENT_PROTOCOL) {
+		return tlsAvailable ? ProtocolMode::SECURE : ProtocolMode::UNAVAILABLE;
+	}
+
+	return ProtocolMode::UNAVAILABLE;
+}
+
 void AdcHub::appendConnectivity(StringMap& lastInfoMap, AdcCommand& c, bool v4, bool v6) {
 	if (v4) {
 		if(CONNSETTING(NO_IP_OVERRIDE) && !getUserIp4().empty()) {
@@ -1632,6 +1623,17 @@ void AdcHub::unknownProtocol(uint32_t target, const string& protocol, const stri
 	cmd.addParam("TO", token);
 
 	send(cmd);
+}
+
+bool AdcHub::secureAvail(uint32_t target, const string& protocol, const string& token, bool& secure) {
+	const auto mode = resolveProtocolMode(protocol, SETTING(REQUIRE_TLS), CryptoManager::getInstance()->TLSOk());
+	if(mode == ProtocolMode::UNAVAILABLE) {
+		unknownProtocol(target, protocol, token);
+		return false;
+	}
+
+	secure = mode == ProtocolMode::SECURE;
+	return true;
 }
 
 void AdcHub::on(Connected c) noexcept {

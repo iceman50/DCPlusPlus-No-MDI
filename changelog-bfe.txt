@@ -12,6 +12,7 @@
 * Update version.xml to use its own experimental feed (https://dcplusplus.sourceforge.io/version_exp.xml) (iceman50)
 * Fix MiniUPnP socket timeouts on Windows being interpreted as milliseconds instead of timeval seconds (iceman50)
 * Harden starred NMDC status frames against client manipulation (iceman50)
+* Apply consistent TLS requirements to ADC direct and NAT traversal connections (iceman50)
 * Prevent System Log stalls by batching RichEdit updates, preserve severity colors for timestamps, and make its retained message limit configurable (iceman50)
 * Add configurable CCPM automatic-reconnect delays, stability and attempt limits, and consolidate Experimental settings into four focused tabs (iceman50)
 * Fix TransferView progress bars occasionally stopping until their row is clicked (https://github.com/iceman50/DCPlusPlus-No-MDI/issues/3) (iceman50)

@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2026 iceman50
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 #include "testbase.h"
 
 #include <dcpp/AdcCommand.h>
@@ -251,6 +260,28 @@ TEST(testadc, advertises_all_enabled_connectivity_families)
 	EXPECT_EQ(std::make_pair(false, true), AdcHub::getAdvertisedConnectivity(true, false, true));
 	EXPECT_EQ(std::make_pair(true, true), AdcHub::getAdvertisedConnectivity(false, true, true));
 	EXPECT_EQ(std::make_pair(true, true), AdcHub::getAdvertisedConnectivity(true, true, true));
+}
+
+TEST(testadc, resolves_peer_transfer_protocol_security)
+{
+	using ProtocolMode = AdcHub::ProtocolMode;
+
+	// Plain ADC is available only when the user permits unencrypted transfers.
+	EXPECT_EQ(ProtocolMode::PLAINTEXT, AdcHub::resolveProtocolMode(AdcHub::CLIENT_PROTOCOL, false, false));
+	EXPECT_EQ(ProtocolMode::PLAINTEXT, AdcHub::resolveProtocolMode(AdcHub::CLIENT_PROTOCOL, false, true));
+	EXPECT_EQ(ProtocolMode::UNAVAILABLE, AdcHub::resolveProtocolMode(AdcHub::CLIENT_PROTOCOL, true, false));
+	EXPECT_EQ(ProtocolMode::UNAVAILABLE, AdcHub::resolveProtocolMode(AdcHub::CLIENT_PROTOCOL, true, true));
+
+	// ADCS depends on local TLS support, independently of whether TLS is required.
+	EXPECT_EQ(ProtocolMode::UNAVAILABLE, AdcHub::resolveProtocolMode(AdcHub::SECURE_CLIENT_PROTOCOL, false, false));
+	EXPECT_EQ(ProtocolMode::SECURE, AdcHub::resolveProtocolMode(AdcHub::SECURE_CLIENT_PROTOCOL, false, true));
+	EXPECT_EQ(ProtocolMode::UNAVAILABLE, AdcHub::resolveProtocolMode(AdcHub::SECURE_CLIENT_PROTOCOL, true, false));
+	EXPECT_EQ(ProtocolMode::SECURE, AdcHub::resolveProtocolMode(AdcHub::SECURE_CLIENT_PROTOCOL, true, true));
+
+	// Protocol identifiers are exact and unknown values must never fall back to plaintext.
+	EXPECT_EQ(ProtocolMode::UNAVAILABLE, AdcHub::resolveProtocolMode(Util::emptyString, false, true));
+	EXPECT_EQ(ProtocolMode::UNAVAILABLE, AdcHub::resolveProtocolMode("adc/1.0", false, true));
+	EXPECT_EQ(ProtocolMode::UNAVAILABLE, AdcHub::resolveProtocolMode("ADC/2.0", false, true));
 }
 
 TEST(testadc, validates_failover_urls)

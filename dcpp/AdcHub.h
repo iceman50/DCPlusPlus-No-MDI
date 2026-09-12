@@ -68,6 +68,14 @@ public:
 	static StringList parseSearchExts(int flag);
 	static pair<bool, bool> getAdvertisedConnectivity(bool hubUsesIPv6, bool ipv4Enabled, bool ipv6Enabled) noexcept;
 
+	enum class ProtocolMode {
+		UNAVAILABLE,
+		PLAINTEXT,
+		SECURE
+	};
+
+	static ProtocolMode resolveProtocolMode(const string& protocol, bool requireTls, bool tlsAvailable) noexcept;
+
 	static const string CLIENT_PROTOCOL;
 	static const string SECURE_CLIENT_PROTOCOL;
 	static const string ADCS_FEATURE;
@@ -160,7 +168,7 @@ private:
 	void resetHBRI() noexcept;
 	void sendUDP(const AdcCommand& cmd) noexcept;
 	void unknownProtocol(uint32_t target, const string& protocol, const string& token);
-	bool secureAvail(uint32_t target, const string& protocol, const string& token);
+	bool secureAvail(uint32_t target, const string& protocol, const string& token, bool& secure);
 
 	virtual bool v4only() const { return false; }
 	virtual void on(Connecting) noexcept { fire(ClientListener::Connecting(), this); }
