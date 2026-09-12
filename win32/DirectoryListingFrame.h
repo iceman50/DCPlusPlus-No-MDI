@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -114,10 +115,12 @@ private:
 			DirectoryListing::File* file;
 			DirectoryListing::Directory* dir;
 		};
+		/** Stable numeric size used by display and sorting without walking subtrees on the UI thread. */
+		int64_t itemSize;
 
-		ItemInfo(bool root, DirectoryListing::Directory* d) : type(USER), dir(d) { }
+		ItemInfo(bool root, DirectoryListing::Directory* d) : type(USER), dir(d), itemSize(0) { }
 
-		ItemInfo(DirectoryListing::File* f) : type(FILE), file(f) {
+		ItemInfo(DirectoryListing::File* f) : type(FILE), file(f), itemSize(f->getSize()) {
 			columns[COLUMN_FILENAME] = Text::toT(f->getName());
 			columns[COLUMN_TYPE] = Util::getFileExt(columns[COLUMN_FILENAME]);
 			if(!columns[COLUMN_TYPE].empty() && columns[COLUMN_TYPE][0] == '.')
@@ -129,11 +132,11 @@ private:
 			if(f->getRemoteDate() > 0)
 				columns[COLUMN_DATE] = Text::toT(Util::formatTime("%Y-%m-%d %H:%M", f->getRemoteDate()));
 		}
-		ItemInfo(DirectoryListing::Directory* d) : type(DIRECTORY), dir(d) {
+		ItemInfo(DirectoryListing::Directory* d) : ItemInfo(d, d->getComplete() ? d->getTotalSize() : d->getRemoteSize()) { }
+		ItemInfo(DirectoryListing::Directory* d, int64_t aSize) : type(DIRECTORY), dir(d), itemSize(aSize) {
 			columns[COLUMN_FILENAME] = Text::toT(d->getName());
-			const auto size = d->getComplete() ? d->getTotalSize() : d->getRemoteSize();
-			columns[COLUMN_EXACTSIZE] = size >= 0 ? Text::toT(Util::formatExactSize(size)) : _T("?");
-			columns[COLUMN_SIZE] = size >= 0 ? Text::toT(Util::formatBytes(size)) : _T("?");
+			columns[COLUMN_EXACTSIZE] = itemSize >= 0 ? Text::toT(Util::formatExactSize(itemSize)) : _T("?");
+			columns[COLUMN_SIZE] = itemSize >= 0 ? Text::toT(Util::formatBytes(itemSize)) : _T("?");
 			if(d->getRemoteDate() > 0)
 				columns[COLUMN_DATE] = Text::toT(Util::formatTime("%Y-%m-%d %H:%M", d->getRemoteDate()));
 		}
@@ -158,7 +161,7 @@ private:
 
 		struct TotalSize {
 			TotalSize() : total(0) { }
-			void operator()(ItemInfo* a) { total += a->type == DIRECTORY ? a->dir->getTotalSize() : a->file->getSize(); }
+			void operator()(ItemInfo* a) { total += a->itemSize; }
 			int64_t total;
 		};
 

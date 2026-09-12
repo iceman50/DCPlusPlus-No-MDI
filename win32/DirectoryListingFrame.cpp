@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -88,9 +89,7 @@ int DirectoryListingFrame::ItemInfo::compareItems(const ItemInfo* a, const ItemI
 		if(b->type == DIRECTORY) {
 			switch(col) {
 			case COLUMN_EXACTSIZE:
-			case COLUMN_SIZE: return compare(
-				a->dir->getComplete() ? a->dir->getTotalSize() : a->dir->getRemoteSize(),
-				b->dir->getComplete() ? b->dir->getTotalSize() : b->dir->getRemoteSize());
+			case COLUMN_SIZE: return compare(a->itemSize, b->itemSize);
 			case COLUMN_DATE: return compare(a->dir->getRemoteDate(), b->dir->getRemoteDate());
 			default: return compare(a->columns[col], b->columns[col]);
 			}
@@ -101,8 +100,8 @@ int DirectoryListingFrame::ItemInfo::compareItems(const ItemInfo* a, const ItemI
 		return 1;
 	} else {
 		switch(col) {
-		case COLUMN_EXACTSIZE: return compare(a->file->getSize(), b->file->getSize());
-		case COLUMN_SIZE: return compare(a->file->getSize(), b->file->getSize());
+		case COLUMN_EXACTSIZE: return compare(a->itemSize, b->itemSize);
+		case COLUMN_SIZE: return compare(a->itemSize, b->itemSize);
 		case COLUMN_DATE: return compare(a->file->getRemoteDate(), b->file->getRemoteDate());
 		default: return compare(a->columns[col], b->columns[col]);
 		}
@@ -461,6 +460,8 @@ public:
 #endif
 
 	int run() {
+		setThreadPriority(Thread::LOW);
+
 		/* load the file list; prepare the directory cache in order to have the directory tree
 		ready by the time the file list is displayed. no need to lock the mutex at this point
 		because it is guaranteed that the file list window won't try to read the directory cache
@@ -475,6 +476,11 @@ public:
 			step("caching dirs");
 			cacheDirs(parent.dl->getRoot());
 
+			// Prepare the root folder before enabling the window. Without this, the UI
+			// can race the background cache and construct a large initial folder itself.
+			step("caching initial files");
+			cacheDirectoryFiles(parent.dl->getRoot());
+
 			step("dir cache done; displaying");
 			successF();
 
@@ -487,7 +493,7 @@ public:
 		they will have been processed by the time the user wants them to be displayed. */
 		try {
 			step("caching files");
-			cacheFiles(parent.dl->getRoot());
+			for(auto directory: parent.dl->getRoot()->directories) cacheFiles(directory);
 		} catch(const Exception&) { }
 
 		step("file cache done; destroying thread");
@@ -534,17 +540,22 @@ private:
 	unordered_map<DirectoryListing::Directory*, list<DirectoryListingFrame::ItemInfo>> cache;
 	CriticalSection cs;
 
-	void cacheDirs(DirectoryListing::Directory* d) {
+	/** Build directory display objects and their aggregate sizes in one post-order traversal. */
+	int64_t cacheDirs(DirectoryListing::Directory* d) {
 		if(parent.dl->getAbort()) { throw Exception(); }
 
+		int64_t totalSize = d->getSize();
 		for(auto i: d->directories) {
+			const auto childSize = cacheDirs(i);
+			totalSize += childSize;
 			++cacheCount;
-			parent.dirCache.emplace(i, i);
-			cacheDirs(i);
+			parent.dirCache.emplace(i, DirectoryListingFrame::ItemInfo(i, i->getComplete() ? childSize : i->getRemoteSize()));
 		}
+		return totalSize;
 	}
 
-	void cacheFiles(DirectoryListing::Directory* d) {
+	/** Build one directory's expensive display strings without touching a window control. */
+	void cacheDirectoryFiles(DirectoryListing::Directory* d) {
 		if(parent.dl->getAbort()) { throw Exception(); }
 
 		const auto count = d->files.size();
@@ -562,6 +573,10 @@ private:
 				cache.emplace(d, move(files));
 			}
 		}
+	}
+
+	void cacheFiles(DirectoryListing::Directory* d) {
+		cacheDirectoryFiles(d);
 
 		// process sub-directories.
 		for(auto i: d->directories) {
