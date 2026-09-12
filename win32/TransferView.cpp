@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -395,9 +396,22 @@ double TransferView::TransferInfo::barPos() const {
 		// "transferred" is computed from previous download events so the ratio might exceed 100%...
 		return size > 0 && transferred >= 0 ?
 			std::min(static_cast<double>(transferred) / static_cast<double>(size), 1.0) : -1;
-	} else {
-		return conns.size() == 1 ? conns.front().barPos() : -1;
 	}
+
+	// Multiple users may upload different ranges of the same file. Summing the
+	// per-connection positions and requested sizes yields a stable aggregate bar;
+	// dividing by the parent file size would misrepresent partial ranges.
+	double completedBytes = 0;
+	double totalBytes = 0;
+	bool running = false;
+	for(const auto& conn: conns) {
+		running = running || conn.status == STATUS_RUNNING;
+		if(conn.size > 0 && conn.transferred >= 0) {
+			completedBytes += static_cast<double>(std::min(conn.transferred, conn.size));
+			totalBytes += static_cast<double>(conn.size);
+		}
+	}
+	return running && totalBytes > 0 ? std::min(completedBytes / totalBytes, 1.0) : -1;
 }
 
 void TransferView::TransferInfo::force() {
