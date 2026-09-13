@@ -21,8 +21,12 @@
 * Restore progress bars for grouped uploads by aggregating per-connection transfer ranges (iceman50)
 * Reduce large file-list UI stalls with low-priority loading, single-pass directory totals and an off-thread initial file cache (iceman50)
 * Smooth the Network Statistics traffic graph with bounded supersampling and shape-preserving curve interpolation (iceman50)
-* Add 15 distributable dark theme XMLs inspired by classic and modern productivity palettes, with bundled and per-user discovery (iceman50)
+* Add 15 distributable dark theme XMLs inspired by classic and modern productivity palettes, with flat application and per-user discovery (iceman50)
 * Add 10 accessible neon and vibrant theme XMLs spanning pink, purple, blue, orange, red, lime, aqua and sunset palettes (iceman50)
+* Fix undersized and pixelated emoticon rendering with DPI-aware rasterization and safer display sizes (iceman50)
+* Add flat application-local and per-user DCEMO discovery through the Emoticons directory (iceman50)
+* Audit and repair cropped artwork across all three distributed emoticon packs, with balanced visible margins at chat display sizes (iceman50)
+* Package distribution archives with the stripped executable renamed to DCPlusPlus.exe, its PDB, changelog, themes and emoticons (iceman50)
 * Restore startup performance with large download queues by building the queued-file TTH index only when first needed (https://github.com/iceman50/DCPlusPlus-No-MDI/issues/2) (iceman50)
 
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==
@@ -114,6 +118,8 @@
 * Add separate timestamp, nickname and message colors for your own outgoing chat messages
 * Batch RichEdit chat updates to reduce UI pressure while preserving selection and scroll position
 * Harden RichEdit text limits, trimming, range handling and embedded-image insertion
+* Add three original distributable .dcemo packs: Neon Circuit, Pixel Arcade and Candy Pop
+* Add an emoticon-package preview showing every loaded image, semantic name and shortcut keyword
 * Add configurable chat emoticons loaded from .dcemo ZIP packages
 * Add XML shortcut rules and BMP, ICO and PNG image support for emoticon packages
 * Add an Appearance > Emoticons settings page with package, display-size and preferred bit-depth selectors

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -56,6 +57,16 @@ public:
 		vector<ExportItem> items;
 		size_t skipped = 0;
 	};
+	struct PackagePreview {
+		string name;
+		string version;
+		vector<ExportItem> items;
+	};
+	struct Package {
+		string name;
+		string version;
+		string path;
+	};
 
 	/** Return a snapshot of all rules in the configured package. */
 	static vector<Rule> getRules();
@@ -70,6 +81,15 @@ public:
 
 	/** Import an XML emoticon manifest and resolve its sibling image folder. */
 	static ImportPackage importEmoticonPackage(const string& manifestPath);
+
+	/** Read package metadata, shortcut rules and extracted icon paths without changing the active package. */
+	static PackagePreview previewPackage(const string& path);
+	/** Read and validate package metadata without extracting image assets. */
+	static Package inspectPackage(const string& path);
+	/** Return the directory reserved for user-installed packages. */
+	static string getDirectory();
+	/** Discover valid flat application-local and user-installed packages. */
+	static vector<Package> getPackages();
 
 	/** Forget the current package so it is re-read on the next request. */
 	static void reload();

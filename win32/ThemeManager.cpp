@@ -91,10 +91,10 @@ std::vector<ThemeManager::Theme> ThemeManager::getThemes() {
 		}
 	};
 
-	// Distribution themes stay beside the executable and remain read-only.
+	// Distribution themes stay beside the executable in the flat Themes directory.
 	// Loading the per-user directory afterward lets an imported file with the
-	// same name override its bundled counterpart without producing duplicates.
-	loadDirectory(Util::getPath(Util::PATH_GLOBAL_CONFIG) + "Themes" PATH_SEPARATOR_STR "Bundled" PATH_SEPARATOR_STR);
+	// same name override its application counterpart without producing duplicates.
+	loadDirectory(Util::getPath(Util::PATH_GLOBAL_CONFIG) + "Themes" PATH_SEPARATOR_STR);
 	const auto userDirectory = getDirectory();
 	File::ensureDirectory(userDirectory);
 	loadDirectory(userDirectory);

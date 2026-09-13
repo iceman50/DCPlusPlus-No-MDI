@@ -1,3 +1,5 @@
+/* Copyright (C) 2026 iceman50 */
+
 #include "testbase.h"
 
 #include <dcpp/Archive.h>
@@ -27,4 +29,12 @@ TEST(testarchive, test_archive)
 	};
 
 	ASSERT_EQ(tiger("test/gtest.h"), tiger("test/data/out/gtest.h"));
+}
+
+TEST(testarchive, reads_a_bounded_entry_without_extracting_the_archive)
+{
+	const auto expected = File("test/gtest.h", File::READ, File::OPEN).read();
+	EXPECT_EQ(expected, Archive("test/data/gtest_h.zip").readFile("gtest.h", expected.size()));
+	EXPECT_THROW(Archive("test/data/gtest_h.zip").readFile("gtest.h", 1), Exception);
+	EXPECT_THROW(Archive("test/data/gtest_h.zip").readFile("missing", 1024), Exception);
 }

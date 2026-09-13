@@ -3,9 +3,9 @@
 Build and package x64 MinGW DC++ debug/release artifacts.
 
 .DESCRIPTION
-Interactive helper for producing a small diagnostic distribution zip. The zip
-contains the unstripped executable, its GNU debug companion PDB, and
-changelog-bfe.txt, plus the distributable theme collection.
+Interactive helper for producing a distribution zip. The zip contains the
+stripped executable renamed to DCPlusPlus.exe, its GNU debug companion PDB,
+changelog-bfe.txt, and the distributable theme and emoticon collections.
 
 Package names use:
 DCPlusPlus-Experimental-VERSION-COMPILER-[Release|Debug]-MSVCRT-gitrev-yyyyMMdd-HHmmssZ.zip
@@ -237,7 +237,7 @@ function Invoke-DistBuild {
 		[string]$SCons
 	)
 
-	$target = "build/$Mode-mingw-x64/bin/DCPlusPlus.exe"
+	$target = "build/$Mode-mingw-x64/bin/DCPlusPlus-stripped.exe"
 	$sconsArgs = @(
 		"tools=mingw",
 		"arch=x64",
@@ -273,16 +273,20 @@ function New-DistPackage {
 
 	$buildName = "$Mode-mingw-x64"
 	$binDir = Join-Path $RepoRoot "build\$buildName\bin"
-	$exePath = Join-Path $binDir "DCPlusPlus.exe"
+	$exePath = Join-Path $binDir "DCPlusPlus-stripped.exe"
 	$pdbPath = Join-Path $binDir "DCPlusPlus.pdb"
 	$changelogPath = Join-Path $RepoRoot "changelog-bfe.txt"
 	$themesPath = Join-Path $RepoRoot "Themes"
+	$emoticonPath = Join-Path $RepoRoot "Emoticons"
 
-	Assert-RequiredFile -Path $exePath -Description "Unstripped executable"
+	Assert-RequiredFile -Path $exePath -Description "Stripped executable"
 	Assert-RequiredFile -Path $pdbPath -Description "Debug companion PDB"
 	Assert-RequiredFile -Path $changelogPath -Description "BFE changelog"
 	if(-not (Test-Path -LiteralPath $themesPath -PathType Container)) {
-		throw "Bundled themes directory was not found: $themesPath"
+		throw "Themes directory was not found: $themesPath"
+	}
+	if(-not (Test-Path -LiteralPath $emoticonPath -PathType Container)) {
+		throw "Emoticons directory was not found: $emoticonPath"
 	}
 
 	$configurationName = Get-PackageConfigurationName -Mode $Mode
@@ -302,6 +306,7 @@ function New-DistPackage {
 		Copy-Item -LiteralPath $pdbPath -Destination (Join-Path $stageDir "DCPlusPlus.pdb") -Force
 		Copy-Item -LiteralPath $changelogPath -Destination (Join-Path $stageDir "changelog-bfe.txt") -Force
 		Copy-Item -LiteralPath $themesPath -Destination (Join-Path $stageDir "Themes") -Recurse -Force
+		Copy-Item -LiteralPath $emoticonPath -Destination (Join-Path $stageDir "Emoticons") -Recurse -Force
 
 		if(Test-Path -LiteralPath $zipPath) {
 			Remove-Item -LiteralPath $zipPath -Force

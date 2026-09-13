@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,6 +27,8 @@
 namespace dcpp {
 
 namespace {
+	constexpr size_t MAX_MANIFEST_SIZE = 256 * 1024;
+
 	struct PackageState {
 		std::mutex mutex;
 		string loadedPath;
@@ -115,16 +118,18 @@ namespace {
 		return true;
 	}
 
-	void loadPackage(PackageState& data, const string& path) {
+	void loadPackage(PackageState& data, const string& path, EmoticonManager::PackagePreview* preview = nullptr) {
 		data.rules.clear();
 		data.icons.clear();
+		if(preview) *preview = {};
 		if(path.empty()) return;
 		auto packageExtension = Util::getFileExt(path);
 		std::transform(packageExtension.begin(), packageExtension.end(), packageExtension.begin(),
 			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 		if(packageExtension != ".dcemo") throw Exception(_("Invalid emoticon package extension"));
 
-		const auto directory = Util::getTempPath() + "dcemo-" + std::to_string(std::hash<string>{}(path)) + PATH_SEPARATOR_STR;
+		const auto directory = Util::getTempPath() + (preview ? "dcemo-preview-" : "dcemo-") +
+			std::to_string(std::hash<string>{}(path)) + PATH_SEPARATOR_STR;
 		Archive(path).extract(directory);
 
 		SimpleXML xml;
@@ -134,8 +139,10 @@ namespace {
 
 		xml.resetCurrentChild();
 		if(!xml.findChild("Name") || xml.getChildData().empty()) throw Exception(_("Invalid emoticon package"));
+		if(preview) preview->name = xml.getChildData();
 		xml.resetCurrentChild();
 		if(!xml.findChild("Version") || Util::toDouble(xml.getChildData()) <= 0) throw Exception(_("Invalid emoticon package"));
+		if(preview) preview->version = xml.getChildData();
 
 		xml.resetCurrentChild();
 		if(!xml.findChild("Emoticons")) throw Exception(_("Invalid emoticon package"));
@@ -153,6 +160,7 @@ namespace {
 			std::replace(icon.begin(), icon.end(), '/', PATH_SEPARATOR);
 			std::replace(icon.begin(), icon.end(), '\\', PATH_SEPARATOR);
 			data.icons[name] = directory + icon;
+			EmoticonManager::ExportItem previewItem { name, {}, data.icons[name] };
 
 			xml.stepIn();
 			auto readRules = [&](const string& element) {
@@ -160,12 +168,16 @@ namespace {
 				while(xml.findChild(element)) {
 					auto text = xml.getChildAttrib("Text");
 					if(text.empty()) text = xml.getChildData();
-					if(!text.empty() && knownRules.insert(text).second) data.rules.push_back({ text, name });
+					if(!text.empty() && knownRules.insert(text).second) {
+						data.rules.push_back({ text, name });
+						previewItem.rules.push_back(std::move(text));
+					}
 				}
 			};
 			readRules("Rule");
 			readRules("Shortcut"); // accepted for compatibility with older emoticon manifests
 			xml.stepOut();
+			if(preview) preview->items.push_back(std::move(previewItem));
 		}
 
 		std::stable_sort(data.rules.begin(), data.rules.end(), [](const auto& a, const auto& b) {
@@ -174,17 +186,74 @@ namespace {
 	}
 
 	void ensureLoaded(PackageState& data) {
-		const auto path = SETTING(EMOTICON_PACK);
-		if(path == data.loadedPath) return;
-		data.loadedPath = path;
+		const auto configuredPath = SETTING(EMOTICON_PACK);
+		if(configuredPath == data.loadedPath) return;
+		data.loadedPath = configuredPath;
 		++data.revision;
 		try {
+			auto path = configuredPath;
+			if(!path.empty() && File::getSize(path) < 0) {
+				const auto fileName = Util::getFileName(path);
+				const auto packages = EmoticonManager::getPackages();
+				const auto replacement = std::find_if(packages.begin(), packages.end(), [&fileName](const auto& package) {
+					return Util::stricmp(Util::getFileName(package.path), fileName) == 0;
+				});
+				if(replacement != packages.end()) path = replacement->path;
+			}
 			loadPackage(data, path);
 		} catch(const Exception&) {
 			data.rules.clear();
 			data.icons.clear();
 		}
 	}
+}
+
+EmoticonManager::Package EmoticonManager::inspectPackage(const string& path) {
+	if(Text::toLower(Util::getFileExt(path)) != ".dcemo") throw Exception(_("Invalid emoticon package extension"));
+	SimpleXML xml;
+	xml.fromXML(Archive(path).readFile("info.xml", MAX_MANIFEST_SIZE));
+	if(!xml.findChild("dcemo")) throw Exception(_("Invalid emoticon package"));
+	xml.stepIn();
+	if(!xml.findChild("Name") || xml.getChildData().empty()) throw Exception(_("Invalid emoticon package"));
+	const auto name = xml.getChildData();
+	xml.resetCurrentChild();
+	if(!xml.findChild("Version") || Util::toDouble(xml.getChildData()) <= 0) throw Exception(_("Invalid emoticon package"));
+	const auto version = xml.getChildData();
+	xml.resetCurrentChild();
+	if(!xml.findChild("Emoticons")) throw Exception(_("Invalid emoticon package"));
+	return { name, version, path };
+}
+
+string EmoticonManager::getDirectory() {
+	return Util::getPath(Util::PATH_USER_CONFIG) + "Emoticons" PATH_SEPARATOR_STR;
+}
+
+vector<EmoticonManager::Package> EmoticonManager::getPackages() {
+	vector<Package> packages;
+	auto loadDirectory = [&packages](const string& directory) {
+		for(const auto& path: File::findFiles(directory, "*.dcemo")) {
+			try {
+				auto package = inspectPackage(path);
+				auto existing = std::find_if(packages.begin(), packages.end(), [&path](const Package& item) {
+					return Util::stricmp(Util::getFileName(item.path), Util::getFileName(path)) == 0;
+				});
+				if(existing == packages.end()) packages.push_back(std::move(package));
+				else *existing = std::move(package);
+			} catch(const Exception&) {
+			}
+		}
+	};
+
+	const auto applicationDirectory = Util::getPath(Util::PATH_GLOBAL_CONFIG) + "Emoticons" PATH_SEPARATOR_STR;
+	const auto userDirectory = getDirectory();
+	File::ensureDirectory(userDirectory);
+	loadDirectory(applicationDirectory);
+	if(Util::stricmp(applicationDirectory, userDirectory) != 0) loadDirectory(userDirectory);
+	std::sort(packages.begin(), packages.end(), [](const Package& lhs, const Package& rhs) {
+		const auto nameOrder = Util::stricmp(lhs.name, rhs.name);
+		return nameOrder == 0 ? Util::stricmp(lhs.path, rhs.path) < 0 : nameOrder < 0;
+	});
+	return packages;
 }
 
 vector<EmoticonManager::Rule> EmoticonManager::getRules() {
@@ -322,6 +391,13 @@ EmoticonManager::ImportPackage EmoticonManager::importEmoticonPackage(const stri
 
 	if(result.items.empty()) throw Exception(_("The XML emoticon package contains no usable BMP, ICO, or PNG entries"));
 	return result;
+}
+
+EmoticonManager::PackagePreview EmoticonManager::previewPackage(const string& path) {
+	PackageState data;
+	PackagePreview preview;
+	loadPackage(data, path, &preview);
+	return preview;
 }
 
 void EmoticonManager::reload() {

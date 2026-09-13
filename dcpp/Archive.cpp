@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -102,6 +103,31 @@ void Archive::extract(const string& path) {
 		check(unzCloseCurrentFile(file));
 
 	} while(check(unzGoToNextFile(file)) == UNZ_OK);
+}
+
+string Archive::readFile(const string& name, size_t maxBytes) {
+	if(unzLocateFile(file, name.c_str(), 0) != UNZ_OK) throw Exception(_("Archive entry not found"));
+	unz_file_info64 info = {};
+	if(check(unzGetCurrentFileInfo64(file, &info, nullptr, 0, nullptr, 0, nullptr, 0)) != UNZ_OK)
+		throw Exception(_("Invalid archive"));
+	if(info.uncompressed_size > maxBytes) throw Exception(_("Archive entry is too large"));
+	if(check(unzOpenCurrentFile(file)) != UNZ_OK) throw Exception(_("Invalid archive"));
+
+	string result(static_cast<size_t>(info.uncompressed_size), '\0');
+	size_t offset = 0;
+	try {
+		while(offset < result.size()) {
+			const auto requested = static_cast<unsigned>(std::min<size_t>(result.size() - offset, 64 * 1024));
+			const auto read = unzReadCurrentFile(file, &result[offset], requested);
+			if(read <= 0) throw Exception(_("Invalid archive"));
+			offset += static_cast<size_t>(read);
+		}
+	} catch(...) {
+		unzCloseCurrentFile(file);
+		throw;
+	}
+	check(unzCloseCurrentFile(file));
+	return result;
 }
 
 int Archive::check(int ret) {

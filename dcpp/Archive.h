@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +19,7 @@
 #ifndef DCPLUSPLUS_DCPP_ARCHIVE_H
 #define DCPLUSPLUS_DCPP_ARCHIVE_H
 
+#include <cstddef>
 #include <string>
 
 typedef void* unzFile;
@@ -34,6 +36,8 @@ public:
 
 	/** Extract all the files in the archive to the specified directory. Throws on errors. */
 	void extract(const string& path);
+	/** Read one archive entry without extracting its siblings. */
+	string readFile(const string& name, size_t maxBytes);
 
 private:
 	inline int check(int ret);

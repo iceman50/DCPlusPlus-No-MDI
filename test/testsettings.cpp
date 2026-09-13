@@ -27,6 +27,11 @@ protected:
 	}
 };
 
+TEST_F(SettingsMigrationTest, uses_readable_emoticon_size_by_default)
+{
+	EXPECT_EQ(24, SettingsManager::getInstance()->get(SettingsManager::EMOTICON_SIZE));
+}
+
 TEST_F(SettingsMigrationTest, repairs_values_truncated_by_experimental_page_spinner)
 {
 	const auto path = Util::getTempPath() + "dcpp-test-truncated-spinner-settings.xml";

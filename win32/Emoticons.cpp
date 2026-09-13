@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,6 +17,7 @@
 #include <dcpp/Util.h>
 
 #include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -23,10 +25,19 @@
 #include <wincodec.h>
 
 #include <dwt/resources/Icon.h>
+#include <dwt/util/GDI.h>
 
 using namespace dcpp;
 
 namespace {
+	// RTF image goals are measured in device-independent twips. Encode enough physical pixels for the
+	// current display DPI, then keep the goal at the requested logical size so RichEdit never upscales
+	// a low-resolution bitmap on high-DPI screens.
+	int rasterPixels(int logicalPixels) {
+		return std::clamp(static_cast<int>(std::lround(logicalPixels * dwt::util::dpiFactor())),
+			logicalPixels, logicalPixels * 4);
+	}
+
 	void appendHex(tstring& out, unsigned char value) {
 		static const TCHAR digits[] = _T("0123456789abcdef");
 		out += digits[value >> 4];
@@ -232,12 +243,14 @@ tstring Emoticons::rtf(const std::string& name, int pixels, int bitDepth) {
 	const auto path = EmoticonManager::getIconPath(name);
 	if(path.empty()) return tstring();
 	const auto revision = EmoticonManager::getRevision();
-	pixels = std::clamp(pixels, 16, 24);
+	pixels = std::clamp(pixels, 20, 32);
+	const auto rasterSize = rasterPixels(pixels);
 	if(bitDepth != 24 && bitDepth != 32) bitDepth = 16;
 	static std::mutex mutex;
 	static std::unordered_map<std::string, tstring> cache;
 	static uint64_t cacheRevision = 0;
-	const auto key = path + ':' + std::to_string(pixels) + ':' + std::to_string(bitDepth);
+	const auto key = path + ':' + std::to_string(pixels) + ':' + std::to_string(rasterSize) + ':' +
+		std::to_string(bitDepth);
 	std::lock_guard<std::mutex> lock(mutex);
 	if(cacheRevision != revision) {
 		cache.clear();
@@ -247,7 +260,7 @@ tstring Emoticons::rtf(const std::string& name, int pixels, int bitDepth) {
 
 	UINT width = 0, height = 0;
 	std::vector<unsigned char> png;
-	if(!encodePng(path, pixels, bitDepth, png, width, height)) return tstring();
+	if(!encodePng(path, rasterSize, bitDepth, png, width, height)) return tstring();
 	auto ret = pngRtf(png, width, height, pixels);
 	if(cache.size() >= 128) cache.erase(cache.begin());
 	return cache.emplace(key, std::move(ret)).first->second;
@@ -255,15 +268,17 @@ tstring Emoticons::rtf(const std::string& name, int pixels, int bitDepth) {
 
 tstring Emoticons::resourceRtf(unsigned resourceId, int pixels) {
 	pixels = std::clamp(pixels, 16, 24);
+	const auto rasterSize = rasterPixels(pixels);
 	static std::mutex mutex;
 	static std::unordered_map<uint64_t, tstring> cache;
-	const auto key = (static_cast<uint64_t>(resourceId) << 32) | static_cast<unsigned>(pixels);
+	const auto key = (static_cast<uint64_t>(resourceId) << 32) |
+		(static_cast<uint64_t>(rasterSize) << 16) | static_cast<unsigned>(pixels);
 	std::lock_guard<std::mutex> lock(mutex);
 	if(auto i = cache.find(key); i != cache.end()) return i->second;
 
 	UINT width = 0, height = 0;
 	std::vector<unsigned char> png;
-	if(!encodeResourcePng(resourceId, pixels, png, width, height)) return tstring();
+	if(!encodeResourcePng(resourceId, rasterSize, png, width, height)) return tstring();
 	auto ret = pngRtf(png, width, height, pixels);
 	if(cache.size() >= 32) cache.erase(cache.begin());
 	return cache.emplace(key, std::move(ret)).first->second;

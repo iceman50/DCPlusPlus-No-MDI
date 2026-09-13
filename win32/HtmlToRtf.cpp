@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -201,8 +202,8 @@ void Parser::startTag(const string& name_, StringPairList& attribs, bool simple)
 		// The source shortcut remains inside the tag for non-rich consumers. Suppress that text after
 		// emitting exactly one packaged icon. A missing/invalid asset leaves the shortcut untouched.
 		const auto configuredSize = SETTING(EMOTICON_SIZE);
-		const auto imageSize = configuredSize == 20 || configuredSize == 22 || configuredSize == 24 ?
-			configuredSize : 16;
+		const auto imageSize = configuredSize == 20 || configuredSize == 24 || configuredSize == 28 ||
+			configuredSize == 32 ? configuredSize : 24;
 		const auto configuredDepth = SETTING(EMOTICON_BIT_DEPTH);
 		// Values written by builds that offered 4/8 bpp migrate to the new 16-bpp minimum.
 		const auto bitDepth = configuredDepth == 24 || configuredDepth == 32 ? configuredDepth : 16;

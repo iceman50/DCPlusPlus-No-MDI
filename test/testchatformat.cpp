@@ -106,6 +106,85 @@ TEST_F(testchatformat, emoticons_can_be_disabled)
 	settings->set(SettingsManager::ENABLE_EMOTICONS, previous);
 }
 
+TEST_F(testchatformat, distributed_emoticon_packages_load)
+{
+	const std::array<const char*, 3> packages { "candy-pop", "neon-circuit", "pixel-arcade" };
+	const std::array<const char*, 12> names { "smile", "grin", "laugh", "wink", "tongue", "cool",
+		"love", "sad", "cry", "angry", "surprised", "confused" };
+	auto settings = SettingsManager::getInstance();
+	for(const auto package: packages) {
+		const auto path = "Emoticons/" + string(package) + ".dcemo";
+		const auto activePath = settings->get(SettingsManager::EMOTICON_PACK);
+		const auto metadata = EmoticonManager::inspectPackage(path);
+		ASSERT_FALSE(metadata.name.empty()) << package;
+		ASSERT_FALSE(metadata.version.empty()) << package;
+		ASSERT_EQ(path, metadata.path) << package;
+		const auto packagePreview = EmoticonManager::previewPackage(path);
+		ASSERT_EQ(activePath, settings->get(SettingsManager::EMOTICON_PACK)) << package;
+		ASSERT_FALSE(packagePreview.name.empty()) << package;
+		ASSERT_EQ(size_t(12), packagePreview.items.size()) << package;
+		size_t previewRules = 0;
+		for(const auto& item: packagePreview.items) previewRules += item.rules.size();
+		ASSERT_EQ(size_t(26), previewRules) << package;
+
+		settings->set(SettingsManager::EMOTICON_PACK, path);
+		EmoticonManager::reload();
+		ASSERT_EQ(size_t(26), EmoticonManager::getRules().size()) << package;
+		for(const auto name: names) {
+			ASSERT_GT(File::getSize(EmoticonManager::getIconPath(name)), 0) << package << ": " << name;
+		}
+	}
+}
+
+TEST_F(testchatformat, discovers_application_and_user_emoticon_packages)
+{
+	Util::PathsMap originalPaths;
+	for(int index = 0; index < Util::PATH_LAST; ++index) {
+		const auto path = static_cast<Util::Paths>(index);
+		originalPaths[path] = Util::getPath(path);
+	}
+	struct RestorePaths {
+		Util::PathsMap paths;
+		~RestorePaths() { Util::initialize(std::move(paths)); }
+	} restore { originalPaths };
+
+	const auto root = Util::getTempPath() + "dcpp-test-emoticon-discovery-" +
+		std::to_string(reinterpret_cast<uintptr_t>(SettingsManager::getInstance())) + PATH_SEPARATOR_STR;
+	const auto application = root + "application" PATH_SEPARATOR_STR;
+	const auto user = root + "user" PATH_SEPARATOR_STR;
+	const auto applicationPackage = application + "Emoticons" PATH_SEPARATOR_STR "shared.dcemo";
+	const auto flat = application + "Emoticons" PATH_SEPARATOR_STR "flat.dcemo";
+	const auto overridePackage = user + "Emoticons" PATH_SEPARATOR_STR "shared.dcemo";
+	const auto invalid = user + "Emoticons" PATH_SEPARATOR_STR "invalid.dcemo";
+	for(const auto& path: { applicationPackage, flat, overridePackage, invalid }) File::deleteFile(path);
+	File::ensureDirectory(applicationPackage);
+	File::ensureDirectory(flat);
+	File::ensureDirectory(overridePackage);
+	File::copyFile("Emoticons/candy-pop.dcemo", applicationPackage);
+	File::copyFile("Emoticons/pixel-arcade.dcemo", flat);
+	File::copyFile("Emoticons/neon-circuit.dcemo", overridePackage);
+	File(invalid, File::WRITE, File::CREATE | File::TRUNCATE).write("not a package", 13);
+
+	auto paths = originalPaths;
+	paths[Util::PATH_GLOBAL_CONFIG] = application;
+	paths[Util::PATH_USER_CONFIG] = user;
+	Util::initialize(std::move(paths));
+	const auto packages = EmoticonManager::getPackages();
+	ASSERT_EQ(size_t(2), packages.size());
+	EXPECT_EQ("Neon Circuit", packages[0].name);
+	EXPECT_EQ(overridePackage, packages[0].path);
+	EXPECT_EQ("Pixel Arcade", packages[1].name);
+	EXPECT_EQ(flat, packages[1].path);
+
+	SettingsManager::getInstance()->set(SettingsManager::EMOTICON_PACK,
+		application + "Emoticons" PATH_SEPARATOR_STR "Bundled" PATH_SEPARATOR_STR "shared.dcemo");
+	EmoticonManager::reload();
+	EXPECT_EQ(size_t(26), EmoticonManager::getRules().size());
+	EXPECT_GT(File::getSize(EmoticonManager::getIconPath("smile")), 0);
+
+	for(const auto& path: { applicationPackage, flat, overridePackage, invalid }) File::deleteFile(path);
+}
+
 TEST_F(testchatformat, hub_specific_nickname_is_colored_as_a_mention)
 {
 	string scratch;

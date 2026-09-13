@@ -214,7 +214,7 @@ SettingsManager::SettingsManager() {
 	setDefault(ENABLE_RICH_TEXT, true);
 	setDefault(ENABLE_EMOTICONS, true);
 	setDefault(EMOTICON_PACK, Util::emptyString);
-	setDefault(EMOTICON_SIZE, 16);
+	setDefault(EMOTICON_SIZE, 24);
 	setDefault(EMOTICON_BIT_DEPTH, 16);
 	setDefault(SHARE_HIDDEN, false);
 	setDefault(FILTER_MESSAGES, true);
