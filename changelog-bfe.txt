@@ -27,6 +27,9 @@
 * Add flat application-local and per-user DCEMO discovery through the Emoticons directory (iceman50)
 * Audit and repair cropped artwork across all three distributed emoticon packs, with balanced visible margins at chat display sizes (iceman50)
 * Package distribution archives with the stripped executable renamed to DCPlusPlus.exe, its PDB, changelog, themes and emoticons (iceman50)
+* Add a reproducible NSIS release-installer builder with the stripped executable, matching PDB, BFE changelog, flat themes and flat emoticon packs (iceman50)
+* Replace missing NSIS CPU and post-install launch dependencies with a native Windows SSE4.2 check and remove obsolete help and locale payload requirements (iceman50)
+* Correct NSIS Windows 10/11 detection, reject unsupported 32-bit Windows for x64 packages and use the 64-bit registry view (iceman50)
 * Restore startup performance with large download queues by building the queued-file TTH index only when first needed (https://github.com/iceman50/DCPlusPlus-No-MDI/issues/2) (iceman50)
 
 == 07-07-2026 - 0.8834 !!!Experimental!!! ==

@@ -1,6 +1,7 @@
+# Copyright (C) 2026 iceman50
 # Build the DC++ installer
 # Dependencies:
-# - hg (this tree must be under hg version control)
+# - git (this tree must be under Git version control)
 # - NSIS <http://nsis.sourceforge.net>
 # - Perl, in order to use po4a <https://www.po4a.org/>
 # - zip (MSYS / Cygwin provide one) or 7z (on Windows)
@@ -23,9 +24,9 @@ if env["distro"]:
         raise Exception(
             "makensis.exe not found in PATH - NSIS is required to build the distro"
         )
-    if env.WhereIs("hg") is None:
+    if env.WhereIs("git") is None:
         raise Exception(
-            '"hg" is required to build the distro; this tree must be under hg '
+            '"git" is required to build the distro; this tree must be under Git '
             "version control"
         )
     if env.WhereIs("zip") is None and env.WhereIs("7z") is None:

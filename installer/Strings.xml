@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Strings>
+	<!-- Copyright (C) 2026 iceman50 -->
 	<SECTION_DCPP>DC++ (required)</SECTION_DCPP>
 	<BACKUP_QUESTION>A previous installation of DC++ has been found; backup settings and queue to '$R0'?</BACKUP_QUESTION>
 	<SECTION_START_MENU>Start menu shortcuts</SECTION_START_MENU>
@@ -22,4 +23,5 @@
 	<DONATE_BUTTON>Donate / Contribute</DONATE_BUTTON>
 	<OSVERSION_WARNING>DC++ may not support this version of Windows. Do you want to continue?</OSVERSION_WARNING>
 	<CPU_FATAL_ERROR>The CPU of this computer is too old to run DC++.</CPU_FATAL_ERROR>
+	<X64_FATAL_ERROR>This x64 build of DC++ requires 64-bit Windows.</X64_FATAL_ERROR>
 </Strings>
