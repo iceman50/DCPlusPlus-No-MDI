@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,8 +22,8 @@
 #define FULL_APPNAME "DC++ Experimental"
 
 // don't forget to update the .rc file as well!
-#define VERSIONSTRING "0.8841"
-#define VERSIONFLOAT 0.8841
+#define VERSIONSTRING "0.8842"
+#define VERSIONFLOAT 0.8842
 
 namespace dcpp {
 extern const std::string fullVersionString;

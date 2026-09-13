@@ -1,3 +1,5 @@
+// Copyright (C) 2026 iceman50
+
 #include "resource.h"
 
 #if defined x86
@@ -107,8 +109,8 @@ IDI_DCPP_WARNING        ICON                    "res/Warning.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,8,41
- PRODUCTVERSION 0,8,8,41
+ FILEVERSION 0,8,8,42
+ PRODUCTVERSION 0,8,8,42
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -125,12 +127,12 @@ BEGIN
         BEGIN
             VALUE "Comments", "https://github.com/iceman50/DCPlusPlus-No-MDI"
             VALUE "FileDescription", "DC++"
-            VALUE "FileVersion", "0, 8, 8, 41"
+            VALUE "FileVersion", "0, 8, 8, 42"
             VALUE "InternalName", "DC++"
             VALUE "LegalCopyright", "Copyright 2001-2026 iceman50"
             VALUE "OriginalFilename", "DCPlusPlus.exe"
             VALUE "ProductName", "DC++"
-            VALUE "ProductVersion", "0, 8, 8, 41"
+            VALUE "ProductVersion", "0, 8, 8, 42"
         END
     END
     BLOCK "VarFileInfo"
