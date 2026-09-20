@@ -1,1 +1,1 @@
-#define DCPP_REVISION "[2d31c17]"
+#define DCPP_REVISION "[c339eee]"

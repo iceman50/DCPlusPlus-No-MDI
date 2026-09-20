@@ -96,10 +96,15 @@ constexpr IconDefinition ICONS[] = {
 constexpr size_t MAX_CACHED_ICONS = sizeof(ICONS) / sizeof(ICONS[0]) * 8;
 
 struct State {
+	struct CachedIcon {
+		dwt::IconPtr icon;
+		bool fromPackage;
+	};
 	std::mutex mutex;
-	std::unordered_map<uint64_t, dwt::IconPtr> cache;
+	std::unordered_map<uint64_t, CachedIcon> cache;
 	std::unordered_map<string, string> entries;
 	string activePack;
+	IconManager::Package package {};
 	bool initialized = false;
 	bool darkMode = false;
 	bool packResolved = false;
@@ -215,7 +220,7 @@ void resolveActivePack(State& current) {
 	current.entries.clear();
 	if(current.activePack.empty()) return;
 	try {
-		readManifest(current.activePack, &current.entries);
+		current.package = readManifest(current.activePack, &current.entries);
 	} catch(const Exception&) {
 		current.activePack.clear();
 		current.entries.clear();
@@ -280,7 +285,7 @@ dwt::IconPtr IconManager::load(unsigned resourceId, long size) {
 	if(!current.initialized) return new dwt::Icon(resourceId, dwt::Point(size, size));
 	const auto key = cacheKey(resourceId, size);
 	const auto cached = current.cache.find(key);
-	if(cached != current.cache.end()) return cached->second;
+	if(cached != current.cache.end()) return cached->second.icon;
 
 	resolveActivePack(current);
 	dwt::IconPtr icon;
@@ -289,9 +294,24 @@ dwt::IconPtr IconManager::load(unsigned resourceId, long size) {
 		const auto entry = current.entries.find(Text::toLower(fileName));
 		if(entry != current.entries.end()) icon = loadPackIcon(current.activePack, entry->second, size);
 	}
+	const bool fromPackage = !!icon;
 	if(!icon) icon = new dwt::Icon(resourceId, dwt::Point(size, size));
-	if(current.cache.size() < MAX_CACHED_ICONS) current.cache.emplace(key, icon);
+	if(current.cache.size() < MAX_CACHED_ICONS) current.cache.emplace(key, State::CachedIcon { icon, fromPackage });
 	return icon;
+}
+
+IconManager::RuntimeInfo IconManager::getRuntimeInfo() {
+	auto& current = state();
+	std::lock_guard<std::mutex> lock(current.mutex);
+	RuntimeInfo info {};
+	info.initialized = current.initialized;
+	info.packResolved = current.packResolved;
+	if(!current.activePack.empty()) info.package = current.package;
+	for(const auto& item: current.cache) {
+		if(item.second.fromPackage) ++info.cachedPackageIcons;
+		else ++info.cachedEmbeddedIcons;
+	}
+	return info;
 }
 
 const char* IconManager::getFileName(unsigned resourceId) noexcept {

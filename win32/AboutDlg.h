@@ -42,6 +42,7 @@ public:
 private:
 	GridPtr grid;
 	LabelPtr version;
+	TextBoxPtr runtimeInfo;
 
 	HttpConnection* c;
 

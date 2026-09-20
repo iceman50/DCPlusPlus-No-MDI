@@ -35,6 +35,17 @@ public:
 		std::size_t iconCount;
 	};
 
+	struct RuntimeInfo {
+		bool initialized = false;
+		bool packResolved = false;
+		Package package {};
+		std::size_t cachedPackageIcons = 0;
+		std::size_t cachedEmbeddedIcons = 0;
+	};
+
+	/** Snapshot of the current cache, counted by resource and size; does not load icons or packages. */
+	static RuntimeInfo getRuntimeInfo();
+
 	/** Enables package-backed icon loading after the core settings singleton has been created. */
 	static void initialize() noexcept;
 	static void setDarkMode(bool enabled) noexcept;

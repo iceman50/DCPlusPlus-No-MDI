@@ -27,6 +27,7 @@ if dev.is_win32():
             "winmm",
             "wtsapi32",
             "dwmapi",
+            "psapi",
         ]
     )
 

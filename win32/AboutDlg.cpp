@@ -16,7 +16,6 @@
  */
 
 #include "stdafx.h"
-#include <zstd.h>
 
 #include "AboutDlg.h"
 
@@ -30,6 +29,12 @@
 #include <GeoIP.h>
 #include <bzlib.h>
 #include <zlib.h>
+#include <zstd.h>
+#include <psapi.h>
+#include <tlhelp32.h>
+#include <dwt/Application.h>
+#include <dwt/Appearance.h>
+#include <dwt/resources/ImageList.h>
 #include <dwt/Version.h>
 #include <miniupnpc/miniupnpc.h>
 #include <natpmp/natpmp.h>
@@ -47,6 +52,7 @@
 #endif
 
 #include "resource.h"
+#include "IconManager.h"
 #include "WinUtil.h"
 
 using dwt::Grid;
@@ -164,6 +170,93 @@ void addInfoLine(string& info, const string& name, const string& value) {
 	info += name + ": " + value + "\r\n";
 }
 
+uint64_t fileTimeTicks(const FILETIME& time) {
+	return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+}
+
+void addProcessInfo(string& info) {
+	const auto process = ::GetCurrentProcess();
+	const auto processId = ::GetCurrentProcessId();
+	addInfoLine(info, "Process ID", std::to_string(processId));
+	tstring executable(32768, _T('\0'));
+	const auto pathLength = ::GetModuleFileName(nullptr, &executable[0], static_cast<DWORD>(executable.size()));
+	addInfoLine(info, "Executable", pathLength && pathLength < executable.size() ? Text::fromT(executable.substr(0, pathLength)) : "Unavailable");
+
+	FILETIME created {}, exited {}, kernel {}, user {}, now {};
+	string uptime = "Unavailable", cpu = "Unavailable";
+	if(::GetProcessTimes(process, &created, &exited, &kernel, &user)) {
+		::GetSystemTimeAsFileTime(&now);
+		const auto start = fileTimeTicks(created), end = fileTimeTicks(now);
+		if(end >= start) uptime = Util::formatSeconds((end - start) / 10000000);
+		cpu = str(F_("%1% kernel, %2% user (h:mm:ss)") %
+			Util::formatSeconds(fileTimeTicks(kernel) / 10000000) %
+			Util::formatSeconds(fileTimeTicks(user) / 10000000));
+	}
+	addInfoLine(info, "Uptime (h:mm:ss)", uptime);
+	addInfoLine(info, "CPU time", cpu);
+
+	string threads = "Unavailable";
+	const auto snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if(snapshot != INVALID_HANDLE_VALUE) {
+		PROCESSENTRY32 entry {};
+		entry.dwSize = sizeof(entry);
+		if(::Process32First(snapshot, &entry)) {
+			do {
+				if(entry.th32ProcessID == processId) {
+					threads = std::to_string(entry.cntThreads);
+					break;
+				}
+			} while(::Process32Next(snapshot, &entry));
+		}
+		::CloseHandle(snapshot);
+	}
+	addInfoLine(info, "Threads", threads);
+	DWORD handles = 0;
+	addInfoLine(info, "Handles", ::GetProcessHandleCount(process, &handles) ? std::to_string(handles) : "Unavailable");
+	const auto guiResources = [process](DWORD kind) {
+		::SetLastError(ERROR_SUCCESS);
+		const auto count = ::GetGuiResources(process, kind);
+		return count || ::GetLastError() == ERROR_SUCCESS ? std::to_string(count) : string("Unavailable");
+	};
+	addInfoLine(info, "GDI objects", guiResources(GR_GDIOBJECTS));
+	addInfoLine(info, "USER objects", guiResources(GR_USEROBJECTS));
+
+	PROCESS_MEMORY_COUNTERS_EX memory {};
+	memory.cb = sizeof(memory);
+	const bool haveMemory = !!::GetProcessMemoryInfo(process, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
+	const auto memoryValue = [haveMemory](SIZE_T value) {
+		return haveMemory ? Util::formatBytes(static_cast<int64_t>(value)) : string("Unavailable");
+	};
+	addInfoLine(info, "Working set (resident memory)", memoryValue(memory.WorkingSetSize));
+	addInfoLine(info, "Peak working set", memoryValue(memory.PeakWorkingSetSize));
+	addInfoLine(info, "Private bytes (committed memory)", memoryValue(memory.PrivateUsage));
+}
+
+void addAppearanceInfo(string& info) {
+	const auto& appearance = dwt::Application::instance().getAppearance();
+	const auto mode = appearance.getMode();
+	addInfoLine(info, "Theme mode", mode == dwt::Appearance::Mode::System ? "System" :
+		mode == dwt::Appearance::Mode::Dark ? "Dark" : "Light");
+	addInfoLine(info, "Effective appearance", appearance.isHighContrast() ? "High contrast" :
+		appearance.isDark() ? "Dark" : "Light");
+	const auto configured = SETTING(ICON_PACK);
+	addInfoLine(info, "Configured icon pack", configured.empty() ? "Automatic" :
+		configured == IconManager::EMBEDDED_PACK ? "Embedded resources" : configured);
+	const auto icons = IconManager::getRuntimeInfo();
+	addInfoLine(info, "Active icon pack", !icons.initialized ? "Not initialized" :
+		!icons.packResolved ? "Not loaded yet" : icons.package.path.empty() ? "Embedded resources" : icons.package.name);
+	if(!icons.package.path.empty()) {
+		addInfoLine(info, "Icon pack version", icons.package.version);
+		addInfoLine(info, "Icon pack path", icons.package.path);
+		addInfoLine(info, "Icons declared in pack", std::to_string(icons.package.iconCount));
+	}
+	addInfoLine(info, "Cached icons (resource/size variants)", std::to_string(icons.cachedPackageIcons + icons.cachedEmbeddedIcons));
+	addInfoLine(info, "Cached icons from pack", std::to_string(icons.cachedPackageIcons));
+	addInfoLine(info, "Cached icons from embedded resources", std::to_string(icons.cachedEmbeddedIcons));
+	addInfoLine(info, "File image list entries", WinUtil::fileImages ? std::to_string(WinUtil::fileImages->size()) : "0");
+	addInfoLine(info, "User image list entries", WinUtil::userImages ? std::to_string(WinUtil::userImages->size()) : "0");
+}
+
 string getAboutInfo() {
 	string info;
 
@@ -187,6 +280,12 @@ string getAboutInfo() {
 	addInfoLine(info, "Physical memory", getMemoryInfo());
 	info += "\r\n";
 
+	info += "Process (snapshot; use Refresh to update)\r\n";
+	addProcessInfo(info);
+	info += "\r\nAppearance and icons\r\n";
+	addAppearanceInfo(info);
+	info += "\r\n";
+
 	info += "Toolchain\r\n";
 	addInfoLine(info, "Compiler", getCompilerVersion());
 	addInfoLine(info, "C++ standard", getCppStandard());
@@ -195,7 +294,7 @@ string getAboutInfo() {
 	info += "Libraries\r\n";
 	addInfoLine(info, "OpenSSL", getOpenSSLVersion());
 	addInfoLine(info, "SQLite", SQLiteDB::getLibraryVersion());
-	addInfoLine(info, "Zstandard", ZSTD_versionString());
+	addInfoLine(info, "Zstandard (zstd)", string(ZSTD_versionString()) + " (headers: " ZSTD_VERSION_STRING "; bundled, static)");
 	addInfoLine(info, "zlib", string(zlibVersion()) + " (headers: " ZLIB_VERSION ")");
 	addInfoLine(info, "bzip2", BZ2_bzlibVersion());
 	addInfoLine(info, "DWT", DWT_VERSION_STRING);
@@ -223,6 +322,7 @@ AboutDlg::AboutDlg(dwt::Widget* parent) :
 dwt::ModalDialog(parent),
 grid(0),
 version(0),
+runtimeInfo(nullptr),
 c(nullptr)
 {
 	onInitDialog([this] { return handleInitDialog(); });
@@ -232,12 +332,12 @@ AboutDlg::~AboutDlg() {
 }
 
 int AboutDlg::run() {
-	create(dwt::Point(400, 600));
+	create(dwt::Point(520, 680));
 	return show();
 }
 
 bool AboutDlg::handleInitDialog() {
-	grid = addChild(Grid::Seed(6, 1));
+	grid = addChild(Grid::Seed(7, 1));
 	grid->column(0).mode = GridInfo::FILL;
 	grid->row(1).mode = GridInfo::FILL;
 	grid->row(1).align = GridInfo::STRETCH;
@@ -276,8 +376,15 @@ bool AboutDlg::handleInitDialog() {
 		auto seed = WinUtil::Seeds::Dialog::textBox;
 		seed.style &= ~ES_AUTOHSCROLL;
 		seed.style |= ES_MULTILINE | WS_VSCROLL | ES_READONLY;
-		seed.caption = Text::toT(getAboutInfo());
-		grid->addChild(gs)->addChild(seed);
+		runtimeInfo = grid->addChild(gs)->addChild(seed);
+	}
+
+	{
+		auto actions = grid->addChild(Grid::Seed(1, 2));
+		actions->column(0).mode = GridInfo::FILL;
+		actions->column(1).mode = GridInfo::FILL;
+		actions->addChild(Button::Seed(T_("Refresh")))->onClicked([this] { runtimeInfo->setText(Text::toT(getAboutInfo())); });
+		actions->addChild(Button::Seed(T_("Copy information")))->onClicked([this] { WinUtil::setClipboard(runtimeInfo->getText()); });
 	}
 
 	{
@@ -307,6 +414,7 @@ bool AboutDlg::handleInitDialog() {
 	setText(T_("About DC++"));
 	setSmallIcon(WinUtil::createIcon(IDI_DCPP, 16));
 	setLargeIcon(WinUtil::createIcon(IDI_DCPP, 32));
+	runtimeInfo->setText(Text::toT(getAboutInfo()));
 
 	layout();
 	centerWindow();
