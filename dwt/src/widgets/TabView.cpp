@@ -662,7 +662,8 @@ bool TabView::handleLeftMouseDown(const MouseEvent& mouseEvent) {
 	if(ti) {
 		dragging = ti->w;
 		::SetCapture(handle());
-		if(closeable && hasStyle(TCS_OWNERDRAWFIXED)) {
+		// Manual themes also draw a close button on native-style tabs.
+		if(closeable && (isManualAppearance() || hasStyle(TCS_OWNERDRAWFIXED))) {
 			int index = findTab(dragging);
 			if(index == active) {
 				closeAuthorized = inCloseRect(mouseEvent.pos);
