@@ -230,6 +230,8 @@ public:
 
 	GETSET(string, hubUrl, HubUrl);
 	GETSET(string, token, Token);
+	// Original handshake token, retained when uploads switch to a local queue ID.
+	GETSET(string, protocolToken, ProtocolToken);
 	GETSET(string, encoding, Encoding);
 	GETSET(string, port, Port);
 	States getState() const noexcept { return state.load(std::memory_order_relaxed); }

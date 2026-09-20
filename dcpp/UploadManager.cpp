@@ -716,7 +716,8 @@ size_t UploadManager::addFailedUpload(const UserConnection& source, string filen
 		Lock l(cs);
 		auto it = find_if(waitingUsers.begin(), waitingUsers.end(), [&](const UserPtr& u) -> bool { ++queue_position; return u == source.getUser(); });
 		if (it==waitingUsers.end()) {
-			waitingUsers.emplace_back(source.getHintedUser(), source.getToken());
+			// The downloader recognizes its handshake token, not our local transfer ID.
+			waitingUsers.emplace_back(source.getHintedUser(), source.getProtocolToken());
 		}
 		waitingFiles[source.getUser()].insert(filename);		//files for which user's asked
 	}

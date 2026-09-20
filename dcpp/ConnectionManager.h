@@ -53,6 +53,8 @@ public:
 	ConnectionQueueItem(const HintedUser& user, ConnectionType type, const string& token = Util::emptyString);
 
 	GETSET(string, token, Token);
+	// Peer-supplied ADC token, retained only for duplicate upload detection.
+	GETSET(string, protocolToken, ProtocolToken);
 	GETSET(uint64_t, lastAttempt, LastAttempt);
 	GETSET(int, errors, Errors); // Number of connection errors, or -1 after a protocol error
 	GETSET(State, state, State);
@@ -75,6 +77,12 @@ class ExpectedMap {
 public:
 	void add(const string& aNick, const string& aMyNick, const string& aHubUrl) {
 		Lock l(cs);
+		auto range = expectedConnections.equal_range(aNick);
+		for(auto i = range.first; i != range.second; ++i) {
+			if(i->second.first == aMyNick && hubHintsEqual(i->second.second, aHubUrl)) {
+				return;
+			}
+		}
 		expectedConnections.emplace(aNick, make_pair(aMyNick, aHubUrl));
 	}
 
@@ -184,8 +192,16 @@ private:
 		ConnectionType type;
 		string hubUrl;
 	};
-	unordered_map<string, TokenInfo> tokens;
-	unordered_map<string, uint64_t> removedDownloadTokens;
+	using TokenMap = std::unordered_multimap<string, TokenInfo>;
+	TokenMap tokens;
+	// Callers hold cs. Protocol tokens are scoped to the peer that supplied them.
+	TokenMap::iterator findToken(const string& token, const CID& cid);
+	void eraseToken(const string& token, const CID& cid);
+	struct RemovedDownloadInfo {
+		CID cid;
+		uint64_t tick;
+	};
+	unordered_map<string, RemovedDownloadInfo> removedDownloadTokens;
 	uint64_t nextPMConnectionId = 0;
 
 	ExpectedMap expectedConnections;
@@ -222,8 +238,9 @@ private:
 	bool checkKeyprint(UserConnection* aSource);
 	pair<bool, ConnectionType> checkToken(UserConnection* uc);
 	bool checkDownload(const UserConnection* uc) const;
-	bool wasRemovedDownload(const string& token) const;
+	bool wasRemovedDownload(const string& token, const CID& cid) const;
 	bool allowNewMCN(const HintedUser& user, bool smallSlot) const;
+	StringList getDownloadRoutes(const HintedUser& user, MCNDownloadType type) const;
 	void removeExtraMCN(ConnectionQueueItem& current, unique_ptr<ConnectionQueueItem>& removedEvent);
 
 	void failed(UserConnection* aSource, const string& aError, bool protocolError);

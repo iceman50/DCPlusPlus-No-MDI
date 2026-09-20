@@ -842,9 +842,9 @@ bool QueueManager::fallbackRecursiveList(const string& target) noexcept {
 	return true;
 }
 
-QueueItem::Priority QueueManager::hasDownload(const UserPtr& aUser, MCNDownloadType type) noexcept {
+QueueItem::Priority QueueManager::hasDownload(const UserPtr& aUser, MCNDownloadType type, const string* hubUrl) noexcept {
 	Lock l(cs);
-	QueueItem* qi = userQueue.getNext(aUser, QueueItem::LOWEST, 0, nullptr, type);
+	QueueItem* qi = userQueue.getNext(aUser, QueueItem::LOWEST, 0, hubUrl, type);
 	if(!qi) {
 		return QueueItem::PAUSED;
 	}

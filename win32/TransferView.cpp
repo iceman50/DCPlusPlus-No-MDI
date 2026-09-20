@@ -836,8 +836,11 @@ void TransferView::addConn(const UpdateInfo& ui) {
 		// this connection has just been created; we don't know what file it is for yet.
 		if(conn) {
 			// Connection and transfer events are posted from different worker threads.
-			// Ignore a delayed duplicate Added event instead of replacing an already
-			// bound transfer with a new blank connection row.
+			// Refresh waiting/retrying rows, but don't let a delayed Added event
+			// replace an already running transfer with a blank connection row.
+			if(conn->status != STATUS_RUNNING) {
+				updateConn(ui);
+			}
 			return;
 		}
 
@@ -1148,6 +1151,7 @@ void TransferView::on(ConnectionManagerListener::Removed, ConnectionQueueItem* a
 
 void TransferView::on(ConnectionManagerListener::Failed, ConnectionQueueItem* aCqi, const string& aReason) noexcept {
 	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType(), aCqi->getToken());
+	ui->setStatus(STATUS_WAITING);
 	ui->setStatusString(aCqi->getUser().user->isSet(User::OLD_CLIENT) ?
 		T_("Remote client does not fully support TTH - cannot download") :
 		Text::toT(aReason));
@@ -1157,9 +1161,26 @@ void TransferView::on(ConnectionManagerListener::Failed, ConnectionQueueItem* aC
 
 void TransferView::on(ConnectionManagerListener::StatusChanged, ConnectionQueueItem* aCqi) noexcept {
 	auto ui = new UpdateInfo(aCqi->getUser(), aCqi->getType(), aCqi->getToken());
-	ui->setStatusString((aCqi->getState() == ConnectionQueueItem::CONNECTING) ? T_("Connecting") : T_("Waiting to retry"));
+	const bool connecting = aCqi->getState() == ConnectionQueueItem::CONNECTING;
+	if(aCqi->getType() == CONNECTION_TYPE_DOWNLOAD &&
+		aCqi->getState() == ConnectionQueueItem::ACTIVE && !aCqi->getRunning())
+	{
+		// A successfully negotiated connection may be retained as an internal idler
+		// even when no file is assigned. It has no active transfer to display.
+		removedConn(ui);
+		return;
+	}
 
-	updatedConn(ui);
+	ui->setStatus(STATUS_WAITING);
+	ui->setStatusString(connecting ? T_("Connecting") : T_("Waiting to retry"));
+
+	if(connecting && aCqi->getType() == CONNECTION_TYPE_DOWNLOAD) {
+		// An idle connection may have been removed from the view. Recreate its
+		// row on retry, or update the existing row while preserving its identity.
+		addedConn(ui);
+	} else {
+		updatedConn(ui);
+	}
 }
 
 namespace {

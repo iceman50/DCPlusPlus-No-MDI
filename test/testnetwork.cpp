@@ -192,3 +192,62 @@ TEST(testnetwork, wakes_socket_wait_for_queued_tasks)
 	wakeup.clear();
 	EXPECT_FALSE(socket.wait(0, true, false, wakeup).wakeup);
 }
+
+TEST(testnetwork, transfers_in_both_directions_with_four_connections_open) {
+	NetworkSession network;
+	ASSERT_TRUE(network.ready());
+	Socket listener(Socket::TYPE_TCP);
+	listener.setV4only(true);
+	listener.setLocalIp4("127.0.0.1");
+	const auto port = listener.listen("0");
+
+	struct TransferPair {
+		Socket client { Socket::TYPE_TCP }, accepted { Socket::TYPE_TCP };
+		string outgoing, incoming, receivedUp, receivedDown;
+		size_t sentUp = 0, sentDown = 0, readUp = 0, readDown = 0;
+	};
+	TransferPair pairs[4];
+	for(size_t i = 0; i < 4; ++i) {
+		auto& pair = pairs[i];
+		pair.client.setV4only(true);
+		pair.client.connect("127.0.0.1", port);
+		ASSERT_TRUE(waitForConnect(pair.client, 2000));
+		ASSERT_TRUE(listener.wait(2000, true, false).first);
+		pair.accepted.accept(listener);
+		pair.outgoing.assign(128 * 1024, static_cast<char>('A' + i));
+		pair.incoming.assign(128 * 1024, static_cast<char>('a' + i));
+		pair.receivedUp.resize(pair.outgoing.size());
+		pair.receivedDown.resize(pair.incoming.size());
+	}
+
+	const auto deadline = GET_TICK() + 10000;
+	bool done = false;
+	while(!done && GET_TICK() < deadline) {
+		done = true;
+		for(auto& pair: pairs) {
+			auto send = [](Socket& socket, const string& data, size_t& sent) {
+				if(sent < data.size()) {
+					const auto n = socket.write(data.data() + sent, static_cast<int>(data.size() - sent));
+					if(n > 0) { sent += n; }
+				}
+			};
+			auto receive = [](Socket& socket, string& data, size_t& received) {
+				if(received < data.size()) {
+					const auto n = socket.read(&data[received], static_cast<int>(data.size() - received));
+					if(n > 0) { received += n; }
+				}
+			};
+			send(pair.client, pair.outgoing, pair.sentUp);
+			send(pair.accepted, pair.incoming, pair.sentDown);
+			receive(pair.accepted, pair.receivedUp, pair.readUp);
+			receive(pair.client, pair.receivedDown, pair.readDown);
+			done = done && pair.readUp == pair.outgoing.size() && pair.readDown == pair.incoming.size();
+		}
+		if(!done) { Thread::sleep(1); }
+	}
+	ASSERT_TRUE(done);
+	for(const auto& pair: pairs) {
+		EXPECT_EQ(pair.outgoing, pair.receivedUp);
+		EXPECT_EQ(pair.incoming, pair.receivedDown);
+	}
+}

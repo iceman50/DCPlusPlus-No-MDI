@@ -129,7 +129,8 @@ public:
 	pair<size_t, int64_t> getQueued(const UserPtr& aUser) const;
 
 	/** @return The highest priority download the user has, PAUSED may also mean no downloads */
-	QueueItem::Priority hasDownload(const UserPtr& aUser, MCNDownloadType type = MCNDownloadType::ANY) noexcept;
+	QueueItem::Priority hasDownload(const UserPtr& aUser, MCNDownloadType type = MCNDownloadType::ANY,
+		const string* hubUrl = nullptr) noexcept;
 
 	int countOnlineSources(const string& aTarget);
 

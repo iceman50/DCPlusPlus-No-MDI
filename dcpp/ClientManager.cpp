@@ -449,10 +449,7 @@ OnlineUser* ClientManager::findOnlineUserHint(const CID& cid, const string& hint
 
 void ClientManager::connect(const HintedUser& user, const string& token, ConnectionType type) {
 	Lock l(cs);
-	OnlineUser* u = user.hint.empty() ?
-		findOnlineUser(user) :
-		findOnlineUserHint(user);
-
+	OnlineUser* u = user.hint.empty() ? findOnlineUser(user) : findOnlineUserHint(user);
 	if(u) {
 		u->getClient().connect(*u, token, type);
 	}

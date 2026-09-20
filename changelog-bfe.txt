@@ -1,4 +1,5 @@
 == 09-13-2026 - 0.8842 !!!Experimental!!! ==
+* Fix overlapping NMDC transfer identities, repeated incoming connection requests, cross-user ADC token collisions, stalled failover retries and hub-specific file-list routing; preserve upload queue notification tokens and visible connection errors
 * Begin the 0.8842 development cycle after the 0.8841 release (iceman50)
 
 == 08-18-2026 - 0.8841 !!!Experimental!!! ==

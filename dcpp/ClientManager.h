@@ -127,6 +127,11 @@ public:
 
 	void sendUDP(AdcCommand& cmd, const OnlineUser& user, const string& aKey = Util::emptyString);
 
+	/**
+	 * Ask one of the hubs where the user is online to establish a client-client connection.
+	 * A nonempty hint selects that exact hub. The download scheduler chooses eligible
+	 * failover routes before calling this function.
+	 */
 	void connect(const HintedUser& user, const string& token, ConnectionType type = CONNECTION_TYPE_LAST);
 	bool privateMessage(const HintedUser& user, const string& msg, bool thirdPerson, bool echo = true,
 		bool explicitRichText = false);
