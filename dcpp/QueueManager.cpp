@@ -851,18 +851,21 @@ QueueItem::Priority QueueManager::hasDownload(const UserPtr& aUser, MCNDownloadT
 	return qi->getPriority();
 }
 
-typedef unordered_map<TTHValue, const DirectoryListing::File*> TTHMap;
+typedef unordered_map<TTHValue, int64_t> TTHMap;
 
 namespace {
-void buildMap(const DirectoryListing::Directory* dir, TTHMap& tthMap) noexcept {
+void buildMap(const DirectoryListing::Directory* dir, TTHMap& tthMap) {
 	std::for_each(dir->directories.cbegin(), dir->directories.cend(), [&](DirectoryListing::Directory* d) {
 		if(!d->getAdls())
 			buildMap(d, tthMap);
 	});
 
+	const bool release = !dir->areFilesLoaded();
+	dir->ensureFiles();
 	std::for_each(dir->files.cbegin(), dir->files.cend(), [&](DirectoryListing::File* f) {
-		tthMap.emplace(f->getTTH(), f);
+		tthMap.emplace(f->getTTH(), f->getSize());
 	});
+	if(release) const_cast<DirectoryListing::Directory*>(dir)->releaseFiles();
 }
 }
 
@@ -873,7 +876,7 @@ int QueueManager::matchListing(const DirectoryListing& dl) noexcept {
 		Lock l(cs);
 
 		TTHMap tthMap;
-		buildMap(dl.getRoot(), tthMap);
+		try { buildMap(dl.getRoot(), tthMap); } catch(const Exception&) { return 0; }
 
 		for(auto& i: fileQueue.getQueue()) {
 			auto qi = i.second;
@@ -882,7 +885,7 @@ int QueueManager::matchListing(const DirectoryListing& dl) noexcept {
 			if(qi->isSet(QueueItem::FLAG_USER_LIST))
 				continue;
 			auto j = tthMap.find(qi->getTTH());
-			if(j != tthMap.end() && j->second->getSize() == qi->getSize()) {
+			if(j != tthMap.end() && j->second == qi->getSize()) {
 				try {
 					addSource(qi, dl.getUser(), QueueItem::Source::FLAG_FILE_NOT_AVAILABLE);
 				} catch(...) {
@@ -1184,6 +1187,8 @@ void QueueManager::putDownload(Download* aDownload, bool finished) noexcept {
 				userQueue.removeDownload(q, d.get());
 				fire(QueueManagerListener::StatusUpdated(), q);
 			} else if(d->getType() == Transfer::TYPE_FULL_LIST) {
+				if(d->isSet(Download::FLAG_XML_ZST_LIST)) q->setFlag(QueueItem::FLAG_XML_ZSTLIST);
+				else q->unsetFlag(QueueItem::FLAG_XML_ZSTLIST);
 				if(d->isSet(Download::FLAG_XML_BZ_LIST)) {
 					q->setFlag(QueueItem::FLAG_XML_BZLIST);
 				} else {
@@ -1804,6 +1809,10 @@ void QueueLoader::endTag(const string& name) {
 void QueueManager::noDeleteFileList(const string& path) {
 	if(!SETTING(KEEP_LISTS)) {
 		protectedFileLists.push_back(path);
+		if(SETTING(FILELIST_CACHE)) {
+			for(const auto& suffix: { ".bz2", ".zst", ".dcfl", ".bz2.dcfl", ".zst.dcfl" })
+				protectedFileLists.push_back(path + suffix);
+		}
 	}
 }
 

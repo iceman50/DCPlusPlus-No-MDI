@@ -83,7 +83,10 @@ public:
 		FLAG_RECURSIVE_LIST = 0x400,
 
 		/** A full-list request was merged while a partial-list transfer was already running. */
-		FLAG_DEFERRED_FULL_LIST = 0x800
+		FLAG_DEFERRED_FULL_LIST = 0x800,
+
+		/** The received XML list is retained as a validated Zstandard frame. */
+		FLAG_XML_ZSTLIST = 0x1000
 	};
 
 	class Source : public Flags {

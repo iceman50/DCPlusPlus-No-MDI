@@ -30,7 +30,8 @@ public:
 	enum Flags {
 		FLAG_ZUPLOAD = 1 << 0,
 		FLAG_PENDING_KICK = 1 << 1,
-		FLAG_CHUNKED = 1 << 2
+		FLAG_CHUNKED = 1 << 2,
+		FLAG_ZSTD = 1 << 3
 	};
 
 	Upload(UserConnection& conn, const string& path, const TTHValue& tth);

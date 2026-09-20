@@ -984,7 +984,7 @@ bool WinUtil::browseSaveFile(dwt::Widget* parent, tstring& file) {
 }
 
 bool WinUtil::browseFileList(dwt::Widget* parent, tstring& file) {
-	return LoadDialog(parent).addFilter(T_("File Lists"), _T("*.xml.bz2;*.xml")) .addFilter(T_("All files"), _T("*.*")) .setInitialDirectory(
+	return LoadDialog(parent).addFilter(T_("File Lists"), _T("*.xml.bz2;*.xml.zst;*.xml")) .addFilter(T_("All files"), _T("*.*")) .setInitialDirectory(
 		Text::toT(Util::getListPath())) .open(file);
 }
 

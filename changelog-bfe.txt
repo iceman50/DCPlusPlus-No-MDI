@@ -1,4 +1,6 @@
 == 09-13-2026 - 0.8842 !!!Experimental!!! ==
+* Add opt-in ZST1/ZS1 Zstandard transfers for ADC and NMDC, with legacy compression fallback.
+* Add an opt-in indexed Zstandard filelist cache and on-demand file entry loading; support opening .xml.zst lists.
 * Add a 16-48 px hub user-list icon selector with per-favorite overrides and an Experimental global default, explicit embedded EXE icon selection, and transparent icons in native light-mode menus (iceman50)
 * Fix overlapping NMDC transfer identities, repeated incoming connection requests, cross-user ADC token collisions, stalled failover retries and hub-specific file-list routing; preserve upload queue notification tokens and visible connection errors
 * Begin the 0.8842 development cycle after the 0.8841 release (iceman50)

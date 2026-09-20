@@ -34,6 +34,11 @@
 
 		Make sure that SCons is in your PATH environment variable. 
 
+		* Zstandard
+
+		Zstandard 1.5.7 is bundled in zstd/ and built statically by SCons; no external package is needed.
+		See zstd/README.dcpp for the source archive and checksum.
+
 		* SQLite
 
 		SQLite is bundled as an amalgamation in the sqlite/ folder and does not require an external package.

@@ -216,7 +216,8 @@ void DownloadManager::checkDownloads(UserConnection* aConn) {
 
 	dcdebug("Requesting " I64_FMT "/" I64_FMT "\n", d->getStartPos(), d->getSize());
 
-	aConn->send(d->getCommand(aConn->isSet(UserConnection::FLAG_SUPPORTS_ZLIB_GET)));
+	aConn->send(d->getCommand(aConn->isSet(UserConnection::FLAG_SUPPORTS_ZLIB_GET),
+		aConn->isSet(UserConnection::FLAG_SUPPORTS_ZSTD_GET)));
 }
 
 void DownloadManager::on(AdcCommand::SND, UserConnection* aSource, const AdcCommand& cmd) noexcept {
@@ -225,24 +226,38 @@ void DownloadManager::on(AdcCommand::SND, UserConnection* aSource, const AdcComm
 		return;
 	}
 
+	if(cmd.getParameters().size() < 4) {
+		failDownload(aSource, _("Response does not match request"));
+		return;
+	}
 	const string& type = cmd.getParam(0);
 	int64_t start = Util::toInt64(cmd.getParam(2));
 	int64_t bytes = Util::toInt64(cmd.getParam(3));
 
-	if(type != Transfer::names[aSource->getDownload()->getType()]) {
+	if(type != Transfer::names[aSource->getDownload()->getType()] ||
+		cmd.getParam(1) != aSource->getDownload()->getRequestedFile()) {
 		// Uhh??? We didn't ask for this...
 		aSource->disconnect();
 		return;
 	}
 
-	startData(aSource, start, bytes, cmd.hasFlag("ZL", 4));
+	const bool zs = cmd.hasFlag("ZS", 4);
+	if((zs && cmd.hasFlag("ZL", 4)) || (zs && !aSource->getDownload()->requestedZstd())) {
+		failDownload(aSource, _("Response does not match request"));
+		return;
+	}
+	startData(aSource, start, bytes, cmd.hasFlag("ZL", 4), zs);
 }
 
-void DownloadManager::startData(UserConnection* aSource, int64_t start, int64_t bytes, bool z) {
+void DownloadManager::startData(UserConnection* aSource, int64_t start, int64_t bytes, bool z, bool zstd) {
 	Download* d = aSource->getDownload();
 	dcassert(d != NULL);
 
 	dcdebug("Preparing " I64_FMT ":" I64_FMT ", " I64_FMT ":" I64_FMT"\n", d->getStartPos(), start, d->getSize(), bytes);
+	if(start != d->getStartPos()) {
+		failDownload(aSource, _("Response does not match request"));
+		return;
+	}
 	if(d->getSize() == -1) {
 		if(bytes >= 0) {
 			d->setSize(bytes);
@@ -257,7 +272,7 @@ void DownloadManager::startData(UserConnection* aSource, int64_t start, int64_t 
 	}
 
 	try {
-		d->open(bytes, z);
+		d->open(bytes, z, zstd);
 	} catch(const FileException& e) {
 		failDownload(aSource, str(F_("Could not open target file: %1%") % e.getError()));
 		return;
@@ -273,7 +288,7 @@ void DownloadManager::startData(UserConnection* aSource, int64_t start, int64_t 
 
 	fire(DownloadManagerListener::Starting(), d);
 
-	if(d->getPos() == d->getSize()) {
+	if(d->getPos() == d->getSize() && !z && !zstd) {
 		try {
 			// Already finished? A zero-byte file list could cause this...
 			endData(aSource);
@@ -308,6 +323,7 @@ void DownloadManager::endData(UserConnection* aSource) {
 	Download* d = aSource->getDownload();
 	dcassert(d != NULL);
 
+	if(d->getPos() != d->getSize()) throw Exception("Transfer ended before its declared size");
 	if(d->getType() == Transfer::TYPE_TREE) {
 		d->getOutput()->flush();
 
@@ -348,6 +364,13 @@ void DownloadManager::endData(UserConnection* aSource) {
 				d->resetPos();
 				failDownload(aSource, _("Invalid or damaged file list received"));
 				return;
+			}
+			for(const auto& extension: { ".xml", ".xml.bz2", ".xml.zst" }) {
+				const auto old = d->getPath() + extension;
+				if(old != d->getTempTarget()) {
+					File::deleteFile(old);
+					File::deleteFile(old + ".dcfl");
+				}
 			}
 		}
 

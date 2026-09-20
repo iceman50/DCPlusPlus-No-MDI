@@ -48,6 +48,7 @@ public:
 	static const string FEATURE_XML_BZLIST;
 	static const string FEATURE_ADCGET;
 	static const string FEATURE_ZLIB_GET;
+	static const string FEATURE_ZSTD_GET;
 	static const string FEATURE_TTHL;
 	static const string FEATURE_TTHF;
 	static const string FEATURE_ADC_BAS0;
@@ -96,7 +97,8 @@ public:
 		// MCN1 connection roles are inferred from the first transfer and may
 		// not be changed during the lifetime of the connection.
 		FLAG_MCN_SMALL = FLAG_SUPPORTS_RTF0 << 1,
-		FLAG_MCN_NORMAL = FLAG_MCN_SMALL << 1
+		FLAG_MCN_NORMAL = FLAG_MCN_SMALL << 1,
+		FLAG_SUPPORTS_ZSTD_GET = FLAG_MCN_NORMAL << 1
 	};
 
 	enum States {

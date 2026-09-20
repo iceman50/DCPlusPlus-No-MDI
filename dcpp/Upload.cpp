@@ -39,6 +39,7 @@ void Upload::getParams(const UserConnection& aSource, ParamMap& params) {
 
 void Upload::appendFlags(StringList& flags) const {
 	Transfer::appendFlags(flags);
+	if(isSet(FLAG_ZSTD)) flags.emplace_back("ZS");
 	if(isSet(FLAG_ZUPLOAD)) {
 		flags.emplace_back("Z");
 	}

@@ -128,8 +128,8 @@ void DirectoryListingFrame::openWindow_(TabViewPtr parent, const tstring& aFile,
 	auto& path = frame->path;
 	path = Text::fromT(aFile);
 	auto n = path.size();
-	if(n > 4 && Util::stricmp(path.substr(n - 4), ".bz2") == 0) {
-		// strip the .bz2 ext - the file list loader will now where to find the file list anyway.
+	if(n > 4 && (Util::stricmp(path.substr(n - 4), ".bz2") == 0 || Util::stricmp(path.substr(n - 4), ".zst") == 0)) {
+		// Strip the compression extension; the loader resolves the stored list format.
 		path.erase(n - 4);
 	}
 
@@ -493,7 +493,8 @@ public:
 		they will have been processed by the time the user wants them to be displayed. */
 		try {
 			step("caching files");
-			for(auto directory: parent.dl->getRoot()->directories) cacheFiles(directory);
+			if(!parent.dl->usesCache())
+				for(auto directory: parent.dl->getRoot()->directories) cacheFiles(directory);
 		} catch(const Exception&) { }
 
 		step("file cache done; destroying thread");
@@ -558,6 +559,7 @@ private:
 	void cacheDirectoryFiles(DirectoryListing::Directory* d) {
 		if(parent.dl->getAbort()) { throw Exception(); }
 
+		d->ensureFiles();
 		const auto count = d->files.size();
 		if(canCache(count)) {
 			cacheCount += static_cast<uint32_t>(count);
@@ -1309,8 +1311,20 @@ DirectoryListingFrame::ItemInfo* DirectoryListingFrame::getCachedDir(DirectoryLi
 }
 
 void DirectoryListingFrame::changeDir(DirectoryListing::Directory* d) {
+	try { d->ensureFiles(); } catch(const Exception& e) {
+		status->setText(STATUS_STATUS, Text::toT(e.getError()));
+		return;
+	}
 	updating = true;
 	clearFiles();
+	if(curDir && curDir != d && curDir->hasCachedFiles()) {
+		auto old = fileCache.find(curDir);
+		if(old != fileCache.end()) {
+			cacheCount -= static_cast<uint32_t>(old->second.size());
+			fileCache.erase(old);
+		}
+		curDir->releaseFiles();
+	}
 	curDir = d;
 
 	for(auto& i: d->directories) {

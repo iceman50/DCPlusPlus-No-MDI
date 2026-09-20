@@ -28,6 +28,7 @@
 #include "ClientManager.h"
 #include "FilteredFile.h"
 #include "ZUtils.h"
+#include "ZstdUtils.h"
 #include "HashManager.h"
 #include "AdcCommand.h"
 #include "FavoriteManager.h"
@@ -85,7 +86,9 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 			}
 
 			if(aFile == Transfer::USER_LIST_NAME_BZ || aFile == Transfer::USER_LIST_NAME) {
-				if(ShareManager::getInstance()->hasCustomShare(aSource.getHubUrl())) {
+				if(aFile == Transfer::USER_LIST_NAME) {
+					sourceFile = _("File list");
+				} else if(ShareManager::getInstance()->hasCustomShare(aSource.getHubUrl())) {
 					preparedList.reset(ShareManager::getInstance()->generateFileList(
 						aSource.getHubUrl(), aFile == Transfer::USER_LIST_NAME_BZ));
 					sourceFile = _("File list");
@@ -336,16 +339,22 @@ bool UploadManager::prepareFile(UserConnection& aSource, const string& aType, co
 						is = new LimitedInputStream<true>(is, size);
 					}
 				} else if(aFile == Transfer::USER_LIST_NAME) {
-					string compressed = File(sourceFile, File::READ, File::OPEN).read();
-					string xml;
-					CryptoManager::getInstance()->decodeBZ2(reinterpret_cast<const uint8_t*>(compressed.data()), compressed.size(), xml);
-					auto list = std::make_unique<MemoryInputStream>(xml);
+					auto opened = ShareManager::getInstance()->openXmlList(aSource.getHubUrl());
+					auto list = std::move(opened.first);
 					start = aStartPos;
-					fullSize = static_cast<int64_t>(list->getSize());
+					fullSize = opened.second;
 					size = (aBytes == -1) ? fullSize - start : aBytes;
-					if(start > fullSize || size < 0 || size > fullSize - start || !list->setPos(static_cast<size_t>(start))) {
+					if(start > fullSize || size < 0 || size > fullSize - start) {
 						aSource.fileNotAvail();
 						return false;
+					}
+					// XML streams cannot seek, but bounded discard preserves legacy ranges.
+					char discard[64 * 1024];
+					for(int64_t remaining = start; remaining > 0;) {
+						size_t n = static_cast<size_t>(std::min<int64_t>(remaining, sizeof(discard)));
+						const auto produced = list->read(discard, n);
+						if(!produced) throw Exception("Truncated file list");
+						remaining -= produced;
 					}
 					is = list.release();
 					if(start + size < fullSize) {
@@ -642,6 +651,11 @@ void UploadManager::on(AdcCommand::GET, UserConnection* aSource, const AdcComman
 		return;
 	}
 
+	const bool zs = c.hasFlag("ZS", 4);
+	if(zs && (c.hasFlag("ZL", 4) || !aSource->isSet(UserConnection::FLAG_SUPPORTS_ZSTD_GET))) {
+		aSource->send(AdcCommand(AdcCommand::SEV_RECOVERABLE, AdcCommand::ERROR_PROTOCOL_GENERIC, "Invalid Zstandard negotiation"));
+		return;
+	}
 	const string& type = c.getParam(0);
 	const string& fname = c.getParam(1);
 	int64_t aStartPos = Util::toInt64(c.getParam(2));
@@ -656,10 +670,19 @@ void UploadManager::on(AdcCommand::GET, UserConnection* aSource, const AdcComman
 			.addParam(Util::toString(u->getStartPos()))
 			.addParam(Util::toString(u->getSize()));
 
-		if(c.hasFlag("ZL", 4)) {
-			u->setStream(new FilteredInputStream<ZFilter, true>(u->getStream()));
-			u->setFlag(Upload::FLAG_ZUPLOAD);
-			cmd.addParam("ZL1");
+		try {
+			if(zs && SETTING(COMPRESS_TRANSFERS)) {
+				u->setStream(new FilteredInputStream<ZstdFilter, true>(u->getStream()));
+				u->setFlag(Upload::FLAG_ZSTD);
+				cmd.addParam("ZS1");
+			} else if(c.hasFlag("ZL", 4)) {
+				u->setStream(new FilteredInputStream<ZFilter, true>(u->getStream()));
+				u->setFlag(Upload::FLAG_ZUPLOAD);
+				cmd.addParam("ZL1");
+			}
+		} catch(const Exception& e) {
+			on(UserConnectionListener::Failed(), aSource, e.getError());
+			return;
 		}
 
 		aSource->send(cmd);

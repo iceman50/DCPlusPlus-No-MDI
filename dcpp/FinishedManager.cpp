@@ -172,15 +172,8 @@ void FinishedManager::onComplete(Transfer* t, bool upload, bool crc32Checked) {
 		// get downloads' file size here to avoid deadlocks
 		if(!upload) {
 			if(t->getType() == Transfer::TYPE_FULL_LIST) {
-				// find the correct extension of the downloaded file list
-				file += ".xml";
-				if(File::getSize(file) == -1) {
-					file += ".bz2";
-					if(File::getSize(file) == -1) {
-						// no file list?
-						return;
-					}
-				}
+				file = static_cast<Download*>(t)->getTempTarget();
+				if(File::getSize(file) == -1) return;
 				size = t->getSize();
 			} else {
 				QueueManager::getInstance()->getSizeInfo(size, pos, file);

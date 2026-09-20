@@ -225,7 +225,17 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 		tempShares->onWindowPosChanged([this](const dwt::Rectangle&) { layoutTempShares(); });
 	}
 
-	auto transferGrid = tabs->addPage(T_("Transfers and hashing"), 2)->content();
+	auto transferGrid = tabs->addPage(T_("Transfers and hashing"), 3)->content();
+
+	{
+		auto group = transferGrid->addChild(GroupBox::Seed(T_("Compression and large file lists")));
+		auto cur = group->addChild(Grid::Seed(2, 1));
+		cur->column(0).mode = GridInfo::FILL;
+		auto zstd = cur->addChild(CheckBox::Seed(T_("Prefer Zstandard over zlib when the peer supports both")));
+		items.emplace_back(zstd, SettingsManager::PREFER_ZSTD, PropPage::T_BOOL);
+		auto cache = cur->addChild(CheckBox::Seed(T_("Cache file lists on disk and load file entries on demand")));
+		items.emplace_back(cache, SettingsManager::FILELIST_CACHE, PropPage::T_BOOL);
+	}
 
 	{
 		auto group = transferGrid->addChild(GroupBox::Seed(T_("Multi-connection transfers (MCN)")));

@@ -1,0 +1,8 @@
+Copyright (C) 2026 iceman50 (this integration note).
+Zstandard library copyright remains with its upstream copyright holders.
+
+Zstandard 1.5.7, unmodified library sources (common, compress, decompress).
+Source: https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+Archive SHA-256: eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+Distributed under the BSD license in LICENSE. See also COPYING.
+Built statically, without assembly, legacy decoders, or worker threads.

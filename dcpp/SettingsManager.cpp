@@ -142,6 +142,7 @@ const string SettingsManager::settingTags[] =
 	"RegisterSystemStartup", "DontLogCCPMChat", "AboutCfgDisclaimer", "EnableTaskbarPreview",
 	"EnableSUDP", "BroadDetection", "BroadDetection6", "HashDbVerifyStartup", "HashDbCompactOnRebuild",
 	"ShareCache", "EnableRTFTempShares", "RTFDroppedImagesInline",
+	"PreferZstd", "FilelistCache",
 	"SENTRY",
 	// Int64
 	"TotalUpload", "TotalDownload", "SharingSkiplistMinSize", "SharingSkiplistMaxSize",
@@ -308,6 +309,8 @@ SettingsManager::SettingsManager() {
 	setDefault(AUTO_KICK, false);
 	setDefault(QUEUEFRAME_SHOW_TREE, true);
 	setDefault(COMPRESS_TRANSFERS, true);
+	setDefault(PREFER_ZSTD, false);
+	setDefault(FILELIST_CACHE, false);
 	setDefault(SFV_CHECK, true);
 	setDefault(AUTO_AWAY, false);
 	setDefault(AWAY_COMP_LOCK, true);

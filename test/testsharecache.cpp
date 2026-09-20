@@ -891,3 +891,44 @@ TEST_F(ShareCacheTest, stale_attachment_completion_reports_clear_and_cannot_read
 	EXPECT_TRUE(freshResult->attachment->temporary);
 	ASSERT_EQ(sm->getTempShares().size(), 1U);
 }
+
+TEST_F(ShareCacheTest, streams_full_xml_with_correct_uncompressed_size) {
+	populateShare();
+	auto sm = ShareManager::getInstance();
+	sm->forceXmlRefresh = true;
+	auto opened = sm->openXmlList("adc://stream.example");
+	string xml;
+	char buffer[37];
+	for(;;) {
+		size_t n = sizeof(buffer);
+		const auto produced = opened.first->read(buffer, n);
+		EXPECT_EQ(produced, n);
+		if(!produced) break;
+		xml.append(buffer, produced);
+	}
+	EXPECT_EQ(static_cast<int64_t>(xml.size()), opened.second);
+	EXPECT_NE(string::npos, xml.find("file.bin"));
+	EXPECT_NE(string::npos, xml.find("</FileListing>"));
+}
+
+TEST_F(ShareCacheTest, streamed_xml_respects_an_explicit_empty_hub_profile) {
+	populateShare();
+	FavoriteHubEntry hub;
+	hub.setServer("adc://empty-stream.example");
+	hub.setShareDirectories({});
+	FavoriteManager::getInstance()->addFavorite(hub);
+	auto opened = ShareManager::getInstance()->openXmlList(hub.getServer());
+	string xml;
+	char buffer[101];
+	for(;;) {
+		size_t n = sizeof(buffer);
+		const auto produced = opened.first->read(buffer, n);
+		EXPECT_EQ(produced, n);
+		if(!produced) break;
+		xml.append(buffer, produced);
+	}
+	EXPECT_EQ(static_cast<int64_t>(xml.size()), opened.second);
+	EXPECT_EQ(string::npos, xml.find("file.bin"));
+	EXPECT_EQ(string::npos, xml.find("Virtual"));
+	EXPECT_NE(string::npos, xml.find("</FileListing>"));
+}

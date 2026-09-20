@@ -422,6 +422,7 @@ void ADLSearchManager::finalizeDestinationDirectories(DestDirList& destDirs, Dir
 }
 
 void ADLSearchManager::matchListing(DirectoryListing& aDirList) {
+	if(std::none_of(collection.begin(), collection.end(), [](const ADLSearch& s) { return s.isActive; })) return;
 	ParamMap params;
 	params["userNI"] = ClientManager::getInstance()->getNicks(aDirList.getUser())[0];
 	params["userCID"] = aDirList.getUser().user->getCID().toBase32();
@@ -448,11 +449,14 @@ void ADLSearchManager::matchRecurse(DestDirList& aDestList, DirectoryListing& fi
 		matchRecurse(aDestList, filelist, dirIt, tmpPath);
 	}
 
+	const bool release = !aDir->areFilesLoaded();
+	aDir->ensureFiles();
 	for(auto& fileIt: aDir->files) {
 		if(filelist.getAbort()) { throw Exception(); }
 		matchesFile(aDestList, fileIt, aPath);
 	}
 
+	if(release) aDir->releaseFiles();
 	stepUpDirectory(aDestList);
 }
 

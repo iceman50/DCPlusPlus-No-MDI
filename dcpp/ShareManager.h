@@ -169,6 +169,7 @@ public:
 	MemoryInputStream* getTree(const string& virtualFile) const;
 	MemoryInputStream* getTree(const string& virtualFile, const string& hubUrl) const;
 	MemoryInputStream* generateFileList(const string& hubUrl, bool compressed) const;
+	std::pair<std::unique_ptr<InputStream>, int64_t> openXmlList(const string& hubUrl);
 	bool hasCustomShare(const string& hubUrl) const;
 
 	AdcCommand getFileInfo(const string& aFile);

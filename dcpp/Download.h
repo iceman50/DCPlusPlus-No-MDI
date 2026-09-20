@@ -45,7 +45,9 @@ public:
 		FLAG_TTH_CHECK = 1 << 3,
 		FLAG_XML_BZ_LIST = 1 << 4,
 		FLAG_CHUNKED = 1 << 5,
-		FLAG_RECURSIVE = 1 << 6
+		FLAG_RECURSIVE = 1 << 6,
+		FLAG_ZSTD = 1 << 7,
+		FLAG_XML_ZST_LIST = 1 << 8
 	};
 
 	Download(UserConnection& conn, QueueItem& qi) noexcept;
@@ -59,7 +61,7 @@ public:
 	string getTargetFileName() const;
 
 	/** Open the target output for writing */
-	void open(int64_t bytes, bool z);
+	void open(int64_t bytes, bool z, bool zstd = false);
 
 	/** Release the target output */
 	void close();
@@ -74,7 +76,9 @@ public:
 	TigerTree& getTigerTree() { return tt; }
 	const string& getPFS() const { return pfs; }
 	/** @internal */
-	AdcCommand getCommand(bool zlib);
+	AdcCommand getCommand(bool zlib, bool zstd = false);
+	bool requestedZstd() const { return zstdRequested; }
+	const string& getRequestedFile() const { return requestedFile; }
 
 	const unique_ptr<OutputStream>& getOutput() const { return output; }
 
@@ -86,6 +90,8 @@ private:
 	unique_ptr<OutputStream> output;
 	TigerTree tt;
 	string pfs;
+	bool zstdRequested = false;
+	string requestedFile;
 };
 
 } // namespace dcpp

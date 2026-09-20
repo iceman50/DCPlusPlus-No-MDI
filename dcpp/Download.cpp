@@ -27,8 +27,33 @@
 #include "File.h"
 #include "FilteredFile.h"
 #include "ZUtils.h"
+#include "ZstdUtils.h"
 
 namespace dcpp {
+
+namespace {
+// Retain the received frame while validating/decompressing into a bounded discard
+// sink. Transfer progress is measured in XML bytes, disk writes in frame bytes.
+class ZstdListOutputStream : public OutputStream {
+	class Sink : public OutputStream {
+	public:
+		size_t write(const void*, size_t len) override { return len; }
+		size_t flush() override { return 0; }
+	} sink;
+	std::unique_ptr<OutputStream> file;
+	LimitedOutputStream<false> limit;
+	FilteredOutputStream<UnZstdFilter, false> decoder;
+public:
+	ZstdListOutputStream(OutputStream* output, int64_t bytes) : file(output), limit(&sink, bytes), decoder(&limit) { }
+	size_t write(const void* data, size_t len) override {
+		const auto produced = decoder.write(data, len);
+		file->write(data, len);
+		return produced;
+	}
+	size_t flush() override { decoder.flush(); return file->flush(); }
+	bool eof() override { return decoder.eof(); }
+};
+}
 
 Download::Download(UserConnection& conn, QueueItem& qi) noexcept : Transfer(conn, qi.getTarget(), qi.getTTH()),
 	tempTarget(qi.getTempTarget()), treeValid(false)
@@ -72,7 +97,9 @@ Download::~Download() {
 	getUserConnection().setDownload(0);
 }
 
-AdcCommand Download::getCommand(bool zlib) {
+AdcCommand Download::getCommand(bool zlib, bool zstd) {
+	zstdRequested = SETTING(COMPRESS_TRANSFERS) && zstd && (SETTING(PREFER_ZSTD) || !zlib);
+	if(zstdRequested && getType() == TYPE_FULL_LIST) unsetFlag(FLAG_XML_BZ_LIST);
 	AdcCommand cmd(AdcCommand::CMD_GET);
 
 	cmd.addParam(Transfer::names[getType()]);
@@ -95,7 +122,9 @@ AdcCommand Download::getCommand(bool zlib) {
 	// A BZip2 file list is already compressed. Wrapping it in ADC's optional
 	// ZL1 stream saves virtually nothing and has historically exposed broken
 	// nested-compression implementations in otherwise compatible peers.
-	if(zlib && SETTING(COMPRESS_TRANSFERS) &&
+	if(zstdRequested) {
+		cmd.addParam("ZS1");
+	} else if(zlib && SETTING(COMPRESS_TRANSFERS) &&
 		!(getType() == TYPE_FULL_LIST && isSet(Download::FLAG_XML_BZ_LIST)))
 	{
 		cmd.addParam("ZL1");
@@ -104,6 +133,7 @@ AdcCommand Download::getCommand(bool zlib) {
 		cmd.addParam("RE1");
 	}
 
+	requestedFile = cmd.getParam(1);
 	return cmd;
 }
 
@@ -117,6 +147,7 @@ void Download::appendFlags(StringList& flags) const {
 	if(isSet(FLAG_TTH_CHECK)) {
 		flags.emplace_back("T");
 	}
+	if(isSet(FLAG_ZSTD)) flags.emplace_back("ZS");
 	if(isSet(FLAG_ZDOWNLOAD)) {
 		flags.emplace_back("Z");
 	}
@@ -133,7 +164,11 @@ const string& Download::getDownloadTarget() const {
 	return (getTempTarget().empty() ? getPath() : getTempTarget());
 }
 
-void Download::open(int64_t bytes, bool z) {
+void Download::open(int64_t bytes, bool z, bool zstd) {
+	if(zstd && getType() == TYPE_FULL_LIST) {
+		unsetFlag(FLAG_XML_BZ_LIST);
+		setFlag(FLAG_XML_ZST_LIST);
+	}
 	if(getType() == Transfer::TYPE_FILE) {
 		auto target = getDownloadTarget();
 		auto fullSize = tt.getFileSize();
@@ -160,7 +195,9 @@ void Download::open(int64_t bytes, bool z) {
 		auto target = getPath();
 		File::ensureDirectory(target);
 
-		if(isSet(Download::FLAG_XML_BZ_LIST)) {
+		if(isSet(Download::FLAG_XML_ZST_LIST)) {
+			target += ".xml.zst";
+		} else if(isSet(Download::FLAG_XML_BZ_LIST)) {
 			target += ".xml.bz2";
 		} else {
 			target += ".xml";
@@ -178,6 +215,12 @@ void Download::open(int64_t bytes, bool z) {
 		output.reset(new BufferedOutputStream<true>(output.release()));
 	}
 
+	if(isSet(FLAG_XML_ZST_LIST)) {
+		setFlag(FLAG_ZSTD);
+		output.reset(new ZstdListOutputStream(output.release(), bytes));
+		return;
+	}
+
 	if(getType() == Transfer::TYPE_FILE) {
 		typedef MerkleCheckOutputStream<TigerTree, true> MerkleStream;
 
@@ -188,7 +231,10 @@ void Download::open(int64_t bytes, bool z) {
 	// Check that we don't get too many bytes
 	output.reset(new LimitedOutputStream<true>(output.release(), bytes));
 
-	if(z) {
+	if(zstd) {
+		setFlag(Download::FLAG_ZSTD);
+		output.reset(new FilteredOutputStream<UnZstdFilter, true>(output.release()));
+	} else if(z) {
 		setFlag(Download::FLAG_ZDOWNLOAD);
 		output.reset(new FilteredOutputStream<UnZFilter, true>(output.release()));
 	}
@@ -207,6 +253,7 @@ bool Download::hasValidFileListSignature() const {
 	try {
 		File file(tempTarget, File::READ, File::OPEN);
 		const auto signature = file.read(5);
+		if(isSet(FLAG_XML_ZST_LIST)) return signature.size() >= 4 && signature.compare(0, 4, "\x28\xb5\x2f\xfd", 4) == 0;
 		if(isSet(Download::FLAG_XML_BZ_LIST)) {
 			// BZip2 streams begin with "BZh" followed by a block-size digit 1-9.
 			return signature.size() >= 4 && signature.compare(0, 3, "BZh") == 0 &&

@@ -19,6 +19,8 @@
 #include "DirectoryListing.h"
 
 #include "BZUtils.h"
+#include "ZstdUtils.h"
+#include "FilelistCache.h"
 #include "ClientManager.h"
 #include "CryptoManager.h"
 #include "File.h"
@@ -49,11 +51,11 @@ UserPtr DirectoryListing::getUserFromFilename(const string& fileName) {
 	string name = Util::getFileName(fileName);
 
 	// Strip off any extensions
-	if(Util::stricmp(name.c_str() + name.length() - 4, ".bz2") == 0) {
+	if(name.size() >= 4 && (Util::stricmp(name.substr(name.size() - 4), ".bz2") == 0 || Util::stricmp(name.substr(name.size() - 4), ".zst") == 0)) {
 		name.erase(name.length() - 4);
 	}
 
-	if(Util::stricmp(name.c_str() + name.length() - 4, ".xml") == 0) {
+	if(name.size() >= 4 && Util::stricmp(name.substr(name.size() - 4), ".xml") == 0) {
 		name.erase(name.length() - 4);
 	}
 
@@ -76,32 +78,53 @@ UserPtr DirectoryListing::getUserFromFilename(const string& fileName) {
 }
 
 void DirectoryListing::loadFile(const string& path) {
-	string actualPath;
-	if(dcpp::File::getSize(path + ".bz2") != -1) {
-		actualPath = path + ".bz2";
-	}
-
-	// For now, we detect type by ending...
-	auto ext = Util::getFileExt(actualPath.empty() ? path : actualPath);
-
-	{
-		dcpp::File file(actualPath.empty() ? path : actualPath, dcpp::File::READ, dcpp::File::OPEN);
-
+	string source = path;
+	if(dcpp::File::getSize(path + ".bz2") != -1) source = path + ".bz2";
+	else if(dcpp::File::getSize(path + ".zst") != -1) source = path + ".zst";
+	const auto ext = Util::getFileExt(source);
+	auto parse = [&] {
+		dcpp::File file(source, dcpp::File::READ, dcpp::File::OPEN);
 		if(Util::stricmp(ext, ".bz2") == 0) {
-			FilteredInputStream<UnBZFilter, false> f(&file);
-			loadXML(f, false);
-		} else if(Util::stricmp(ext, ".xml") == 0) {
-			loadXML(file, false);
-		} else {
-			throw Exception(_("Invalid file list extension (must be .xml or .bz2)"));
+			FilteredInputStream<UnBZFilter, false> stream(&file); loadXML(stream, false);
+		} else if(Util::stricmp(ext, ".zst") == 0) {
+			FilteredInputStream<UnZstdFilter, false> stream(&file); loadXML(stream, false);
+		} else if(Util::stricmp(ext, ".xml") == 0) loadXML(file, false);
+		else throw Exception(_("Invalid file list extension (must be .xml, .bz2 or .zst)"));
+	};
+	if(SETTING(FILELIST_CACHE)) {
+		const auto cachePath = source + ".dcfl";
+		auto reset = [&] {
+			// The GUI already holds the root pointer; clear its contents without replacing it.
+			for(auto d: root->directories) delete d;
+			root->directories.clear();
+			for(auto f: root->files) delete f;
+			root->files.clear();
+			root->cache = nullptr; root->cacheId = 0; root->filesLoaded = true;
+			root->cachedFileCount = 0; root->cachedSize = 0;
+			root->setComplete(false); root->setRemoteDate(0);
+			root->setRemoteSize(-1); root->setRemoteDirectories(-1); root->setRemoteFiles(-1);
+			root->setHasChildren(false);
+			fileCache.reset(); base.clear();
+		};
+		try {
+			fileCache = std::make_unique<FilelistCache>(cachePath, false);
+			if(fileCache->load(*this, source)) return;
+		} catch(const Exception&) { }
+		reset();
+		try {
+			fileCache = std::make_unique<FilelistCache>(cachePath + ".tmp-" + CID::generate().toBase32(), true, source);
+			parse();
+			fileCache->finish(*this, source);
+			fileCache->publish(cachePath);
+			return;
+		} catch(const Exception&) {
+			reset();
+			if(getAbort()) throw;
+			// A read-only directory or an unusable cache must not prevent opening a list.
 		}
 	}
-
-	if(!actualPath.empty()) {
-		// save the uncompressed file.
-		save(path);
-		dcpp::File::deleteFile(actualPath);
-	}
+	parse();
+	if(source != path) { save(path); dcpp::File::deleteFile(source); }
 }
 
 class ListLoader : public SimpleXMLReader::CallBack {
@@ -233,7 +256,16 @@ void ListLoader::startTag(const string& name, StringPairList& attribs, bool simp
 
 			const auto& remoteDateAttr = getAttrib(attribs, sDate, 3);
 			auto remoteDate = parseRemoteDate(remoteDateAttr);
+			if(!(list->fileCache && list->fileCache->isBuilding())) {
+				cur->ensureFiles();
+				if(updating) cur->detachCache();
+			}
 			auto f = new DirectoryListing::File(cur, n, size, tth, remoteDate);
+			if(list->fileCache && list->fileCache->isBuilding()) {
+				std::unique_ptr<DirectoryListing::File> owned(f);
+				list->fileCache->addFile(cur, *f);
+				return;
+			}
 			auto insert = cur->files.insert(f);
 
 			if(!insert.second) {
@@ -384,7 +416,9 @@ void DirectoryListing::save(const string& path) const {
 	}
 	stream.write(LIT("\">\r\n"));
 
+	const bool releaseRoot = start && !start->areFilesLoaded();
 	if(start) {
+		start->ensureFiles();
 		std::for_each(start->directories.cbegin(), start->directories.cend(), [&](Directory* d) {
 			d->save(stream, indent, tmp);
 		});
@@ -394,9 +428,12 @@ void DirectoryListing::save(const string& path) const {
 	}
 
 	stream.write(LIT("</FileListing>"));
+	if(releaseRoot) start->releaseFiles();
 }
 
 void DirectoryListing::Directory::save(OutputStream& stream, string& indent, string& tmp) const {
+	const bool release = !filesLoaded;
+	ensureFiles();
 	if(adls)
 		return;
 
@@ -444,6 +481,7 @@ void DirectoryListing::Directory::save(OutputStream& stream, string& indent, str
 		stream.write(indent);
 		stream.write(LIT("</Directory>\r\n"));
 	}
+	if(release) const_cast<Directory*>(this)->releaseFiles();
 }
 
 void DirectoryListing::File::save(OutputStream& stream, string& indent, string& tmp) const {
@@ -527,6 +565,8 @@ void DirectoryListing::download(Directory* aDir, const string& aTarget, bool hig
 		download(j, target, highPrio);
 	}
 	// Then add the files
+	const bool release = !aDir->areFilesLoaded();
+	aDir->ensureFiles();
 	for(auto file: aDir->files) {
 		try {
 			download(file, target + file->getName(), false, highPrio);
@@ -536,6 +576,7 @@ void DirectoryListing::download(Directory* aDir, const string& aTarget, bool hig
 			//..
 		}
 	}
+	if(release) aDir->releaseFiles();
 }
 
 void DirectoryListing::download(const string& aDir, const string& aTarget, bool highPrio) {
@@ -574,6 +615,20 @@ DirectoryListing::Directory* DirectoryListing::find(const string& aName, Directo
 	return nullptr;
 }
 
+void DirectoryListing::Directory::ensureFiles() const {
+	if(!filesLoaded && cache) {
+		cache->loadFiles(const_cast<Directory*>(this));
+		filesLoaded = true;
+	}
+}
+
+void DirectoryListing::Directory::releaseFiles() {
+	if(cache && filesLoaded) {
+		for(auto f: files) delete f;
+		files.clear(); filesLoaded = false;
+	}
+}
+
 DirectoryListing::Directory::~Directory() {
 	std::for_each(directories.begin(), directories.end(), DeleteFunction());
 	std::for_each(files.begin(), files.end(), DeleteFunction());
@@ -588,6 +643,7 @@ void DirectoryListing::Directory::filterList(DirectoryListing& dirList) {
 }
 
 void DirectoryListing::Directory::filterList(DirectoryListing::Directory::TTHSet& l) {
+	detachCache();
 	for(auto i = directories.begin(); i != directories.end();) {
 		auto d = *i;
 
@@ -613,8 +669,11 @@ void DirectoryListing::Directory::filterList(DirectoryListing::Directory::TTHSet
 }
 
 void DirectoryListing::Directory::getHashList(DirectoryListing::Directory::TTHSet& l) {
+	const bool release = !filesLoaded;
+	ensureFiles();
 	for(auto i: directories) i->getHashList(l);
 	for(auto i: files) l.insert(i->getTTH());
+	if(release) releaseFiles();
 }
 
 int64_t DirectoryListing::Directory::getTotalSize(bool adl) {

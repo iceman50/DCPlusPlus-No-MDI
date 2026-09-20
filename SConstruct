@@ -449,6 +449,7 @@ env = conf.Finish()
 
 dev.dwarf = dev.build("dwarf/") if "mingw" in dev.env["TOOLS"] else []
 dev.zlib = dev.build("zlib/")
+dev.zstd = dev.build("zstd/")
 dev.sqlite = dev.build("sqlite/")
 dev.build("zlib/test/")
 dev.bzip2 = dev.build("bzip2/") if dev.is_win32() else []

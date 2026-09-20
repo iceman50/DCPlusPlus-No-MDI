@@ -34,6 +34,7 @@ const string UserConnection::FEATURE_MINISLOTS = "MiniSlots";
 const string UserConnection::FEATURE_XML_BZLIST = "XmlBZList";
 const string UserConnection::FEATURE_ADCGET = "ADCGet";
 const string UserConnection::FEATURE_ZLIB_GET = "ZLIG";
+const string UserConnection::FEATURE_ZSTD_GET = "ZST1";
 const string UserConnection::FEATURE_TTHL = "TTHL";
 const string UserConnection::FEATURE_TTHF = "TTHF";
 const string UserConnection::FEATURE_ADC_BAS0 = "BAS0";

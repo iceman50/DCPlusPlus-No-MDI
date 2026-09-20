@@ -2133,6 +2133,23 @@ void ShareManager::getBloom(ByteVector& v, size_t k, size_t m, size_t h, const s
 	bloom.copy_to(v);
 }
 
+namespace {
+class XmlSizeCounter : public OutputStream {
+public:
+	explicit XmlSizeCounter(OutputStream& output) : output(output) { }
+	size_t write(const void* data, size_t len) override {
+		const auto written = output.write(data, len);
+		count += static_cast<int64_t>(len);
+		return written;
+	}
+	size_t flush() override { return output.flush(); }
+	int64_t getCount() const { return count; }
+private:
+	OutputStream& output;
+	int64_t count = 0;
+};
+}
+
 void ShareManager::generateXmlList() {
 	Lock l(cs);
 	if(forceXmlRefresh || (xmlDirty && (lastXmlUpdate + 15 * 60 * 1000 < GET_TICK() || lastXmlUpdate < lastFullUpdate))) {
@@ -2148,7 +2165,7 @@ void ShareManager::generateXmlList() {
 				// We don't care about the leaves...
 				CalcOutputStream<TTFilter<1024*1024*1024>, false> bzTree(&f);
 				FilteredOutputStream<BZFilter, false> bzipper(&bzTree);
-				CountOutputStream<false> count(&bzipper);
+				XmlSizeCounter count(bzipper);
 				CalcOutputStream<TTFilter<1024*1024*1024>, false> newXmlFile(&count);
 
 				newXmlFile.write(SimpleXML::utf8Header);
@@ -2192,6 +2209,56 @@ void ShareManager::generateXmlList() {
 		forceXmlRefresh = false;
 		lastXmlUpdate = GET_TICK();
 	}
+}
+
+namespace {
+class XmlListInputStream : public InputStream {
+public:
+	explicit XmlListInputStream(File* file) : stream(file) { }
+	size_t read(void* data, size_t& len) override {
+		// Upload progress must count XML bytes, not the backing bzip2 file reads.
+		const auto produced = stream.read(data, len);
+		len = produced;
+		return produced;
+	}
+private:
+	FilteredInputStream<UnBZFilter, true> stream;
+};
+
+class TemporaryListFile : public File {
+public:
+	TemporaryListFile(const string& path) : File(path, File::RW, File::CREATE | File::TRUNCATE), path(path) { }
+	~TemporaryListFile() override { close(); File::deleteFile(path); }
+private:
+	string path;
+};
+}
+
+std::pair<std::unique_ptr<InputStream>, int64_t> ShareManager::openXmlList(const string& hubUrl) {
+	if(!hasCustomShare(hubUrl)) {
+		Lock l(cs);
+		generateXmlList();
+		auto file = std::make_unique<File>(getBZXmlFile(), File::READ, File::OPEN);
+		auto stream = std::make_unique<XmlListInputStream>(file.get());
+		file.release();
+		return { std::move(stream), xmlListLen };
+	}
+	// Spool a hub-specific list to disk so serialization does not grow RAM with the share.
+	auto file = std::make_unique<TemporaryListFile>(Util::getTempPath() + "dcpp-list-" + CID::generate().toBase32() + ".xml");
+	auto access = getShareAccess(hubUrl);
+	file->write(SimpleXML::utf8Header);
+	file->write("<FileListing Version=\"1\" CID=\"" + ClientManager::getInstance()->getMe()->getCID().toBase32() + "\" Base=\"/\">\r\n");
+	{
+		Lock l(cs);
+		string indent, tmp;
+		for(const auto& item: directories) {
+			if(isVirtualAllowed(item.first, access)) item.second->toXml(*file, indent, tmp, -1, false);
+		}
+	}
+	file->write("</FileListing>");
+	const auto size = file->getSize();
+	file->setPos(0);
+	return { std::move(file), size };
 }
 
 string ShareManager::generateFileListData(const string& hubUrl, bool compressed) const {

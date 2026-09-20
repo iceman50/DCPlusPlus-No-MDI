@@ -818,6 +818,8 @@ void ConnectionManager::on(AdcCommand::SUP, UserConnection* aSource, const AdcCo
 				aSource->setFlag(UserConnection::FLAG_SUPPORTS_TTHL);
 				// For compatibility with older clients...
 				aSource->setFlag(UserConnection::FLAG_SUPPORTS_XML_BZLIST);
+			} else if(feat == UserConnection::FEATURE_ZSTD_GET) {
+				aSource->setFlag(UserConnection::FLAG_SUPPORTS_ZSTD_GET);
 			} else if(feat == UserConnection::FEATURE_ZLIB_GET) {
 				aSource->setFlag(UserConnection::FLAG_SUPPORTS_ZLIB_GET);
 			} else if(feat == UserConnection::FEATURE_ADC_BZIP) {
@@ -842,6 +844,7 @@ void ConnectionManager::on(AdcCommand::SUP, UserConnection* aSource, const AdcCo
 		StringList defFeatures = adcFeatures;
 		if(SETTING(COMPRESS_TRANSFERS)) {
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ZLIB_GET);
+			defFeatures.push_back("AD" + UserConnection::FEATURE_ZSTD_GET);
 		}
 		if(SETTING(ENABLE_RICH_TEXT)) {
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ADC_RTF0);
@@ -867,6 +870,7 @@ void ConnectionManager::on(UserConnectionListener::Connected, UserConnection* aS
 		StringList defFeatures = adcFeatures;
 		if(SETTING(COMPRESS_TRANSFERS)) {
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ZLIB_GET);
+			defFeatures.push_back("AD" + UserConnection::FEATURE_ZSTD_GET);
 		}
 		if(SETTING(ENABLE_RICH_TEXT)) {
 			defFeatures.push_back("AD" + UserConnection::FEATURE_ADC_RTF0);
@@ -955,6 +959,7 @@ void ConnectionManager::on(UserConnectionListener::CLock, UserConnection* aSourc
 		StringList defFeatures = features;
 		if(SETTING(COMPRESS_TRANSFERS)) {
 			defFeatures.push_back(UserConnection::FEATURE_ZLIB_GET);
+			defFeatures.push_back(UserConnection::FEATURE_ZSTD_GET);
 		}
 
 		aSource->supports(defFeatures);
@@ -1466,6 +1471,8 @@ void ConnectionManager::on(UserConnectionListener::Supports, UserConnection* con
 			conn->setFlag(UserConnection::FLAG_SUPPORTS_XML_BZLIST);
 		} else if(i == UserConnection::FEATURE_ADCGET) {
 			conn->setFlag(UserConnection::FLAG_SUPPORTS_ADCGET);
+		} else if(i == UserConnection::FEATURE_ZSTD_GET) {
+			conn->setFlag(UserConnection::FLAG_SUPPORTS_ZSTD_GET);
 		} else if(i == UserConnection::FEATURE_ZLIB_GET) {
 			conn->setFlag(UserConnection::FLAG_SUPPORTS_ZLIB_GET);
 		} else if(i == UserConnection::FEATURE_TTHL) {

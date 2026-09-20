@@ -78,7 +78,7 @@ private:
 
 	void checkDownloads(UserConnection* aConn);
 	void revive(UserConnection* uc);
-	void startData(UserConnection* aSource, int64_t start, int64_t newSize, bool z);
+	void startData(UserConnection* aSource, int64_t start, int64_t newSize, bool z, bool zstd = false);
 	void endData(UserConnection* aSource);
 
 	void onFailed(UserConnection* aSource, const string& aError);

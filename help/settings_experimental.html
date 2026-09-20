@@ -12,6 +12,14 @@
 hashing, RTF0, defensive protocol, interface, and application theme controls. The controls are divided among the
 <em>Chat and sharing</em>, <em>Transfers and hashing</em>, <em>Protocol limits</em>, and <em>Interface and themes</em> tabs.</p>
 
+<h2>Compression and large file lists</h2>
+<dl>
+  <dt>Prefer Zstandard over zlib when the peer supports both</dt>
+  <dd>Use Zstandard for downloads from clients supporting the experimental ZST1 extension on ADC or NMDC. Older clients continue to use the existing compression. Full lists from supporting clients use compressed XML instead of bzip2. Requires Compress transfers. The default is off. The preference affects new download requests; supporting peers may still request Zstandard uploads.</dd>
+  <dt>Cache file lists on disk and load file entries on demand</dt>
+  <dd>Build a compressed disk index when opening XML, bzip2, or Zstandard lists. Directory metadata remains available, while file entries load when a directory is visited and are released when leaving it. The original list is retained. The first open builds the index; later opens reuse it unless the source changes. Search, queue matching, ADL rules, and directory downloads include unloaded entries. One very large directory still needs memory for its own entries. This uses additional disk space and defaults to off. Applies to newly opened lists.</dd>
+</dl>
+
 <h2>Hub user lists</h2>
 <dl>
   <dt>Default user icon size</dt>

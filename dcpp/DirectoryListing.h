@@ -33,6 +33,7 @@ namespace dcpp {
 using std::set;
 
 class ListLoader;
+class FilelistCache;
 
 class DirectoryListing
 {
@@ -102,9 +103,15 @@ public:
 		void setAllComplete(bool complete);
 		bool isCompleteRecursive() const;
 
-		size_t getFileCount() const { return files.size(); }
+		void ensureFiles() const;
+		void releaseFiles();
+		void detachCache() { ensureFiles(); cache = nullptr; }
+		bool hasCachedFiles() const { return cache != nullptr; }
+		bool areFilesLoaded() const { return filesLoaded; }
+		size_t getFileCount() const { return filesLoaded ? files.size() : cachedFileCount; }
 
 		int64_t getSize() const {
+			if(!filesLoaded) return cachedSize;
 			int64_t x = 0;
 			for(auto& i: files) {
 				x += i->getSize();
@@ -121,6 +128,14 @@ public:
 		GETSET(bool, hasChildren, HasChildren);
 		GETSET(bool, adls, Adls);
 		GETSET(bool, complete, Complete);
+	private:
+		friend class FilelistCache;
+		friend class DirectoryListing;
+		FilelistCache* cache = nullptr;
+		int64_t cacheId = 0;
+		size_t cachedFileCount = 0;
+		int64_t cachedSize = 0;
+		mutable bool filesLoaded = true;
 	};
 
 	class AdlDirectory : public Directory {
@@ -134,6 +149,7 @@ public:
 	~DirectoryListing();
 
 	void loadFile(const string& path);
+	bool usesCache() const { return fileCache != nullptr; }
 
 	string updateXML(const std::string&);
 	string loadXML(InputStream& xml, bool updating);
@@ -169,6 +185,8 @@ public:
 
 private:
 	friend class ListLoader;
+	friend class FilelistCache;
+	std::unique_ptr<FilelistCache> fileCache;
 
 	Directory* root;
 	string base;

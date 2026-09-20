@@ -16,6 +16,7 @@
  */
 
 #include "stdafx.h"
+#include <zstd.h>
 
 #include "AboutDlg.h"
 
@@ -194,6 +195,7 @@ string getAboutInfo() {
 	info += "Libraries\r\n";
 	addInfoLine(info, "OpenSSL", getOpenSSLVersion());
 	addInfoLine(info, "SQLite", SQLiteDB::getLibraryVersion());
+	addInfoLine(info, "Zstandard", ZSTD_versionString());
 	addInfoLine(info, "zlib", string(zlibVersion()) + " (headers: " ZLIB_VERSION ")");
 	addInfoLine(info, "bzip2", BZ2_bzlibVersion());
 	addInfoLine(info, "DWT", DWT_VERSION_STRING);

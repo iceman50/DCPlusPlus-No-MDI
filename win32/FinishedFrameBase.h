@@ -439,7 +439,7 @@ private:
 				ShellMenuPaths.push_back(data->file);
 			else
 				allFilesExist = false;
- 			isBz2 |= Util::getFileExt(data->file) == ".bz2";
+			isBz2 |= Util::getFileExt(data->file) == ".bz2" || Util::getFileExt(data->file) == ".zst";
  		}
 		bool allFilesExist;
 		StringList ShellMenuPaths;
