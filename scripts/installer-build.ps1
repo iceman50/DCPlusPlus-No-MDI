@@ -6,7 +6,7 @@ Build the x64 MinGW release NSIS installer.
 Stages the distributable payload, generates the English NSIS string catalog,
 and compiles installer/DCPlusPlus.nsi. The installed DCPlusPlus.exe is copied
 from DCPlusPlus-stripped.exe and is accompanied by its matching PDB, the BFE
-changelog, legal notices, flat Themes, and flat Emoticons directories.
+changelog, legal notices, flat Themes, flat Emoticons, and bundled icon packs.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\installer-build.ps1
@@ -123,6 +123,7 @@ $strippedExecutable = Join-Path $ReleaseDirectory "DCPlusPlus-stripped.exe"
 $debugSymbols = Join-Path $ReleaseDirectory "DCPlusPlus.pdb"
 $themesDirectory = Join-Path $repoRoot "Themes"
 $emoticonsDirectory = Join-Path $repoRoot "Emoticons"
+$iconPacksDirectory = Join-Path $repoRoot "IconPacks"
 
 Assert-RequiredFile -Path $strippedExecutable -Description "Stripped release executable"
 Assert-RequiredFile -Path $debugSymbols -Description "Release PDB"
@@ -132,6 +133,14 @@ if(-not (Test-Path -LiteralPath $themesDirectory -PathType Container)) {
 }
 if(-not (Test-Path -LiteralPath $emoticonsDirectory -PathType Container)) {
 	throw "Emoticons directory was not found: $emoticonsDirectory"
+}
+if(-not (Test-Path -LiteralPath $iconPacksDirectory -PathType Container)) {
+	throw "IconPacks directory was not found: $iconPacksDirectory"
+}
+Assert-RequiredFile -Path (Join-Path $iconPacksDirectory "Dark.dcico") -Description "Bundled dark icon package"
+Assert-RequiredFile -Path (Join-Path $iconPacksDirectory "Neon-Circuit.dcico") -Description "Bundled Neon Circuit icon package"
+foreach($packName in @("Aurora", "Copper", "Paper")) {
+	Assert-RequiredFile -Path (Join-Path $iconPacksDirectory "$packName.dcico") -Description "Bundled $packName icon package"
 }
 if(Test-Path -LiteralPath (Join-Path $themesDirectory "Bundled")) {
 	throw "Themes must be stored directly in Themes; Bundled is not allowed."
@@ -161,6 +170,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "License.txt") -Destination $stageDi
 Copy-Item -LiteralPath (Join-Path $repoRoot "ThirdPartyLicenses.txt") -Destination $stageDirectory -Force
 Copy-Item -LiteralPath $themesDirectory -Destination (Join-Path $stageDirectory "Themes") -Recurse -Force
 Copy-Item -LiteralPath $emoticonsDirectory -Destination (Join-Path $stageDirectory "Emoticons") -Recurse -Force
+Copy-Item -LiteralPath $iconPacksDirectory -Destination (Join-Path $stageDirectory "IconPacks") -Recurse -Force
 Write-EnglishCatalog -StringsPath (Join-Path $stageDirectory "Strings.xml") -StageDirectory $stageDirectory
 
 Push-Location -LiteralPath $stageDirectory

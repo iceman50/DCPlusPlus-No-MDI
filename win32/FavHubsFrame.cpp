@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -85,8 +86,8 @@ hubs(0)
 		if(!hubIcons) {
 			const dwt::Point size(16, 16);
 			hubIcons = dwt::ImageListPtr(new dwt::ImageList(size));
-			hubIcons->add(dwt::Icon(IDI_HUB, size));
-			hubIcons->add(dwt::Icon(IDI_HUB_OFF, size));
+			hubIcons->add(*WinUtil::createIcon(IDI_HUB, size.x));
+			hubIcons->add(*WinUtil::createIcon(IDI_HUB_OFF, size.x));
 		}
 		hubs->setSmallImageList(hubIcons);
 
@@ -317,6 +318,7 @@ void FavHubsFrame::handleGroup(const string& group) {
 	const FavoriteHubEntryList& selected = keeper.getSelection();
 	for_each(selected.cbegin(), selected.cend(), [group](FavoriteHubEntryPtr entry) { entry->setGroup(group); });
 	FavoriteManager::getInstance()->save();
+	HubFrame::refreshUserIconSizes();
 	refresh();
 }
 

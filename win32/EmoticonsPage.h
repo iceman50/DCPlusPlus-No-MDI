@@ -13,9 +13,10 @@
 
 #include <dcpp/EmoticonManager.h>
 
+#include "IconManager.h"
 #include "PropPage.h"
 
-/** Appearance sub-page for enabling, selecting, and creating .dcemo packages. */
+/** Appearance sub-page for selecting and editing .dcemo and .dcico packages. */
 class EmoticonsPage : public PropPage {
 public:
 	explicit EmoticonsPage(dwt::Widget* parent);
@@ -25,15 +26,25 @@ private:
 	void updatePreview();
 	void reloadPackages(const std::string& selectedPath = std::string());
 	void selectPackage(const std::string& path);
+	void handlePackageSelection();
+	void editSelectedPackage();
 	std::string selectedPackagePath() const;
+	void updateIconPackageStatus();
+	void selectIconPackage(const std::string& path);
+	std::string selectedIconPackagePath() const;
 
 	ItemList items;
 	ComboBoxPtr packageBox;
 	std::vector<dcpp::EmoticonManager::Package> packages;
+	std::string retainedPackagePath;
+	bool changingPackageSelection;
 	ComboBoxPtr sizeBox;
 	ComboBoxPtr bitDepthBox;
 	RichTextBoxPtr preview;
 	LabelPtr previewStatus;
+	ComboBoxPtr iconPackageBox;
+	std::vector<IconManager::Package> iconPackages;
+	LabelPtr iconPackageStatus;
 };
 
 #endif

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,6 +17,8 @@
  */
 
 #include "stdafx.h"
+
+#include "IconManager.h"
 
 #include "WinUtil.h"
 
@@ -155,6 +158,7 @@ BOOL CALLBACK updateWindowColors(HWND hwnd, LPARAM) {
 
 void updateApplicationColors() {
 	const auto& appearance = dwt::Application::instance().getAppearance();
+	IconManager::setDarkMode(appearance.isDark());
 	WinUtil::textColor = appearance.isHighContrast() ?
 		::GetSysColor(COLOR_WINDOWTEXT) :
 		static_cast<COLORREF>(SETTING(TEXT_COLOR));
@@ -244,6 +248,7 @@ const Button::Seed WinUtil::Seeds::Dialog::button;
 
 void WinUtil::init() {
 	auto& appearance = dwt::Application::instance().getAppearance();
+	IconManager::initialize();
 	appearance.configure(themeMode(), themePalette());
 
 	SettingsManager::getInstance()->setDefault(SettingsManager::BACKGROUND_COLOR, dwt::Color::predefined(COLOR_WINDOW));
@@ -337,31 +342,7 @@ void WinUtil::init() {
 	fileImages->add(*createIcon(IDI_USER, 16));
 	fileImages->add(*createIcon(IDI_PRIVATE, 16));
 
-	{
-		const dwt::Point size(16, 16);
-		userImages = dwt::ImageListPtr(new dwt::ImageList(size));
-
-		const unsigned baseCount = USER_ICON_MOD_START;
-		const unsigned modifierCount = USER_ICON_LAST - USER_ICON_MOD_START;
-
-		auto userIcon = [](unsigned id) { return createIcon(id, 16); };
-		dwt::IconPtr bases[baseCount] = { userIcon(IDI_USER), userIcon(IDI_USER_AWAY), userIcon(IDI_USER_BOT) };
-		dwt::IconPtr modifiers[modifierCount] = { userIcon(IDI_USER_NOCON), userIcon(IDI_USER_NOSLOT), userIcon(IDI_USER_OP) };
-
-		for(size_t iBase = 0; iBase < baseCount; ++iBase) {
-			for(size_t i = 0, n = modifierCount * modifierCount; i < n; ++i) {
-				dwt::ImageList icons(size);
-
-				icons.add(*bases[iBase]);
-
-				for(size_t iMod = 0; iMod < modifierCount; ++iMod)
-					if(i & (static_cast<size_t>(1) << iMod))
-						icons.add(*modifiers[iMod]);
-
-				userImages->add(*dwt::util::merge(icons));
-			}
-		}
-	}
+	userImages = createUserImages(16);
 
 	registerHubHandlers();
 	registerMagnetHandler();
@@ -1813,7 +1794,7 @@ void WinUtil::addUserItems(Menu* menu, const HintedUserList& users, TabViewPtr p
 		PrivateFrame::openWindow(parent, u); });
 
 	addUsers(menu, T_("Add To &Favorites"), filter(users, &isFav), [=](const HintedUser &u, const string& s) {
-		FavoriteManager::getInstance()->addFavoriteUser(u); }, dwt::IconPtr(new dwt::Icon(IDI_FAVORITE_USER_ON)));
+		FavoriteManager::getInstance()->addFavoriteUser(u); }, WinUtil::menuIcon(IDI_FAVORITE_USER_ON));
 
 	addUsers(menu, T_("Grant &extra slot"), users, [=](const HintedUser &u, const string& s) {
 		UploadManager::getInstance()->reserveSlot(u); });
@@ -1923,21 +1904,49 @@ pair<int, bool> WinUtil::tableSortSetting(int columnCount, int setting, int defa
 }
 
 dwt::IconPtr WinUtil::createIcon(unsigned id, long size) {
-	return new dwt::Icon(id, dwt::Point(size, size));
+	return IconManager::load(id, size);
 }
 
 dwt::IconPtr WinUtil::toolbarIcon(unsigned id) {
 	return createIcon(id, SETTING(TOOLBAR_SIZE));
 }
 
-dwt::IconPtr WinUtil::mergeIcons(const std::vector<int>& iconIds)
+dwt::ImageListPtr WinUtil::createUserImages(long pixels) {
+	const dwt::Point size(pixels, pixels);
+	auto images = dwt::ImageListPtr(new dwt::ImageList(size));
+
+	const unsigned baseCount = USER_ICON_MOD_START;
+	const unsigned modifierCount = USER_ICON_LAST - USER_ICON_MOD_START;
+
+	auto userIcon = [pixels](unsigned id) { return createIcon(id, pixels); };
+	// Bot artwork is a corner overlay; retain the normal user underneath it.
+	dwt::IconPtr bases[baseCount] = { userIcon(IDI_USER), userIcon(IDI_USER_AWAY), mergeIcons({ IDI_USER, IDI_USER_BOT }, pixels) };
+	dwt::IconPtr modifiers[modifierCount] = { userIcon(IDI_USER_NOCON), userIcon(IDI_USER_NOSLOT), userIcon(IDI_USER_OP) };
+
+	for(size_t iBase = 0; iBase < baseCount; ++iBase) {
+		for(size_t i = 0, n = modifierCount * modifierCount; i < n; ++i) {
+			dwt::ImageList icons(size);
+
+			icons.add(*bases[iBase]);
+
+			for(size_t iMod = 0; iMod < modifierCount; ++iMod)
+				if(i & (static_cast<size_t>(1) << iMod))
+					icons.add(*modifiers[iMod]);
+
+			images->add(*dwt::util::merge(icons));
+		}
+	}
+	return images;
+}
+
+dwt::IconPtr WinUtil::mergeIcons(const std::vector<int>& iconIds, long pixels)
 {
-	const dwt::Point size(16, 16);
+	const dwt::Point size(pixels, pixels);
 	dwt::ImageList icons(size);
 
 	for(auto& item : iconIds)
 	{
-		auto icon = createIcon(item, 16);
+		auto icon = createIcon(item, pixels);
 		icons.add(*icon);
 	}
 	

@@ -28,7 +28,7 @@ const string HubSettings::boolNames[BoolCount] = {
 };
 
 const string HubSettings::intNames[IntCount] = {
-	"IncomingConnections", "IncomingConnections6"
+	"IncomingConnections", "IncomingConnections6", "UserIconSize"
 };
 
 namespace {
@@ -39,6 +39,11 @@ inline bool defined(int i) { return i > numeric_limits<int>::min(); }
 
 int HubSettings::getMinInt() { 
 	return numeric_limits<int>::min(); 
+}
+
+bool HubSettings::isUserIconSize(int size) {
+	for(auto value: userIconSizes) if(value == size) return true;
+	return false;
 }
 
 HubSettings::HubSettings() {
@@ -95,6 +100,7 @@ void HubSettings::merge(const HubSettings& sub) {
 }
 
 void HubSettings::load(SimpleXML& xml) {
+	get(UserIconSize) = getMinInt();
 	for(uint8_t i = 0; i < StringCount; ++i) {
 		strings[i] = xml.getChildAttrib(stringNames[i]);
 	}
@@ -106,6 +112,7 @@ void HubSettings::load(SimpleXML& xml) {
 		if (!tmp.empty())
 			ints[i] = Util::toInt(tmp);
 	}
+	if(!isUserIconSize(get(UserIconSize))) get(UserIconSize) = getMinInt();
 }
 
 void HubSettings::save(SimpleXML& xml) const {

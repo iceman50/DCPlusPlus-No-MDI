@@ -264,6 +264,8 @@ private:
 
 		/// Menu item icon
 		const IconPtr icon;
+		// Native menus borrow this bitmap; keep it alive with the menu item.
+		BitmapPtr bitmap;
 
 		// Wrapper Constructor
 		ItemDataWrapper(
@@ -292,6 +294,7 @@ private:
 	void updateAppearance();
 	void applyBackground();
 	void setOwnerDrawn(bool value);
+	void setNativeIcon(MENUITEMINFO& info, ItemDataWrapper& item);
 
 	Menu* parentMenu; /// only defined for sub-menus; this is a link to their container menu
 	HMENU itsHandle;

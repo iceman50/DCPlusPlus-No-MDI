@@ -63,11 +63,15 @@ struct HubSettings
 		
 		Connection = HubIntFirst,
 		Connection6,
+		UserIconSize,
 	
 		HubIntLast
 	};
 
 	HubSettings();
+
+	static constexpr int userIconSizes[] = { 16, 20, 24, 28, 32, 40, 48 };
+	static bool isUserIconSize(int size);
 
 	static int getMinInt();
 	const string& get(HubStrSetting setting) const;

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -128,15 +129,15 @@ selected(-1)
 		if(!userIcons) {
 			const dwt::Point size(16, 16);
 			userIcons = dwt::ImageListPtr(new dwt::ImageList(size));
-			userIcons->add(dwt::Icon(IDI_FAVORITE_USER_OFF, size));
-			userIcons->add(dwt::Icon(IDI_FAVORITE_USER_ON, size));
-			userIcons->add(dwt::Icon(IDI_RED_BALL, size));
-			userIcons->add(dwt::Icon(IDI_GREEN_BALL, size));
-			userIcons->add(dwt::Icon(IDI_DCPP, size));
-			userIcons->add(dwt::Icon(IDI_WHATS_THIS, size));
-			userIcons->add(dwt::Icon(IDI_USER_BOT, size));
-			userIcons->add(dwt::Icon(IDI_TRUSTED, size));
-			userIcons->add(dwt::Icon(IDI_DCPP_WARNING, size));
+			userIcons->add(*WinUtil::createIcon(IDI_FAVORITE_USER_OFF, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_FAVORITE_USER_ON, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_RED_BALL, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_GREEN_BALL, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_DCPP, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_WHATS_THIS, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_USER_BOT, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_TRUSTED, size.x));
+			userIcons->add(*WinUtil::createIcon(IDI_DCPP_WARNING, size.x));
 		}
 
 		WidgetUsers::Seed cs(WinUtil::Seeds::table);

@@ -49,6 +49,7 @@ private:
 	std::vector<ThemeManager::Theme> themePresets;
 	ComboBoxPtr themeMode;
 	ComboBoxPtr themePreset;
+	ComboBoxPtr hubUserIconSize;
 	TablePtr tempShares;
 	std::vector<std::unique_ptr<TempShareRow>> tempShareRows;
 	LabelPtr tempSummary;

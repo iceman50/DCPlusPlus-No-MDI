@@ -23,6 +23,7 @@
 #include <dwt/widgets/Label.h>
 #include <dwt/widgets/LoadDialog.h>
 #include <dwt/widgets/MessageBox.h>
+#include <dwt/widgets/TabView.h>
 
 #include "EmoticonPackDlg.h"
 #include "Emoticons.h"
@@ -37,25 +38,103 @@ using dwt::GridInfo;
 using dwt::Label;
 using namespace dcpp;
 
-EmoticonsPage::EmoticonsPage(dwt::Widget* parent) : PropPage(parent, 4, 1), packageBox(nullptr), sizeBox(nullptr),
-	bitDepthBox(nullptr), preview(nullptr), previewStatus(nullptr) {
+namespace {
+
+/** A settings tab page that sizes itself from its content grid. */
+class IconsTabPage : public dwt::Container {
+public:
+	IconsTabPage(dwt::Widget* parent, const tstring& title, size_t rows) : dwt::Container(parent), grid(nullptr) {
+		dwt::Container::Seed seed;
+		seed.caption = title;
+		seed.style &= ~WS_VISIBLE;
+		seed.exStyle |= WS_EX_CONTROLPARENT;
+		create(seed);
+		setHelpId(IDH_APPEARANCEPAGE);
+		grid = addChild(Grid::Seed(rows, 1));
+		grid->setSpacing(10);
+		grid->column(0).mode = GridInfo::FILL;
+	}
+
+	GridPtr content() const { return grid; }
+	dwt::Point getPreferredSize() override { return grid->getPreferredSize() + dwt::Point(14, 12); }
+	void layout() override {
+		const auto size = getClientSize();
+		grid->resize(dwt::Rectangle(7, 4, std::max<LONG>(0, size.x - 14), std::max<LONG>(0, size.y - 12)));
+	}
+
+private:
+	GridPtr grid;
+};
+
+/** Gives settings tabs a preferred size while retaining TabView behavior. */
+class IconsTabView : public dwt::TabView {
+public:
+	typedef IconsTabView* ObjectType;
+	typedef dwt::TabView::Seed Seed;
+	explicit IconsTabView(dwt::Widget* parent) : dwt::TabView(parent) { }
+
+	IconsTabPage* addPage(const tstring& title, size_t rows) {
+		auto page = new IconsTabPage(this, title, rows);
+		pages.push_back(page);
+		add(page);
+		return page;
+	}
+
+	dwt::Point getPreferredSize() override {
+		dwt::Point contentSize;
+		for(auto page: pages) {
+			const auto size = page->getPreferredSize();
+			contentSize.x = std::max(contentSize.x, size.x);
+			contentSize.y = std::max(contentSize.y, size.y);
+		}
+		LONG tabsRight = 0;
+		for(size_t index = 0; index < size(); ++index) {
+			RECT rect = { 0 };
+			if(TabCtrl_GetItemRect(handle(), static_cast<int>(index), &rect)) tabsRight = std::max(tabsRight, rect.right);
+		}
+		contentSize.x = std::max(contentSize.x, tabsRight);
+		RECT rect = { 0, 0, contentSize.x, contentSize.y };
+		TabCtrl_AdjustRect(handle(), TRUE, &rect);
+		return dwt::Point(rect.right - rect.left, rect.bottom - rect.top);
+	}
+
+private:
+	std::vector<IconsTabPage*> pages;
+};
+
+}
+
+EmoticonsPage::EmoticonsPage(dwt::Widget* parent) : PropPage(parent, 1, 1), packageBox(nullptr),
+	changingPackageSelection(false), sizeBox(nullptr), bitDepthBox(nullptr), preview(nullptr),
+	previewStatus(nullptr), iconPackageBox(nullptr), iconPackageStatus(nullptr) {
 	setHelpId(IDH_APPEARANCEPAGE);
 	grid->column(0).mode = GridInfo::FILL;
-	grid->row(2).mode = GridInfo::FILL;
-	grid->row(2).align = GridInfo::STRETCH;
+	grid->row(0).mode = GridInfo::FILL;
+	grid->row(0).align = GridInfo::STRETCH;
 
-	auto enabled = grid->addChild(CheckBox::Seed(T_("Enable emoticons in chat")));
+	auto tabSeed = WinUtil::Seeds::tabs;
+	tabSeed.style &= ~(TCS_OWNERDRAWFIXED | TCS_MULTILINE | TCS_RAGGEDRIGHT | TCS_TOOLTIPS);
+	tabSeed.exStyle |= WS_EX_CONTROLPARENT;
+	tabSeed.widthConfig = 0;
+	tabSeed.closeable = false;
+	auto tabs = dwt::WidgetCreator<IconsTabView>::create(grid, tabSeed);
+	grid->setWidget(tabs, 0, 0);
+
+	auto emoticonGrid = tabs->addPage(T_("Emoticons"), 4)->content();
+	emoticonGrid->row(2).mode = GridInfo::FILL;
+	emoticonGrid->row(2).align = GridInfo::STRETCH;
+	auto enabled = emoticonGrid->addChild(CheckBox::Seed(T_("Enable emoticons in chat")));
 	items.emplace_back(enabled, SettingsManager::ENABLE_EMOTICONS, PropPage::T_BOOL);
 
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Emoticon package")));
+		auto group = emoticonGrid->addChild(GroupBox::Seed(T_("Emoticon package")));
 		auto content = group->addChild(Grid::Seed(3, 1));
 		content->column(0).mode = GridInfo::FILL;
-		auto row = content->addChild(Grid::Seed(1, 6));
+		auto row = content->addChild(Grid::Seed(1, 5));
 		row->column(0).mode = GridInfo::FILL;
 
 		packageBox = row->addChild(WinUtil::Seeds::Dialog::comboBox);
-		packageBox->onSelectionChanged([this] { updatePreview(); });
+		packageBox->onSelectionChanged([this] { handlePackageSelection(); });
 		row->addChild(Button::Seed(T_("Browse...")))->onClicked([this] {
 			const auto current = selectedPackagePath();
 			auto path = Text::toT(current.empty() ? EmoticonManager::getDirectory() : Util::getFilePath(current));
@@ -66,9 +145,9 @@ EmoticonsPage::EmoticonsPage(dwt::Widget* parent) : PropPage(parent, 4, 1), pack
 			}
 		});
 		row->addChild(Button::Seed(T_("Build...")))->onClicked([this] {
-			EmoticonPackDlg dialog(this);
+			EmoticonPackDlg dialog(this, tstring(), Text::toT(EmoticonManager::getDirectory() + "Custom.dcemo"));
 			if(dialog.run() == IDOK) {
-				selectPackage(Text::fromT(dialog.getExportedPath()));
+				reloadPackages(Text::fromT(dialog.getExportedPath()));
 				updatePreview();
 			}
 		});
@@ -78,13 +157,9 @@ EmoticonsPage::EmoticonsPage(dwt::Widget* parent) : PropPage(parent, 4, 1), pack
 				.addFilter(T_("All files"), _T("*.*")).open(source)) return;
 			EmoticonPackDlg dialog(this, std::move(source));
 			if(dialog.run() == IDOK) {
-				selectPackage(Text::fromT(dialog.getExportedPath()));
+				reloadPackages(Text::fromT(dialog.getExportedPath()));
 				updatePreview();
 			}
-		});
-		row->addChild(Button::Seed(T_("Reload")))->onClicked([this] {
-			reloadPackages(selectedPackagePath());
-			updatePreview();
 		});
 		row->addChild(Button::Seed(T_("Preview")))->onClicked([this] { updatePreview(); });
 
@@ -102,7 +177,7 @@ EmoticonsPage::EmoticonsPage(dwt::Widget* parent) : PropPage(parent, 4, 1), pack
 
 		auto depthRow = content->addChild(Grid::Seed(1, 2));
 		depthRow->column(1).mode = GridInfo::FILL;
-		depthRow->addChild(Label::Seed(T_("Preferred icon bit depth")));
+		depthRow->addChild(Label::Seed(T_("Preferred emoticon bit depth")));
 		bitDepthBox = depthRow->addChild(WinUtil::Seeds::Dialog::comboBox);
 		static const int bitDepths[] = { 16, 24, 32 };
 		selected = 0;
@@ -114,7 +189,7 @@ EmoticonsPage::EmoticonsPage(dwt::Widget* parent) : PropPage(parent, 4, 1), pack
 	}
 
 	{
-		auto group = grid->addChild(GroupBox::Seed(T_("Loaded emoticons")));
+		auto group = emoticonGrid->addChild(GroupBox::Seed(T_("Loaded emoticons")));
 		auto content = group->addChild(Grid::Seed(2, 1));
 		content->column(0).mode = GridInfo::FILL;
 		content->row(0).mode = GridInfo::FILL;
@@ -126,10 +201,36 @@ EmoticonsPage::EmoticonsPage(dwt::Widget* parent) : PropPage(parent, 4, 1), pack
 		previewStatus = content->addChild(Label::Seed());
 	}
 
-	grid->addChild(Label::Seed(T_("Packages are .dcemo ZIP files containing XML shortcut rules and BMP, ICO, or PNG images.")));
+	emoticonGrid->addChild(Label::Seed(T_("Choose Custom / edit selected from the package list to add, update, or remove emoticons.")));
+
+	auto iconGrid = tabs->addPage(T_("Application icons"), 3)->content();
+	{
+		auto group = iconGrid->addChild(GroupBox::Seed(T_("Icon package")));
+		auto content = group->addChild(Grid::Seed(2, 1));
+		content->column(0).mode = GridInfo::FILL;
+		auto row = content->addChild(Grid::Seed(1, 2));
+		row->column(0).mode = GridInfo::FILL;
+		iconPackageBox = row->addChild(WinUtil::Seeds::Dialog::comboBox);
+		iconPackageBox->onSelectionChanged([this] { updateIconPackageStatus(); });
+		row->addChild(Button::Seed(T_("Browse...")))->onClicked([this] {
+			const auto selected = selectedIconPackagePath();
+			auto path = Text::toT(selected.empty() || selected == IconManager::EMBEDDED_PACK ? IconManager::getDirectory() : Util::getFilePath(selected));
+			if(dwt::LoadDialog(this).addFilter(T_("DC++ icon packages"), _T("*.dcico"))
+				.addFilter(T_("All files"), _T("*.*")).open(path)) selectIconPackage(Text::fromT(path));
+		});
+		iconPackageStatus = content->addChild(Label::Seed());
+	}
+	iconGrid->addChild(Label::Seed(T_("Automatic uses Dark.dcico for dark appearance and compiled icons otherwise.")));
+	iconGrid->addChild(Label::Seed(T_("Packages are .dcico ZIP files containing info.xml and multi-resolution ICO files.\r\nRestart DC++ to refresh every existing control.")));
+
 	PropPage::read(items);
 	reloadPackages(SETTING(EMOTICON_PACK));
 	updatePreview();
+	iconPackages = IconManager::getPackages();
+	iconPackageBox->addValue(T_("Automatic (appearance-aware)"));
+	iconPackageBox->addValue(T_("Embedded icons (EXE)"));
+	for(const auto& package: iconPackages) iconPackageBox->addValue(Text::toT(package.name) + T_(" (DCICO)"));
+	selectIconPackage(SETTING(ICON_PACK));
 }
 
 std::string EmoticonsPage::selectedPackagePath() const {
@@ -138,13 +239,18 @@ std::string EmoticonsPage::selectedPackagePath() const {
 }
 
 void EmoticonsPage::selectPackage(const std::string& path) {
+	changingPackageSelection = true;
 	if(path.empty()) {
 		packageBox->setSelected(0);
+		retainedPackagePath.clear();
+		changingPackageSelection = false;
 		return;
 	}
 	for(size_t index = 0; index < packages.size(); ++index) {
 		if(Util::stricmp(packages[index].path, path) == 0) {
 			packageBox->setSelected(static_cast<int>(index + 1));
+			retainedPackagePath = packages[index].path;
+			changingPackageSelection = false;
 			return;
 		}
 	}
@@ -152,18 +258,22 @@ void EmoticonsPage::selectPackage(const std::string& path) {
 		for(size_t index = 0; index < packages.size(); ++index) {
 			if(Util::stricmp(Util::getFileName(packages[index].path), Util::getFileName(path)) == 0) {
 				packageBox->setSelected(static_cast<int>(index + 1));
+				retainedPackagePath = packages[index].path;
+				changingPackageSelection = false;
 				return;
 			}
 		}
 	}
 	try {
 		packages.push_back(EmoticonManager::inspectPackage(path));
-		packageBox->addValue(Text::toT(packages.back().name) + T_(" (external DCEMO)"));
+		packageBox->insertValue(static_cast<int>(packages.size()), Text::toT(packages.back().name) + T_(" (external DCEMO)"));
 		packageBox->setSelected(static_cast<int>(packages.size()));
+		retainedPackagePath = packages.back().path;
 	} catch(const Exception& e) {
 		dwt::MessageBox(this).show(T_("Unable to load the emoticon package:\r\n") + Text::toT(e.getError()),
 			T_("Emoticon package"), dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
 	}
+	changingPackageSelection = false;
 }
 
 void EmoticonsPage::reloadPackages(const std::string& selectedPath) {
@@ -171,8 +281,80 @@ void EmoticonsPage::reloadPackages(const std::string& selectedPath) {
 	packageBox->clear();
 	packageBox->addValue(T_("(No package)"));
 	for(const auto& package: packages) packageBox->addValue(Text::toT(package.name) + T_(" (DCEMO)"));
-	packageBox->setSelected(0);
+	packageBox->addValue(T_("Custom / edit selected..."));
 	selectPackage(selectedPath);
+}
+
+void EmoticonsPage::handlePackageSelection() {
+	if(changingPackageSelection) return;
+	if(packageBox->getSelected() == static_cast<int>(packages.size() + 1)) {
+		editSelectedPackage();
+		return;
+	}
+	retainedPackagePath = selectedPackagePath();
+	updatePreview();
+}
+
+void EmoticonsPage::editSelectedPackage() {
+	const auto source = retainedPackagePath;
+	changingPackageSelection = true;
+	selectPackage(source);
+	changingPackageSelection = false;
+	const auto fileName = source.empty() ? string("Custom.dcemo") : Util::getFileName(source);
+	const auto target = EmoticonManager::getDirectory() + fileName;
+	EmoticonPackDlg dialog(this, Text::toT(source), Text::toT(target));
+	if(dialog.run() == IDOK) {
+		reloadPackages(Text::fromT(dialog.getExportedPath()));
+		updatePreview();
+	}
+}
+
+std::string EmoticonsPage::selectedIconPackagePath() const {
+	const auto selected = iconPackageBox ? iconPackageBox->getSelected() : 0;
+	if(selected == 1) return IconManager::EMBEDDED_PACK;
+	return selected >= 2 && static_cast<size_t>(selected - 2) < iconPackages.size() ? iconPackages[selected - 2].path : string();
+}
+
+void EmoticonsPage::selectIconPackage(const std::string& path) {
+	if(path.empty() || path == IconManager::EMBEDDED_PACK) {
+		iconPackageBox->setSelected(path.empty() ? 0 : 1);
+		updateIconPackageStatus();
+		return;
+	}
+	for(size_t index = 0; index < iconPackages.size(); ++index) {
+		if(Util::stricmp(iconPackages[index].path, path) == 0 ||
+			(File::getSize(path) < 0 && Util::stricmp(Util::getFileName(iconPackages[index].path), Util::getFileName(path)) == 0)) {
+			iconPackageBox->setSelected(static_cast<int>(index + 2));
+			updateIconPackageStatus();
+			return;
+		}
+	}
+	try {
+		iconPackages.push_back(IconManager::inspectPackage(path));
+		iconPackageBox->addValue(Text::toT(iconPackages.back().name) + T_(" (external DCICO)"));
+		iconPackageBox->setSelected(static_cast<int>(iconPackages.size() + 1));
+	} catch(const Exception& e) {
+		dwt::MessageBox(this).show(T_("Unable to load the icon package:\r\n") + Text::toT(e.getError()),
+			T_("Icon package"), dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
+		iconPackageBox->setSelected(0);
+	}
+	updateIconPackageStatus();
+}
+
+void EmoticonsPage::updateIconPackageStatus() {
+	if(!iconPackageStatus) return;
+	const auto selected = iconPackageBox ? iconPackageBox->getSelected() : 0;
+	if(selected == 1) {
+		iconPackageStatus->setText(T_("Use the icons embedded in DCPlusPlus.exe in both light and dark appearance."));
+		return;
+	}
+	if(selected < 2 || static_cast<size_t>(selected - 2) >= iconPackages.size()) {
+		iconPackageStatus->setText(T_("Automatic selection is enabled."));
+		return;
+	}
+	const auto& package = iconPackages[selected - 2];
+	iconPackageStatus->setText(str(TF_("%1% version %2%: %3% application icons; scheme %4%") %
+		Text::toT(package.name) % Text::toT(package.version) % package.iconCount % Text::toT(package.scheme)));
 }
 
 void EmoticonsPage::updatePreview() {
@@ -227,13 +409,15 @@ void EmoticonsPage::updatePreview() {
 void EmoticonsPage::write() {
 	PropPage::write(items);
 	SettingsManager::getInstance()->set(SettingsManager::EMOTICON_PACK, selectedPackagePath());
+	SettingsManager::getInstance()->set(SettingsManager::ICON_PACK, selectedIconPackagePath());
 	static const int sizes[] = { 20, 24, 28, 32 };
 	const auto selected = sizeBox ? sizeBox->getSelected() : 1;
 	SettingsManager::getInstance()->set(SettingsManager::EMOTICON_SIZE,
-		sizes[selected >= 0 && selected < static_cast<int>(std::size(sizes)) ? selected : 1]);
+						sizes[selected >= 0 && selected < static_cast<int>(std::size(sizes)) ? selected : 1]);
 	static const int bitDepths[] = { 16, 24, 32 };
 	const auto selectedDepth = bitDepthBox ? bitDepthBox->getSelected() : 0;
 	SettingsManager::getInstance()->set(SettingsManager::EMOTICON_BIT_DEPTH,
-		bitDepths[selectedDepth >= 0 && selectedDepth < static_cast<int>(std::size(bitDepths)) ? selectedDepth : 0]);
+						bitDepths[selectedDepth >= 0 && selectedDepth < static_cast<int>(std::size(bitDepths)) ? selectedDepth : 0]);
 	EmoticonManager::reload();
+	IconManager::reload();
 }

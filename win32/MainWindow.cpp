@@ -97,11 +97,11 @@ using dwt::ToolBar;
 
 decltype(MainWindow::pluginCommands) MainWindow::pluginCommands;
 
-static dwt::IconPtr mainIcon(WinUtil::createIcon(IDI_DCPP, 32));
-static dwt::IconPtr mainSmallIcon(WinUtil::createIcon(IDI_DCPP, 16));
+static dwt::IconPtr mainIcon;
+static dwt::IconPtr mainSmallIcon;
 
 MainWindow::MainWindow() :
-dwt::Window(0, dwt::NormalDispatcher::newClass<MainWindow>(mainIcon, mainSmallIcon)),
+dwt::Window(0, dwt::NormalDispatcher::newClass<MainWindow>(mainIcon = WinUtil::createIcon(IDI_DCPP, 32), mainSmallIcon = WinUtil::createIcon(IDI_DCPP, 16))),
 rebar(0),
 paned(0),
 transfers(0),
@@ -1317,6 +1317,7 @@ void MainWindow::handleSettings() {
 
 		ClientManager::getInstance()->infoUpdated();
 		HubFrame::refreshRichTextSettings();
+		HubFrame::refreshUserIconSizes();
 		PrivateFrame::refreshRichTextSettings();
 
 		bool rebuildGeo = prevGeo && SETTING(COUNTRY_FORMAT) != prevGeoFormat;

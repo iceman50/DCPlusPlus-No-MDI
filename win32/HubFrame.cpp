@@ -40,6 +40,7 @@
 
 #include <dwt/util/HoldResize.h>
 #include <dwt/widgets/Button.h>
+#include <dwt/widgets/ComboBox.h>
 #include <dwt/widgets/Grid.h>
 #include <dwt/widgets/Label.h>
 #include <dwt/widgets/MessageBox.h>
@@ -116,6 +117,10 @@ void HubFrame::refreshRichTextSettings() {
 	for(auto frame: frames) frame->updateRichTextAvailability();
 }
 
+void HubFrame::refreshUserIconSizes() {
+	for(auto frame: frames) frame->readUserIconSize();
+}
+
 void HubFrame::closeAll(ClosePred f) {
 	if(!WinUtil::mainWindow->getEnabled())
 		return;
@@ -184,6 +189,7 @@ BaseType(parent, Text::toT(url), IDH_HUB, IDI_HUB_OFF, false),
 paned(0),
 userGrid(0),
 users(0),
+userIconSize(nullptr),
 filter(usersColumns, COLUMN_LAST, [this] { updateUserList(); }),
 filterOpts(0),
 showUsers(0),
@@ -230,8 +236,6 @@ tabIcon(IDI_HUB)
 		users = userGrid->addChild(WidgetUsers::Seed(WinUtil::Seeds::table));
 		addWidget(users);
 
-		users->setSmallImageList(WinUtil::userImages);
-
 		WinUtil::makeColumns(users, usersColumns, COLUMN_LAST, SETTING(HUBFRAME_ORDER), SETTING(HUBFRAME_WIDTHS));
 		WinUtil::setTableSort(users, COLUMN_LAST, SettingsManager::HUBFRAME_SORT, COLUMN_NICK);
 
@@ -239,10 +243,35 @@ tabIcon(IDI_HUB)
 		users->onKeyDown([this](int c) { return handleUsersKeyDown(c); });
 		users->onContextMenu([this](const dwt::ScreenCoordinate &sc) { return handleUsersContextMenu(sc); });
 
-		filter.createTextBox(userGrid);
+		auto controls = userGrid->addChild(Grid::Seed(1, 3));
+		controls->column(0).mode = GridInfo::FILL;
+		filter.createTextBox(controls);
 		filter.text->setHelpId(IDH_HUB_FILTER);
 		filter.text->setCue(T_("Filter users"));
 		addWidget(filter.text);
+
+		controls->addChild(Label::Seed(T_("Icons")));
+		userIconSize = controls->addChild(WinUtil::Seeds::comboBox);
+		userIconSize->setAccessibleName(T_("Hub user icon size"));
+		userIconSize->addValue(T_("Default"));
+		for(auto size: HubSettings::userIconSizes) {
+			userIconSize->addValue(Text::toT(std::to_string(size)) + _T(" px"));
+		}
+		userIconSize->setSelected(0);
+		addWidget(userIconSize);
+		readUserIconSize();
+		// Recreate from full-resolution pack/resource frames after a DPI change.
+		users->onDpiResourcesChanged([this](const dwt::DpiResourceEvent&) { updateUserIconSize(); });
+		userIconSize->onSelectionChanged([this] {
+			if(auto favorite = FavoriteManager::getInstance()->getFavoriteHubEntry(this->url)) {
+				favorite->get(HubSettings::UserIconSize) = getUserIconSizeOverride();
+				FavoriteManager::getInstance()->save();
+				refreshUserIconSizes();
+			} else {
+				// Non-favorite hubs retain their choice for this window only.
+				updateUserIconSize();
+			}
+		});
 	}
 
 	{
@@ -1635,6 +1664,15 @@ pair<tstring, tstring> HubFrame::getStatusShared() const {
 		str(TF_("Average: %1%") % Text::toT(Util::formatBytes(userCount > 0 ? available / userCount : 0))));
 }
 
+void HubFrame::on(FavoriteManagerListener::FavoriteAdded, const FavoriteHubEntryPtr entry) noexcept {
+	if(entry->hasServer(url)) callAsync([this] { readUserIconSize(); });
+}
+
+void HubFrame::on(FavoriteManagerListener::FavoriteRemoved, const FavoriteHubEntryPtr entry) noexcept {
+	// FavoriteManager removes the entry after notifying listeners.
+	if(entry->hasServer(url)) callAsync([this] { readUserIconSize(); });
+}
+
 void HubFrame::on(FavoriteManagerListener::UserAdded, const FavoriteUser& /*aUser*/) noexcept {
 	resortForFavsFirst();
 }
@@ -1656,6 +1694,7 @@ void HubFrame::addAsFavorite() {
 		entry.setServer(url);
 		entry.setName(client->getHubName());
 		entry.setHubDescription(client->getHubDescription());
+		entry.get(HubSettings::UserIconSize) = getUserIconSizeOverride();
 		if(!client->getPassword().empty())  {
 			entry.setPassword(client->getPassword());
 		}
@@ -2056,6 +2095,34 @@ void HubFrame::hideFilterOpts(dwt::Widget* w) {
 
 HubFrame::UserInfoList HubFrame::selectedUsersImpl() const {
 	return showUsers->getChecked() ? usersFromTable(users) : (currentUser ? UserInfoList(1, currentUser) : UserInfoList());
+}
+
+int HubFrame::getUserIconSizeOverride() const {
+	const auto selected = userIconSize->getSelected();
+	return selected > 0 && static_cast<size_t>(selected - 1) < std::size(HubSettings::userIconSizes) ?
+		HubSettings::userIconSizes[selected - 1] : HubSettings::getMinInt();
+}
+
+void HubFrame::readUserIconSize() {
+	if(auto favorite = FavoriteManager::getInstance()->getFavoriteHubEntry(url)) {
+		int selected = 0;
+		for(size_t i = 0; i < std::size(HubSettings::userIconSizes); ++i) {
+			if(favorite->get(HubSettings::UserIconSize) == HubSettings::userIconSizes[i]) selected = static_cast<int>(i + 1);
+		}
+		userIconSize->setSelected(selected);
+	}
+	updateUserIconSize();
+}
+
+void HubFrame::updateUserIconSize() {
+	auto settings = SettingsManager::getInstance()->getHubSettings();
+	if(auto favorite = FavoriteManager::getInstance()->getFavoriteHubEntry(url)) {
+		FavoriteManager::getInstance()->mergeHubSettings(*favorite, settings);
+	}
+	const auto overrideSize = getUserIconSizeOverride();
+	const auto logicalSize = HubSettings::isUserIconSize(overrideSize) ? overrideSize : settings.get(HubSettings::UserIconSize);
+	users->setSmallImageList(WinUtil::createUserImages(users->scale(logicalSize)));
+	users->redrawWindow();
 }
 
 void HubFrame::setTabIcon()

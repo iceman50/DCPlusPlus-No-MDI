@@ -46,6 +46,7 @@ private:
 	ComboBoxPtr showJoins;
 	ComboBoxPtr favShowJoins;
 	ComboBoxPtr logMainChat;
+	ComboBoxPtr userIconSize;
 	ComboBoxPtr groups;
 	CheckBoxPtr defaultShare;
 	dwt::TreePtr shareFolders;

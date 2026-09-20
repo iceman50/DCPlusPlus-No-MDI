@@ -136,6 +136,26 @@ TEST_F(testchatformat, distributed_emoticon_packages_load)
 	}
 }
 
+TEST_F(testchatformat, selected_emoticon_package_can_be_exported_as_custom_copy)
+{
+	const auto source = string("Emoticons/candy-pop.dcemo");
+	const auto target = Util::getTempPath() + "dcpp-test-custom-emoticons.dcemo";
+	File::deleteFile(target);
+	const auto selected = EmoticonManager::previewPackage(source);
+	EmoticonManager::exportPackage(target, selected.name + " Custom", selected.items);
+	const auto customized = EmoticonManager::previewPackage(target);
+	EXPECT_EQ(selected.items.size(), customized.items.size());
+	size_t selectedRules = 0;
+	size_t customizedRules = 0;
+	for(const auto& item: selected.items) selectedRules += item.rules.size();
+	for(const auto& item: customized.items) {
+		customizedRules += item.rules.size();
+		EXPECT_GT(File::getSize(item.iconPath), 0);
+	}
+	EXPECT_EQ(selectedRules, customizedRules);
+	File::deleteFile(target);
+}
+
 TEST_F(testchatformat, discovers_application_and_user_emoticon_packages)
 {
 	Util::PathsMap originalPaths;

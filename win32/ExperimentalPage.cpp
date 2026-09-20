@@ -143,6 +143,7 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 	PropPage(parent, 1, 1),
 	themeMode(nullptr),
 	themePreset(nullptr),
+	hubUserIconSize(nullptr),
 	tempShares(nullptr),
 	tempSummary(nullptr),
 	removeTemp(nullptr),
@@ -320,7 +321,24 @@ ExperimentalPage::ExperimentalPage(dwt::Widget* parent) :
 			IDH_SETTINGS_EXPERIMENTAL_MAX_PARTIAL_LIST_BYTES, T_("KiB"), 1, MAX_KIB_SETTING, BYTES_PER_KIB);
 	}
 
-	auto themeGrid = tabs->addPage(T_("Interface and theme"), 4)->content();
+	auto themeGrid = tabs->addPage(T_("Interface and themes"), 5)->content();
+
+	{
+		auto group = themeGrid->addChild(GroupBox::Seed(T_("Hub user lists")));
+		auto cur = group->addChild(Grid::Seed(2, 2));
+		cur->column(0).mode = GridInfo::FILL;
+		cur->addChild(Label::Seed(T_("Default user icon size")));
+		hubUserIconSize = cur->addChild(WinUtil::Seeds::Dialog::comboBox);
+		hubUserIconSize->setAccessibleName(T_("Default hub user icon size"));
+		int selected = 0;
+		for(size_t i = 0; i < std::size(HubSettings::userIconSizes); ++i) {
+			hubUserIconSize->addValue(Text::toT(std::to_string(HubSettings::userIconSizes[i])) + _T(" px"));
+			if(SETTING(HUB_USER_ICON_SIZE) == HubSettings::userIconSizes[i]) selected = static_cast<int>(i);
+		}
+		hubUserIconSize->setSelected(selected);
+		auto note = cur->addChild(Label::Seed(T_("Individual favorite hubs can override this size. Sizes scale with display DPI.")));
+		cur->setWidget(note, 1, 0, 1, 2);
+	}
 
 	{
 		auto group = themeGrid->addChild(GroupBox::Seed(T_("System Log")));
@@ -403,6 +421,9 @@ void ExperimentalPage::write() {
 
 	auto settings = SettingsManager::getInstance();
 	settings->set(SettingsManager::THEME_MODE, themeMode->getSelected());
+	const auto iconSizeIndex = hubUserIconSize->getSelected();
+	settings->set(SettingsManager::HUB_USER_ICON_SIZE,
+		iconSizeIndex >= 0 && static_cast<size_t>(iconSizeIndex) < std::size(HubSettings::userIconSizes) ? HubSettings::userIconSizes[iconSizeIndex] : 16);
 	for(const auto& item: themeColors) {
 		settings->set(static_cast<SettingsManager::IntSetting>(item.setting), static_cast<int>(item.color));
 	}

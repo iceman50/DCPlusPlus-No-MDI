@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -145,7 +146,7 @@ bool SettingsDialog::initDialog() {
 		HTREEITEM selectedPage = nullptr;
 		auto addPage = [&](const tstring& title, const std::type_info& type, std::function<PropPage* ()> create, unsigned icon, HTREEITEM parent) -> HTREEITEM {
 			auto index = static_cast<int>(pages.size());
-			images->add(dwt::Icon(icon, size));
+			images->add(*WinUtil::createIcon(icon, size.x));
 			auto item = tree->insert(title, parent, TVI_LAST, 0, true, index);
 			if(static_cast<size_t>(index) == setting) {
 				selectedPage = item;
@@ -176,7 +177,7 @@ bool SettingsDialog::initDialog() {
 
 		{
 			HTREEITEM item = addPage(T_("Appearance"), typeid(AppearancePage), [container] { return new AppearancePage(container); }, IDI_DCPP, TVI_ROOT);
-			addPage(T_("Emoticons"), typeid(EmoticonsPage), [container] { return new EmoticonsPage(container); }, IDI_CHAT, item);
+			addPage(T_("Icons"), typeid(EmoticonsPage), [container] { return new EmoticonsPage(container); }, IDI_CHAT, item);
 			addPage(T_("Styles"), typeid(StylesPage), [container] { return new StylesPage(container); }, IDI_STYLES, item);
 			addPage(T_("Tabs"), typeid(TabsPage), [container] { return new TabsPage(container); }, IDI_TABS, item);
 			addPage(T_("Windows"), typeid(WindowsPage), [container] { return new WindowsPage(container); }, IDI_WINDOWS, item);

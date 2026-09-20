@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,10 +29,11 @@ using dwt::GridInfo;
 using dwt::Label;
 using namespace dcpp;
 
-EmoticonPackDlg::EmoticonPackDlg(dwt::Widget* parent, tstring initialImportPath_) :
+EmoticonPackDlg::EmoticonPackDlg(dwt::Widget* parent, tstring initialImportPath_, tstring defaultExportPath_) :
 	dwt::ModalDialog(parent), grid(nullptr), packageName(nullptr), packageVersion(nullptr),
 	emoticonName(nullptr), shortcut(nullptr), iconPath(nullptr), rules(nullptr),
-	updateButton(nullptr), removeButton(nullptr), initialImportPath(std::move(initialImportPath_)) {
+	updateButton(nullptr), removeButton(nullptr), initialImportPath(std::move(initialImportPath_)),
+	defaultExportPath(std::move(defaultExportPath_)) {
 	onInitDialog([this] { return handleInitDialog(); });
 }
 
@@ -81,7 +83,7 @@ bool EmoticonPackDlg::handleInitDialog() {
 		updateButton->onClicked([this] { updateRule(); });
 		removeButton = buttons->addChild(Button::Seed(T_("&Remove selected")));
 		removeButton->onClicked([this] { removeRule(); });
-		buttons->addChild(Button::Seed(T_("&Import XML...")))->onClicked([this] { importPackage(); });
+		buttons->addChild(Button::Seed(T_("&Import...")))->onClicked([this] { importPackage(); });
 		buttons->addChild(Label::Seed());
 	}
 
@@ -172,11 +174,20 @@ void EmoticonPackDlg::browseIcon() {
 
 void EmoticonPackDlg::importPackage(tstring path) {
 	if(path.empty() && !dwt::LoadDialog(this)
+		.addFilter(T_("DC++ emoticon packages"), _T("*.dcemo"))
 		.addFilter(T_("XML emoticon packages"), _T("*.xml"))
 		.addFilter(T_("All files"), _T("*.*")).open(path)) return;
 
 	try {
-		const auto imported = EmoticonManager::importEmoticonPackage(Text::fromT(path));
+		EmoticonManager::ImportPackage imported;
+		if(Text::toLower(Util::getFileExt(Text::fromT(path))) == ".dcemo") {
+			const auto package = EmoticonManager::previewPackage(Text::fromT(path));
+			imported.name = package.name;
+			imported.version = package.version;
+			imported.items = package.items;
+		} else {
+			imported = EmoticonManager::importEmoticonPackage(Text::fromT(path));
+		}
 		packageName->setText(Text::toT(imported.name));
 		rules->clear();
 		ruleRows.clear();
@@ -192,7 +203,7 @@ void EmoticonPackDlg::importPackage(tstring path) {
 				dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONINFORMATION);
 		}
 	} catch(const Exception& e) {
-		dwt::MessageBox(this).show(Text::toT(e.getError()), T_("Cannot import XML emoticons"),
+		dwt::MessageBox(this).show(Text::toT(e.getError()), T_("Cannot import emoticons"),
 			dwt::MessageBox::BOX_OK, dwt::MessageBox::BOX_ICONSTOP);
 	}
 }
@@ -215,7 +226,7 @@ void EmoticonPackDlg::exportPackage() {
 			}
 		}
 
-		tstring target;
+		tstring target = defaultExportPath;
 		if(!dwt::SaveDialog(this).addFilter(T_("DC++ emoticon packages"), _T("*.dcemo"))
 			.setDefaultExtension(_T("dcemo")).open(target)) return;
 		EmoticonManager::exportPackage(Text::fromT(target), Text::fromT(packageName->getText()), items);

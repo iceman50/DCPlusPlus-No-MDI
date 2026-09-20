@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -74,9 +75,9 @@ balloonBg(0)
 
 		const dwt::Point size(16, 16);
 		dwt::ImageListPtr images(new dwt::ImageList(size));
-		images->add(dwt::Icon(IDI_CANCEL, size));
-		images->add(dwt::Icon(IDI_SOUND, size));
-		images->add(dwt::Icon(IDI_BALLOON, size));
+		images->add(*WinUtil::createIcon(IDI_CANCEL, size.x));
+		images->add(*WinUtil::createIcon(IDI_SOUND, size.x));
+		images->add(*WinUtil::createIcon(IDI_BALLOON, size.x));
 		table->setSmallImageList(images);
 
 		cur = cur->addChild(Grid::Seed(1, 2));

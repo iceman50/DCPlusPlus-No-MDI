@@ -200,16 +200,18 @@ void Menu::setOwnerDrawn(bool value) {
 				continue;
 			}
 			MENUITEMINFO info = { sizeof(MENUITEMINFO),
-				MIIM_FTYPE | MIIM_DATA };
+				MIIM_FTYPE | MIIM_DATA | MIIM_BITMAP };
 			if(!::GetMenuItemInfo(handle(), item->index, TRUE, &info)) {
 				continue;
 			}
 			if(ownerDrawn) {
 				info.fType |= MFT_OWNERDRAW;
 				info.dwItemData = reinterpret_cast<ULONG_PTR>(item.get());
+				info.hbmpItem = nullptr;
 			} else {
 				info.fType &= ~MFT_OWNERDRAW;
 				info.dwItemData = 0;
+				setNativeIcon(info, *item);
 			}
 			::SetMenuItemInfo(handle(), item->index, TRUE, &info);
 		}
@@ -305,6 +307,52 @@ void Menu::setMenu() {
 	::DrawMenuBar(control->handle());
 }
 
+void Menu::setNativeIcon(MENUITEMINFO& info, ItemDataWrapper& item) {
+	info.fMask |= MIIM_BITMAP;
+	info.hbmpItem = nullptr;
+	if(!item.icon) return;
+	if(!item.bitmap) {
+		// Render against black and white to recover premultiplied alpha for both
+		// modern RGBA icons and legacy executable icons with only an AND mask.
+		BITMAPINFO format { };
+		format.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		format.bmiHeader.biWidth = iconSize.x;
+		format.bmiHeader.biHeight = -iconSize.y;
+		format.bmiHeader.biPlanes = 1;
+		format.bmiHeader.biBitCount = 32;
+		format.bmiHeader.biCompression = BI_RGB;
+		DWORD* blackPixels = nullptr;
+		DWORD* whitePixels = nullptr;
+		BitmapPtr black = new Bitmap(::CreateDIBSection(nullptr, &format, DIB_RGB_COLORS,
+			reinterpret_cast<void**>(&blackPixels), nullptr, 0));
+		BitmapPtr white = new Bitmap(::CreateDIBSection(nullptr, &format, DIB_RGB_COLORS,
+			reinterpret_cast<void**>(&whitePixels), nullptr, 0));
+		if(!black->handle() || !white->handle()) throw Win32Exception("Creating native menu icon failed");
+		const auto count = static_cast<size_t>(iconSize.x) * iconSize.y;
+		std::fill_n(blackPixels, count, 0);
+		std::fill_n(whitePixels, count, 0x00ffffff);
+		CompatibleCanvas canvas(nullptr);
+		{
+			auto selected = canvas.select(*black);
+			if(!::DrawIconEx(canvas.handle(), 0, 0, item.icon->handle(), iconSize.x, iconSize.y, 0, nullptr, DI_NORMAL))
+				throw Win32Exception("Drawing native menu icon failed");
+		}
+		{
+			auto selected = canvas.select(*white);
+			if(!::DrawIconEx(canvas.handle(), 0, 0, item.icon->handle(), iconSize.x, iconSize.y, 0, nullptr, DI_NORMAL))
+				throw Win32Exception("Drawing native menu icon mask failed");
+		}
+		::GdiFlush();
+		for(size_t i = 0; i < count; ++i) {
+			const auto difference = static_cast<int>(whitePixels[i] & 0xff) - static_cast<int>(blackPixels[i] & 0xff);
+			const DWORD alpha = 255 - std::clamp(difference, 0, 255);
+			blackPixels[i] = (blackPixels[i] & 0x00ffffff) | (alpha << 24);
+		}
+		item.bitmap = black;
+	}
+	info.hbmpItem = item.bitmap->handle();
+}
+
 Menu* Menu::appendPopup(const tstring& text, const IconPtr& icon, bool subTitle) {
 	// create the sub-menu
 	std::unique_ptr<Menu> sub(new Menu(getParent()));
@@ -336,6 +384,8 @@ Menu* Menu::appendPopup(const tstring& text, const IconPtr& icon, bool subTitle)
 		info.fMask |= MIIM_DATA | MIIM_FTYPE;
 		info.fType = MFT_OWNERDRAW;
 		info.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper.get());
+	} else {
+		setNativeIcon(info, *wrapper);
 	}
 
 	// append to this menu at the end
@@ -989,6 +1039,8 @@ unsigned Menu::appendItem(const tstring& text, const Dispatcher::F& f, const Ico
 		info.fMask |= MIIM_FTYPE | MIIM_DATA;
 		info.fType = MFT_OWNERDRAW;
 		info.dwItemData = reinterpret_cast<ULONG_PTR>(wrapper.get());
+	} else {
+		setNativeIcon(info, *wrapper);
 	}
 
 	if(!::InsertMenuItem(itsHandle, index, TRUE, &info)) {

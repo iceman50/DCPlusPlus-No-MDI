@@ -67,7 +67,7 @@ const string SettingsManager::settingTags[] =
 	"LogFileStatus", "LogFileUpload", "LogFileDownload", "LogFileFinishedDownload", "LogFileSystem",
 	"LogFormatSystem", "LogFormatStatus",
 	"TLSPrivateKeyFile", "TLSCertificateFile", "TLSTrustedCertificatesPath",
-	"Language", "Toolbar", "LastSearchType", "Mapper", "Mapper6", "EmoticonPack",
+	"Language", "Toolbar", "LastSearchType", "Mapper", "Mapper6", "EmoticonPack", "IconPack",
 	"SoundMainChat", "SoundPM", "SoundPMWindow", "SoundFinishedDL", "SoundFinishedFL", "LastSharedFolder",
 	"SharingSkiplistExtensions", "SharingSkiplistRegEx", "SharingSkiplistPaths", "WhitelistOpenURIs",
 	"ACFrameOrder", "ACFrameWidths",
@@ -85,7 +85,7 @@ const string SettingsManager::settingTags[] =
 	"ChatOwnTimestampColor", "ChatOwnTimestampBgColor", "ChatOwnNickColor", "ChatOwnNickBgColor",
 	"ChatOwnTextColor", "ChatOwnTextBgColor",
 	"ChatMentionColor", "ChatMentionBgColor",
-	"EmoticonSize", "EmoticonBitDepth",
+	"EmoticonSize", "EmoticonBitDepth", "HubUserIconSize",
 	"BandwidthLimitStart", "BandwidthLimitEnd", "MaxDownloadSpeedRealTime",
 	"MaxUploadSpeedTime", "MaxDownloadSpeedPrimary", "MaxUploadSpeedPrimary",
 	"SlotsAlternateLimiting", "SlotsPrimaryLimiting",
@@ -214,7 +214,9 @@ SettingsManager::SettingsManager() {
 	setDefault(ENABLE_RICH_TEXT, true);
 	setDefault(ENABLE_EMOTICONS, true);
 	setDefault(EMOTICON_PACK, Util::emptyString);
+	setDefault(ICON_PACK, Util::emptyString);
 	setDefault(EMOTICON_SIZE, 24);
+	setDefault(HUB_USER_ICON_SIZE, 16);
 	setDefault(EMOTICON_BIT_DEPTH, 16);
 	setDefault(SHARE_HIDDEN, false);
 	setDefault(FILTER_MESSAGES, true);
@@ -814,6 +816,7 @@ HubSettings SettingsManager::getHubSettings() const {
 	ret.get(HubSettings::ShowJoins) = get(SHOW_JOINS);
 	ret.get(HubSettings::FavShowJoins) = get(FAV_SHOW_JOINS);
 	ret.get(HubSettings::LogMainChat) = get(LOG_MAIN_CHAT);
+	ret.get(HubSettings::UserIconSize) = HubSettings::isUserIconSize(get(HUB_USER_ICON_SIZE)) ? get(HUB_USER_ICON_SIZE) : 16;
 
 	ret.get(HubSettings::Connection) = CONNSETTING(INCOMING_CONNECTIONS);
 	ret.get(HubSettings::Connection6) = CONNSETTING(INCOMING_CONNECTIONS6);

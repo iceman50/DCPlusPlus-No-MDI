@@ -5,7 +5,7 @@ Build and package x64 MinGW DC++ debug/release artifacts.
 .DESCRIPTION
 Interactive helper for producing a distribution zip. The zip contains the
 stripped executable renamed to DCPlusPlus.exe, its GNU debug companion PDB,
-changelog-bfe.txt, and the distributable theme and emoticon collections.
+changelog-bfe.txt, and the distributable theme, emoticon, and icon-pack collections.
 
 Package names use:
 DCPlusPlus-Experimental-VERSION-COMPILER-[Release|Debug]-MSVCRT-gitrev-yyyyMMdd-HHmmssZ.zip
@@ -278,6 +278,7 @@ function New-DistPackage {
 	$changelogPath = Join-Path $RepoRoot "changelog-bfe.txt"
 	$themesPath = Join-Path $RepoRoot "Themes"
 	$emoticonPath = Join-Path $RepoRoot "Emoticons"
+	$iconPacksPath = Join-Path $RepoRoot "IconPacks"
 
 	Assert-RequiredFile -Path $exePath -Description "Stripped executable"
 	Assert-RequiredFile -Path $pdbPath -Description "Debug companion PDB"
@@ -287,6 +288,14 @@ function New-DistPackage {
 	}
 	if(-not (Test-Path -LiteralPath $emoticonPath -PathType Container)) {
 		throw "Emoticons directory was not found: $emoticonPath"
+	}
+	if(-not (Test-Path -LiteralPath $iconPacksPath -PathType Container)) {
+		throw "IconPacks directory was not found: $iconPacksPath"
+	}
+	Assert-RequiredFile -Path (Join-Path $iconPacksPath "Dark.dcico") -Description "Bundled dark icon package"
+	Assert-RequiredFile -Path (Join-Path $iconPacksPath "Neon-Circuit.dcico") -Description "Bundled Neon Circuit icon package"
+	foreach($packName in @("Aurora", "Copper", "Paper")) {
+		Assert-RequiredFile -Path (Join-Path $iconPacksPath "$packName.dcico") -Description "Bundled $packName icon package"
 	}
 
 	$configurationName = Get-PackageConfigurationName -Mode $Mode
@@ -307,6 +316,7 @@ function New-DistPackage {
 		Copy-Item -LiteralPath $changelogPath -Destination (Join-Path $stageDir "changelog-bfe.txt") -Force
 		Copy-Item -LiteralPath $themesPath -Destination (Join-Path $stageDir "Themes") -Recurse -Force
 		Copy-Item -LiteralPath $emoticonPath -Destination (Join-Path $stageDir "Emoticons") -Recurse -Force
+		Copy-Item -LiteralPath $iconPacksPath -Destination (Join-Path $stageDir "IconPacks") -Recurse -Force
 
 		if(Test-Path -LiteralPath $zipPath) {
 			Remove-Item -LiteralPath $zipPath -Force

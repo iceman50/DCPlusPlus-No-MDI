@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2026 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +22,7 @@
 /** Interactive .dcemo package builder used from the Appearance settings page. */
 class EmoticonPackDlg : public dwt::ModalDialog {
 public:
-	explicit EmoticonPackDlg(dwt::Widget* parent, dcpp::tstring initialImportPath = dcpp::tstring());
+	explicit EmoticonPackDlg(dwt::Widget* parent, dcpp::tstring initialImportPath = dcpp::tstring(), dcpp::tstring defaultExportPath = dcpp::tstring());
 	int run();
 	const dcpp::tstring& getExportedPath() const { return exportedPath; }
 
@@ -34,8 +35,7 @@ private:
 
 	bool handleInitDialog();
 	void addRule();
-	void insertRule(const dcpp::tstring& name, const dcpp::tstring& shortcut,
-		const dcpp::tstring& imagePath);
+	void insertRule(const dcpp::tstring& name, const dcpp::tstring& shortcut, const dcpp::tstring& imagePath);
 	RuleRow* getRule(int row);
 	void updateRule();
 	void removeRule();
@@ -56,6 +56,7 @@ private:
 	ButtonPtr updateButton;
 	ButtonPtr removeButton;
 	dcpp::tstring initialImportPath;
+	dcpp::tstring defaultExportPath;
 	dcpp::tstring exportedPath;
 };
 

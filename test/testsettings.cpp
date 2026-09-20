@@ -9,7 +9,9 @@
 
 #include "testbase.h"
 
+#include <dcpp/ConnectivityManager.h>
 #include <dcpp/File.h>
+#include <dcpp/HubEntry.h>
 #include <dcpp/LogManager.h>
 #include <dcpp/SettingsManager.h>
 #include <dcpp/Util.h>
@@ -20,9 +22,11 @@ class SettingsMigrationTest : public testing::Test {
 protected:
 	void SetUp() override {
 		SettingsManager::newInstance();
+		ConnectivityManager::newInstance();
 	}
 
 	void TearDown() override {
+		ConnectivityManager::deleteInstance();
 		SettingsManager::deleteInstance();
 	}
 };
@@ -30,6 +34,104 @@ protected:
 TEST_F(SettingsMigrationTest, uses_readable_emoticon_size_by_default)
 {
 	EXPECT_EQ(24, SettingsManager::getInstance()->get(SettingsManager::EMOTICON_SIZE));
+}
+
+TEST_F(SettingsMigrationTest, persists_global_hub_user_icon_size_and_embedded_icons)
+{
+	const auto path = Util::getTempPath() + "dcpp-test-hub-icon-settings.xml";
+	File::deleteFile(path);
+	auto settings = SettingsManager::getInstance();
+	EXPECT_EQ(16, settings->get(SettingsManager::HUB_USER_ICON_SIZE));
+	settings->set(SettingsManager::HUB_USER_ICON_SIZE, 32);
+	settings->set(SettingsManager::ICON_PACK, "@embedded");
+	settings->save(path);
+	SettingsManager::deleteInstance();
+	SettingsManager::newInstance();
+	settings = SettingsManager::getInstance();
+	settings->load(path);
+	EXPECT_EQ(32, settings->get(SettingsManager::HUB_USER_ICON_SIZE));
+	EXPECT_EQ("@embedded", settings->get(SettingsManager::ICON_PACK));
+	File::deleteFile(path);
+}
+
+TEST_F(SettingsMigrationTest, hub_user_icon_sizes_inherit_without_changing_other_hubs)
+{
+	auto settings = SettingsManager::getInstance();
+	settings->set(SettingsManager::HUB_USER_ICON_SIZE, 24);
+	auto resolved = settings->getHubSettings();
+	EXPECT_EQ(24, resolved.get(HubSettings::UserIconSize));
+	HubSettings group;
+	group.get(HubSettings::UserIconSize) = 28;
+	resolved.merge(group);
+	FavoriteHubEntry favorite, otherHub;
+	favorite.get(HubSettings::UserIconSize) = 40;
+	resolved.merge(favorite);
+	EXPECT_EQ(40, resolved.get(HubSettings::UserIconSize));
+	EXPECT_EQ(24, settings->get(SettingsManager::HUB_USER_ICON_SIZE));
+	auto otherResolved = settings->getHubSettings();
+	otherResolved.merge(otherHub);
+	EXPECT_EQ(24, otherResolved.get(HubSettings::UserIconSize));
+
+	settings->set(SettingsManager::HUB_USER_ICON_SIZE, 32);
+	resolved = settings->getHubSettings();
+	resolved.merge(favorite);
+	EXPECT_EQ(40, resolved.get(HubSettings::UserIconSize));
+	favorite.get(HubSettings::UserIconSize) = HubSettings::getMinInt();
+	resolved = settings->getHubSettings();
+	resolved.merge(favorite);
+	EXPECT_EQ(32, resolved.get(HubSettings::UserIconSize));
+	resolved.merge(group);
+	resolved.merge(favorite);
+	EXPECT_EQ(28, resolved.get(HubSettings::UserIconSize));
+	settings->set(SettingsManager::HUB_USER_ICON_SIZE, 999);
+	EXPECT_EQ(16, settings->getHubSettings().get(HubSettings::UserIconSize));
+}
+
+TEST_F(SettingsMigrationTest, favorite_hub_icon_size_round_trip_and_default_reset)
+{
+	FavoriteHubEntry favorite;
+	for(auto size: HubSettings::userIconSizes) {
+		favorite.get(HubSettings::UserIconSize) = size;
+		SimpleXML saved;
+		saved.addTag("Hub");
+		favorite.save(saved);
+		SimpleXML restored;
+		restored.fromXML(saved.toXML());
+		ASSERT_TRUE(restored.findChild("Hub"));
+		FavoriteHubEntry loaded;
+		loaded.load(restored);
+		EXPECT_EQ(size, loaded.get(HubSettings::UserIconSize));
+	}
+	favorite.get(HubSettings::UserIconSize) = HubSettings::getMinInt();
+	SimpleXML defaults;
+	defaults.addTag("Hub");
+	favorite.save(defaults);
+	EXPECT_EQ(string::npos, defaults.toXML().find("UserIconSize"));
+	for(const auto& xml: { "<Hub/>", "<Hub UserIconSize=\"0\"/>", "<Hub UserIconSize=\"17\"/>", "<Hub UserIconSize=\"999\"/>" }) {
+		SimpleXML legacy;
+		legacy.fromXML(xml);
+		ASSERT_TRUE(legacy.findChild("Hub"));
+		favorite.get(HubSettings::UserIconSize) = 48;
+		favorite.load(legacy);
+		EXPECT_EQ(HubSettings::getMinInt(), favorite.get(HubSettings::UserIconSize));
+	}
+}
+
+TEST_F(SettingsMigrationTest, persists_icon_pack_selection)
+{
+	const auto path = Util::getTempPath() + "dcpp-test-icon-pack-settings.xml";
+	File::deleteFile(path);
+	auto settings = SettingsManager::getInstance();
+	EXPECT_TRUE(settings->get(SettingsManager::ICON_PACK).empty());
+	settings->set(SettingsManager::ICON_PACK, "IconPacks/Custom.dcico");
+	settings->save(path);
+
+	SettingsManager::deleteInstance();
+	SettingsManager::newInstance();
+	settings = SettingsManager::getInstance();
+	settings->load(path);
+	EXPECT_EQ("IconPacks/Custom.dcico", settings->get(SettingsManager::ICON_PACK));
+	File::deleteFile(path);
 }
 
 TEST_F(SettingsMigrationTest, repairs_values_truncated_by_experimental_page_spinner)

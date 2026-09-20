@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001-2025 Jacek Sieka, arnetheduck on gmail point com
+ * Copyright (C) 2026 iceman50
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -324,7 +325,8 @@ public:
 	static inline dwt::IconPtr tabIcon(unsigned id) { return createIcon(id, 16); }
 	static dwt::IconPtr toolbarIcon(unsigned id);
 
-	static dwt::IconPtr mergeIcons(const std::vector<int>& iconIds);
+	static dwt::IconPtr mergeIcons(const std::vector<int>& iconIds, long pixels = 16);
+	static dwt::ImageListPtr createUserImages(long pixels);
 
 	static void getHubStatus(const string& aUrl, tstring& statusText, int& statusIcon);
 

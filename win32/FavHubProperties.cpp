@@ -31,6 +31,7 @@
 
 #include "resource.h"
 #include "FavHubGroupsDlg.h"
+#include "HubFrame.h"
 #include "HoldRedraw.h"
 #include "WinUtil.h"
 
@@ -55,6 +56,7 @@ encoding(0),
 showJoins(0),
 favShowJoins(0),
 logMainChat(0),
+userIconSize(nullptr),
 groups(0),
 defaultShare(0),
 shareFolders(0),
@@ -158,7 +160,7 @@ bool FavHubProperties::handleInitDialog() {
 	}
 
 	{
-		auto cur = grid->addChild(Grid::Seed(3, 2));
+		auto cur = grid->addChild(Grid::Seed(4, 2));
 		grid->setWidget(cur, 2, 0, 1, 2);
 		cur->column(0).mode = GridInfo::FILL;
 		cur->column(0).align = GridInfo::BOTTOM_RIGHT;
@@ -177,6 +179,16 @@ bool FavHubProperties::handleInitDialog() {
 		logMainChat = cur->addChild(WinUtil::Seeds::Dialog::comboBox);
 		WinUtil::fillTriboolCombo(logMainChat);
 		logMainChat->setSelected(toInt(entry->get(HubSettings::LogMainChat)));
+
+		cur->addChild(Label::Seed(T_("User icon size")));
+		userIconSize = cur->addChild(WinUtil::Seeds::Dialog::comboBox);
+		userIconSize->addValue(T_("Default"));
+		int selectedSize = 0;
+		for(size_t i = 0; i < std::size(HubSettings::userIconSizes); ++i) {
+			userIconSize->addValue(Text::toT(std::to_string(HubSettings::userIconSizes[i])) + _T(" px"));
+			if(entry->get(HubSettings::UserIconSize) == HubSettings::userIconSizes[i]) selectedSize = static_cast<int>(i + 1);
+		}
+		userIconSize->setSelected(selectedSize);
 	}
 
 	{
@@ -297,6 +309,9 @@ void FavHubProperties::handleOKClicked() {
 	entry->get(HubSettings::ShowJoins) = to3bool(showJoins->getSelected());
 	entry->get(HubSettings::FavShowJoins) = to3bool(favShowJoins->getSelected());
 	entry->get(HubSettings::LogMainChat) = to3bool(logMainChat->getSelected());
+	const auto iconSizeIndex = userIconSize->getSelected();
+	entry->get(HubSettings::UserIconSize) = iconSizeIndex > 0 && static_cast<size_t>(iconSizeIndex - 1) < std::size(HubSettings::userIconSizes) ?
+		HubSettings::userIconSizes[iconSizeIndex - 1] : HubSettings::getMinInt();
 	entry->setGroup(Text::fromT(groups->getText()));
 
 	if(defaultShare->getChecked()) {
@@ -305,6 +320,7 @@ void FavHubProperties::handleOKClicked() {
 		entry->setShareDirectories(selectedShareDirectories);
 	}
 	FavoriteManager::getInstance()->save();
+	HubFrame::refreshUserIconSizes();
 	if(oldShareProfile != entry->hasShareProfile() || oldShareDirectories != entry->getShareDirectories()) {
 		ConnectionManager::getInstance()->disconnectUploads(oldServer);
 	}

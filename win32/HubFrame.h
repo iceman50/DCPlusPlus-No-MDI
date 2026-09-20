@@ -87,6 +87,7 @@ public:
 
 	static void resortUsers();
 	static void refreshRichTextSettings();
+	static void refreshUserIconSizes();
 
 	WindowParams getWindowParams() const;
 	static void parseWindowParams(TabViewPtr parent, const WindowParams& params);
@@ -160,6 +161,10 @@ private:
 	typedef TypedTable<UserInfo, false> WidgetUsers;
 	typedef WidgetUsers* WidgetUsersPtr;
 	WidgetUsersPtr users;
+	ComboBoxPtr userIconSize;
+	void updateUserIconSize();
+	void readUserIconSize();
+	int getUserIconSizeOverride() const;
 
 	ListFilter filter;
 	GridPtr filterOpts;
@@ -287,6 +292,8 @@ private:
 	void showBBSDocument(const string& board, const string& tth);
 
 	// FavoriteManagerListener
+	void on(FavoriteManagerListener::FavoriteAdded, const FavoriteHubEntryPtr entry) noexcept override;
+	void on(FavoriteManagerListener::FavoriteRemoved, const FavoriteHubEntryPtr entry) noexcept override;
 	virtual void on(FavoriteManagerListener::UserAdded, const FavoriteUser& /*aUser*/) noexcept;
 	virtual void on(FavoriteManagerListener::UserRemoved, const FavoriteUser& /*aUser*/) noexcept;
 	void resortForFavsFirst(bool justDoIt = false);

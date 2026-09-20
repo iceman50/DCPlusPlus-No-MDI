@@ -1,6 +1,14 @@
 == 09-13-2026 - 0.8842 !!!Experimental!!! ==
+* Add a 16-48 px hub user-list icon selector with per-favorite overrides and an Experimental global default, explicit embedded EXE icon selection, and transparent icons in native light-mode menus (iceman50)
 * Fix overlapping NMDC transfer identities, repeated incoming connection requests, cross-user ADC token collisions, stalled failover retries and hub-specific file-list routing; preserve upload queue notification tokens and visible connection errors
 * Begin the 0.8842 development cycle after the 0.8841 release (iceman50)
+* Add a complete multi-resolution dark-mode icon pack that is selected automatically for dark application appearances (iceman50)
+* Route application icon loading through a bounded cache with per-user, application-local and compiled-resource fallbacks (iceman50)
+* Combine emoticon and application icon settings under an Icons page with separate tabs and selectable .dcico ZIP icon packages (iceman50)
+* Add selected-pack .dcemo customization from the package selector and remove the redundant manual package refresh control (iceman50)
+* Prevent startup crashes when the splash screen loads its icon before application settings are initialized (iceman50)
+* Add an optional polished Neon Circuit icon pack with purpose-built semantic glyphs, small-size optical tuning and clipping-safe restrained glow (iceman50)
+* Smooth the Neon Circuit settings cog and retain the original DC++ application icon with its gold accent shifted to blue (iceman50)
 
 == 08-18-2026 - 0.8841 !!!Experimental!!! ==
 * Complete ADC MCN1 support with fair per-user upload slots, negotiated connection limits, and a dedicated small-transfer connection (iceman50)
